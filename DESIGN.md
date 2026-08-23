@@ -585,6 +585,9 @@ score = 0.50 * representativeness   # 目录内代表度
 - 命名整理虚拟预览
 - 命名整理落盘（移动/重命名 + 冲突检测）+ 一键撤销（undo manifest）
 - zip 导出（Electron 主进程 `archiver` 流式写到保存对话框路径；Web/Memory 用内置 STORE zip 编码器下载）
+- 导出 zip 附带 `index.json`（目录树 + 图片元数据）
+- 持久化索引（IndexedDB 缓存，启动增量加载，避免全量重扫）
+- 删除相册（删除选中目录及其全部下级，二次确认）
 
 详细的进度、问题复盘与下一阶段计划见：
 
