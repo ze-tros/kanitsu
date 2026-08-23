@@ -7,6 +7,6 @@
   "exports": { ".": "./src/index.ts" },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
-    "test": "esbuild test/organize.test.ts --bundle --platform=node --format=esm --outfile=.test-build/organize.test.mjs && node .test-build/organize.test.mjs"
+    "test": "esbuild test/organize.test.ts --bundle --platform=node --format=esm --outfile=.test-build/organize.test.mjs && esbuild test/library.test.ts --bundle --platform=node --format=esm --outfile=.test-build/library.test.mjs && node .test-build/organize.test.mjs && node .test-build/library.test.mjs"
   }
 }

@@ -5,7 +5,8 @@ import {
   directImagesOf,
   imagesOf,
   importFolder,
-  scanLibrary,
+  loadOrScan,
+  rescanLibrary,
   undoOrganize,
   type FolderNode,
   type ImageEntry,
@@ -15,6 +16,7 @@ import {
   type OrganizeBinding,
   type OrganizeManifest,
   type OrganizeResult,
+  type PersistentIndex,
 } from '../../core/src/index';
 import type { ImportSourcePicker, LibraryStore } from '../../fs-adapter/src/types';
 import { organizeByFolder } from '../../organizer/src/index';
@@ -46,9 +48,11 @@ function downloadBlob(blob: Blob, fileName: string): void {
 export function LibraryBrowser({
   picker,
   store,
+  index,
 }: {
   picker: ImportSourcePicker;
   store: LibraryStore;
+  index: PersistentIndex;
 }) {
   const [snapshot, setSnapshot] = useState<LibrarySnapshot | null>(null);
   const [selectedFolderId, setSelectedFolderId] = useState<string>('');
@@ -64,16 +68,24 @@ export function LibraryBrowser({
   const [importReport, setImportReport] = useState<ImportTask | null>(null);
   const [expandedFolders, setExpandedFolders] = useState<ReadonlySet<string>>(new Set());
 
-  const refresh = useCallback(async () => {
-    const next = await scanLibrary(store);
+  const applySnapshot = useCallback((next: LibrarySnapshot) => {
     setSnapshot(next);
     setSelectedFolderId((prev) => (prev && next.folders[prev] ? prev : next.rootId));
-    return next;
-  }, [store]);
+  }, []);
 
+  // Startup: load the cached index (no full re-scan). Fallback scans + persists.
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    void (async () => {
+      applySnapshot(await loadOrScan(store, index));
+    })();
+  }, [store, index, applySnapshot]);
+
+  // Mutation / explicit refresh: re-scan from disk and persist the fresh index.
+  const refresh = useCallback(async () => {
+    const next = await rescanLibrary(store, index);
+    applySnapshot(next);
+    return next;
+  }, [store, index, applySnapshot]);
 
   const folderImages = useMemo(() => {
     if (!snapshot) return [];

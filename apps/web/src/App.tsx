@@ -1,10 +1,14 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import {
   ElectronImportSourcePicker,
   ElectronLibraryStore,
   MemoryImportSourcePicker,
   MemoryLibraryStore,
 } from '../../../packages/fs-adapter/src/index';
+import {
+  createIdbPersistentIndex,
+  createMemoryPersistentIndex,
+} from '../../../packages/core/src/index';
 import { LibraryBrowser } from '../../../packages/ui/src/index';
 
 export default function App() {
@@ -13,20 +17,28 @@ export default function App() {
       return {
         picker: new ElectronImportSourcePicker(),
         store: new ElectronLibraryStore(),
-        mode: 'Electron v0.4',
+        mode: 'Electron v0.5',
       };
     }
     return {
       picker: MemoryImportSourcePicker.fromDemo(),
       store: new MemoryLibraryStore(),
-      mode: 'Web demo v0.4',
+      mode: 'Web demo v0.5',
     };
   }, []);
+
+  // Only persist the scan index for the Electron (persistent) library. The web/memory
+  // demo store is ephemeral, so it always rescans fresh and caches in memory only.
+  const [index] = useState(() =>
+    window.kanituDesktop?.platform === 'electron'
+      ? createIdbPersistentIndex()
+      : createMemoryPersistentIndex(),
+  );
 
   return (
     <>
       <div className="mode-badge">{adapters.mode}</div>
-      <LibraryBrowser picker={adapters.picker} store={adapters.store} />
+      <LibraryBrowser picker={adapters.picker} store={adapters.store} index={index} />
     </>
   );
 }
