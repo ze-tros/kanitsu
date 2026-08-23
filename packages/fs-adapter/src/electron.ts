@@ -123,6 +123,15 @@ export class ElectronLibraryStore implements LibraryStore {
     return new Blob([data as BlobPart]);
   }
 
+  async getViewerUrl(file: FileRef): Promise<string> {
+    // The main process serves the ORIGINAL file through the guarded kanitu-file protocol.
+    return `kanitu-file://file/?p=${encodeURIComponent(file.id)}`;
+  }
+
+  releaseViewerUrl(_url: string): void {
+    // Protocol-backed URLs hold no client-side resource to release.
+  }
+
   async move(entry: FsEntry, toFolder: FolderRef, newName?: string): Promise<FsEntry> {
     const moved = await requireBridge().moveLibraryEntry(toEntry(entry), toEntry(toFolder), newName);
     return moved.kind === 'folder' ? toFolderRef(moved) : toFileRef(moved);

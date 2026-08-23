@@ -234,6 +234,15 @@ export class MemoryLibraryStore implements LibraryStore {
     return this.readBlob(file);
   }
 
+  async getViewerUrl(file: FileRef): Promise<string> {
+    const blob = await this.readBlob(file);
+    return URL.createObjectURL(blob);
+  }
+
+  releaseViewerUrl(url: string): void {
+    URL.revokeObjectURL(url);
+  }
+
   async move(entry: FsEntry, toFolder: FolderRef, newName?: string): Promise<FsEntry> {
     const node = this.tree.move(entry.id, toFolder, newName);
     if (!node) throw new Error(`Move failed: ${entry.id}`);

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   applyOrganize,
   childrenOf,
@@ -611,37 +611,190 @@ function Viewer({
   onNavigate: (id: string) => void;
 }) {
   const image = images[index];
+  const [viewerUrl, setViewerUrl] = useState<string | null>(null);
+  const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
+  const [zoom, setZoom] = useState(1);
+  const [rotate, setRotate] = useState(0);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [containerSize, setContainerSize] = useState({ w: 0, h: 0 });
 
+  const containerRef = useRef<HTMLDivElement>(null);
+  const viewerUrlRef = useRef<string | null>(null);
+  const dragRef = useRef<{ startX: number; startY: number; startPan: { x: number; y: number } } | null>(null);
+
+  const fileRefFor = (img: ImageEntry) => ({ id: img.fileRefId ?? img.id, name: img.name, kind: 'file' as const });
+
+  // Track the container size so "fit" can be computed correctly.
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-      else if (e.key === 'ArrowLeft') {
-        const prev = images[(index - 1 + images.length) % images.length];
-        onNavigate(prev.id);
-      } else if (e.key === 'ArrowRight') {
-        const next = images[(index + 1) % images.length];
-        onNavigate(next.id);
+    const el = containerRef.current;
+    if (!el) return;
+    const update = () => setContainerSize({ w: el.clientWidth, h: el.clientHeight });
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // Load the ORIGINAL-resolution URL for the current image, releasing the previous one.
+  useEffect(() => {
+    if (!image) return;
+    let cancelled = false;
+    store.getViewerUrl(fileRefFor(image)).then((url) => {
+      if (cancelled) {
+        store.releaseViewerUrl(url);
+        return;
       }
+      if (viewerUrlRef.current) store.releaseViewerUrl(viewerUrlRef.current);
+      viewerUrlRef.current = url;
+      setViewerUrl(url);
+    });
+    return () => {
+      cancelled = true;
     };
+  }, [image, store]);
+
+  // Release the URL when the viewer unmounts.
+  useEffect(() => {
+    return () => {
+      if (viewerUrlRef.current) store.releaseViewerUrl(viewerUrlRef.current);
+    };
+  }, [store]);
+
+  // Reset transforms when switching images.
+  useEffect(() => {
+    setZoom(1);
+    setRotate(0);
+    setPan({ x: 0, y: 0 });
+    setNatural(null);
+  }, [image?.id]);
+
+  // Preload adjacent images for smoother navigation.
+  useEffect(() => {
+    if (!images.length) return;
+    for (const offset of [-1, 1]) {
+      const i = index + offset;
+      if (i < 0 || i >= images.length) continue;
+      const img = images[i]!;
+      store.getViewerUrl(fileRefFor(img)).then((url) => {
+        const pre = new Image();
+        pre.onload = () => store.releaseViewerUrl(url);
+        pre.onerror = () => store.releaseViewerUrl(url);
+        pre.src = url;
+      });
+    }
+  }, [image?.id, images, index, store]);
+
+  const baseFit = useMemo(() => {
+    if (!natural || !containerSize.w || !containerSize.h) return 1;
+    const s = Math.min(containerSize.w / natural.w, containerSize.h / natural.h);
+    return Math.max(0.05, Math.min(1, s));
+  }, [natural, containerSize]);
+
+  const displayed = useMemo(() => {
+    const w = (natural?.w ?? 1) * baseFit * zoom;
+    const h = (natural?.h ?? 1) * baseFit * zoom;
+    return { w, h };
+  }, [natural, baseFit, zoom]);
+
+  const clamp = (v: number, m: number) => Math.max(-m, Math.min(m, v));
+  const maxX = Math.max(0, (displayed.w - containerSize.w) / 2);
+  const maxY = Math.max(0, (displayed.h - containerSize.h) / 2);
+  const panX = clamp(pan.x, maxX);
+  const panY = clamp(pan.y, maxY);
+
+  const zoomBy = useCallback((factor: number) => {
+    setZoom((z) => Math.max(0.5, Math.min(8, z * factor)));
+  }, []);
+  const fit = useCallback(() => setZoom(1), []);
+  const percent = useCallback(() => {
+    setZoom((z) => (baseFit > 0 ? 1 / baseFit : 1));
+  }, [baseFit]);
+  const toggleFit100 = useCallback(() => {
+    setZoom((z) => (Math.abs(z - 1) < 0.01 ? (baseFit > 0 ? 1 / baseFit : 1) : 1));
+  }, [baseFit]);
+  const rotateCW = useCallback(() => setRotate((r) => (r + 90) % 360), []);
+
+  const onKey = useCallback(
+    (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      } else if (e.key === 'ArrowLeft') {
+        onNavigate(images[(index - 1 + images.length) % images.length]!.id);
+      } else if (e.key === 'ArrowRight') {
+        onNavigate(images[(index + 1) % images.length]!.id);
+      } else if (e.key === '+' || e.key === '=') {
+        zoomBy(1.25);
+      } else if (e.key === '-') {
+        zoomBy(0.8);
+      } else if (e.key === '0') {
+        fit();
+      } else if (e.key === '1') {
+        percent();
+      } else if (e.key === 'r' || e.key === 'R') {
+        rotateCW();
+      }
+    },
+    [images, index, onClose, onNavigate, zoomBy, fit, percent, rotateCW],
+  );
+  useEffect(() => {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [images, index, onClose, onNavigate]);
+  }, [onKey]);
 
   if (!image) return null;
+
   return (
     <div className="viewer">
       <div className="viewer-toolbar">
-        <button onClick={onClose}>Close</button>
+        <button onClick={onClose}>✕ Close</button>
+        <button onClick={() => onNavigate(images[(index - 1 + images.length) % images.length]!.id)}>‹ Prev</button>
         <span>
           {index + 1} / {images.length}
         </span>
+        <button onClick={() => onNavigate(images[(index + 1) % images.length]!.id)}>Next ›</button>
+        <span className="viewer-divider" />
+        <button onClick={() => zoomBy(1.25)}>＋</button>
+        <button onClick={() => zoomBy(0.8)}>－</button>
+        <button onClick={fit}>Fit</button>
+        <button onClick={percent}>100%</button>
+        <button onClick={rotateCW}>↻</button>
       </div>
-      <BlobImage
-        store={store}
-        fileRef={{ id: image.fileRefId ?? image.id, name: image.name, kind: 'file' }}
-        alt={image.name}
-        className="viewer-image"
-      />
+      <div
+        className="viewer-canvas"
+        ref={containerRef}
+        onWheel={(e) => {
+          e.preventDefault();
+          zoomBy(e.deltaY > 0 ? 0.8 : 1.25);
+        }}
+        onDoubleClick={toggleFit100}
+        onMouseDown={(e) => {
+          dragRef.current = { startX: e.clientX, startY: e.clientY, startPan: pan };
+        }}
+        onMouseMove={(e) => {
+          const drag = dragRef.current;
+          if (drag) setPan({ x: drag.startPan.x + (e.clientX - drag.startX), y: drag.startPan.y + (e.clientY - drag.startY) });
+        }}
+        onMouseUp={() => {
+          dragRef.current = null;
+        }}
+        onMouseLeave={() => {
+          dragRef.current = null;
+        }}
+      >
+        {viewerUrl && (
+          <img
+            className="viewer-image"
+            src={viewerUrl}
+            alt={image.name}
+            draggable={false}
+            onLoad={(e) => {
+              const el = e.currentTarget;
+              setNatural({ w: el.naturalWidth, h: el.naturalHeight });
+            }}
+            style={{ transform: `translate(${panX}px, ${panY}px) rotate(${rotate}deg) scale(${baseFit * zoom})` }}
+          />
+        )}
+      </div>
       <div className="viewer-caption">{image.name}</div>
     </div>
   );

@@ -1,7 +1,8 @@
 // Electron main process: native file system for import and album library.
-import { app, BrowserWindow, dialog, ipcMain, nativeImage } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, net, protocol } from 'electron';
 import { promises as fs, createWriteStream } from 'node:fs';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import archiver from 'archiver';
 
 const IMAGE_EXT = new Set(['jpg', 'jpeg', 'png', 'webp', 'avif', 'bmp', 'gif']);
@@ -303,6 +304,28 @@ function registerIpc(): void {
   });
 }
 
+/**
+ * Registers a guarded `kanitu-file://` protocol so the renderer can display the
+ * ORIGINAL image (no 2560px cap, no giant IPC buffer): Chromium streams and decodes
+ * the file natively. Only files inside the library are served.
+ */
+function registerViewerProtocol(): void {
+  protocol.handle('kanitu-file', async (request) => {
+    const filePath = new URL(request.url).searchParams.get('p');
+    if (!filePath) return new Response('Bad request', { status: 400 });
+    try {
+      assertInsideLibrary(filePath);
+    } catch {
+      return new Response('Forbidden', { status: 403 });
+    }
+    try {
+      return await net.fetch(pathToFileURL(filePath).toString());
+    } catch {
+      return new Response('Not found', { status: 404 });
+    }
+  });
+}
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1280,
@@ -329,6 +352,7 @@ function createWindow() {
 
 void app.whenReady().then(() => {
   registerIpc();
+  registerViewerProtocol();
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

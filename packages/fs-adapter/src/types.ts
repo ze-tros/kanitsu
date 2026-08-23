@@ -43,6 +43,10 @@ export interface LibraryStore {
   readBlob(file: FileRef): Promise<Blob>;
   /** Small thumbnail for grids/folder covers. Implementations should avoid loading the full image. */
   readThumbnail(file: FileRef, maxSize?: number): Promise<Blob>;
+  /** Original-resolution viewable URL for an `<img>` (streamed for Electron). */
+  getViewerUrl(file: FileRef): Promise<string>;
+  /** Releases resources held by a viewer URL (no-op for protocol-backed URLs). */
+  releaseViewerUrl(url: string): void;
   move(entry: FsEntry, toFolder: FolderRef, newName?: string): Promise<FsEntry>;
   remove(entry: FsEntry): Promise<void>;
   /** Zips targetRelPath (empty = whole library) preserving directory structure. */

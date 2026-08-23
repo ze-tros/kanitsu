@@ -218,11 +218,9 @@ button:disabled { background: #444; cursor: not-allowed; }
 .viewer {
   position: relative;
   flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   background: #111;
   min-height: 0;
+  overflow: hidden;
 }
 .viewer-toolbar {
   position: absolute;
@@ -230,13 +228,45 @@ button:disabled { background: #444; cursor: not-allowed; }
   left: 16px;
   right: 16px;
   display: flex;
-  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
   z-index: 2;
+  flex-wrap: wrap;
+}
+.viewer-toolbar button {
+  background: rgba(255, 255, 255, 0.12);
+  color: #eee;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+  padding: 5px 10px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.viewer-toolbar button:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+.viewer-divider {
+  width: 1px;
+  height: 20px;
+  background: rgba(255, 255, 255, 0.3);
+  margin: 0 2px;
+}
+.viewer-canvas {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  cursor: grab;
+}
+.viewer-canvas:active {
+  cursor: grabbing;
 }
 .viewer-image {
-  max-width: 100%;
-  max-height: 100%;
-  object-fit: contain;
+  transform-origin: center;
+  user-select: none;
+  pointer-events: none;
 }
 .viewer-caption {
   position: absolute;
@@ -247,6 +277,10 @@ button:disabled { background: #444; cursor: not-allowed; }
   padding: 4px 12px;
   border-radius: 4px;
   font-size: 13px;
+  white-space: nowrap;
+  max-width: 90%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .blob-image.loading {
