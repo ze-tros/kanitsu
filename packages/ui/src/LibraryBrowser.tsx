@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   applyOrganize,
   childrenOf,
+  deleteLibraryFolder,
   directImagesOf,
   imagesOf,
   importFolder,
@@ -250,6 +251,25 @@ export function LibraryBrowser({
     }
   };
 
+  const handleDelete = async () => {
+    if (!selectedFolder || !selectedFolder.relPath) return;
+    const name = selectedFolder.name;
+    if (!window.confirm(`Delete "${name}" and all of its subfolders? This cannot be undone.`)) return;
+    setBusy(true);
+    setMessage(`Deleting "${name}"…`);
+    const parentId = selectedFolder.parentId;
+    try {
+      await deleteLibraryFolder(store, selectedFolder.relPath);
+      await refresh();
+      if (parentId) setSelectedFolderId(parentId);
+      setMessage(`Deleted "${name}".`);
+    } catch (err) {
+      setMessage(`Delete failed: ${String(err)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const viewerImages = folderImages;
   const viewerIndex = viewerImages.findIndex((img) => img.id === viewerImageId);
 
@@ -276,6 +296,12 @@ export function LibraryBrowser({
           </button>
           <button disabled={!selectedFolder || busy || exporting} onClick={handleExport}>
             {exporting ? 'Exporting…' : 'Export ZIP'}
+          </button>
+          <button
+            disabled={!selectedFolder || !selectedFolder.relPath || busy || exporting}
+            onClick={handleDelete}
+          >
+            Delete Album
           </button>
           {importReport && (
             <button onClick={() => setImportReport(importReport)}>Import Report</button>

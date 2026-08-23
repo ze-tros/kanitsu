@@ -6,3 +6,4 @@ export * from './import';
 export * from './organize';
 export * from './library';
 export * from './indexed';
+export * from './remove';
