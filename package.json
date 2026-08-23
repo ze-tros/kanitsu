@@ -1,0 +1,16 @@
+{
+  "name": "kanitu",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Kanitu Viewer - local-first cross-platform image viewer",
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "dev:web": "npm run dev -w @kanitu/web",
+    "dev:desktop": "npm run dev -w @kanitu/desktop",
+    "build:web": "npm run build -w @kanitu/web",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  }
+}

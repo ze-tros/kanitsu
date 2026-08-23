@@ -1,0 +1,11 @@
+node_modules/
+dist/
+out/
+*.tsbuildinfo
+.DS_Store
+Thumbs.db
+.npm-cache/
+apps/desktop/dist-electron/
+apps/desktop/dist/
+*.js.map
+*.d.ts
