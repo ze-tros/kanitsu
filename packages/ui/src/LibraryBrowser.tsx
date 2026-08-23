@@ -110,6 +110,18 @@ export function LibraryBrowser({
 
   const selectedFolder = snapshot?.folders[selectedFolderId || snapshot?.rootId || ''] ?? null;
 
+  // Breadcrumb path from the library root to the selected folder.
+  const crumbs = useMemo(() => {
+    if (!snapshot || !selectedFolder) return [];
+    const chain: FolderNode[] = [];
+    let node: FolderNode | undefined = selectedFolder;
+    while (node) {
+      chain.unshift(node);
+      node = node.parentId ? snapshot.folders[node.parentId] : undefined;
+    }
+    return chain;
+  }, [snapshot, selectedFolder]);
+
   const cover = useMemo(() => {
     if (!selectedFolder || !snapshot) return null;
     const images = directImagesOf(snapshot, selectedFolder.id);
@@ -374,6 +386,20 @@ export function LibraryBrowser({
 
       <main className="content">
         <header className="content-header">
+          <nav className="breadcrumb" aria-label="Breadcrumb">
+            {crumbs.map((crumb, i) => (
+              <span key={crumb.id} className="crumb-wrap">
+                {i > 0 && <span className="crumb-sep">›</span>}
+                {i < crumbs.length - 1 ? (
+                  <button className="crumb" onClick={() => handleSelectFolder(crumb)}>
+                    {crumb.name}
+                  </button>
+                ) : (
+                  <span className="crumb current">{crumb.name}</span>
+                )}
+              </span>
+            ))}
+          </nav>
           <h2>{selectedFolder?.name ?? 'Albums'}</h2>
           <div className="meta">
             {selectedFolder && (

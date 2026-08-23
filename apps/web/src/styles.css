@@ -283,6 +283,29 @@ button:disabled { background: #444; cursor: not-allowed; }
   text-overflow: ellipsis;
 }
 
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+.crumb-wrap { display: inline-flex; align-items: center; gap: 4px; }
+.crumb-sep { color: #777; }
+.crumb {
+  background: none;
+  border: none;
+  color: #7fd1ff;
+  cursor: pointer;
+  font-size: 13px;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+.crumb:hover { background: rgba(127, 209, 255, 0.15); }
+.crumb.current { color: #eee; cursor: default; }
+.crumb.current:hover { background: none; }
+
 .blob-image.loading {
   display: flex;
   align-items: center;
