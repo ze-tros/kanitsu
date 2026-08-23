@@ -110,6 +110,7 @@ button:disabled { background: #444; cursor: not-allowed; }
 .folder-tree .count { color: #9a9a9a; font-size: 12px; }
 
 .message { margin-top: 12px; font-size: 12px; color: #b8b8b8; }
+.message.export-progress { color: #7fd1ff; }
 
 .content { overflow-y: auto; display: flex; flex-direction: column; }
 
@@ -274,6 +275,9 @@ button:disabled { background: #444; cursor: not-allowed; }
   font-size: 13px;
 }
 .organize-preview button { align-self: flex-start; margin-top: 16px; }
+.organize-actions { display: flex; gap: 12px; align-items: center; }
+.organize-preview .organize-actions button { align-self: auto; }
+.organize-hint { font-size: 12px; color: #aaa; margin-top: 12px; }
 
 .report-summary {
   display: flex;

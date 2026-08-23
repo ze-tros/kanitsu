@@ -5,5 +5,8 @@
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "exports": { ".": "./src/index.ts" },
-  "scripts": { "typecheck": "tsc -p tsconfig.json" }
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "esbuild test/organize.test.ts --bundle --platform=node --format=esm --outfile=.test-build/organize.test.mjs && node .test-build/organize.test.mjs"
+  }
 }

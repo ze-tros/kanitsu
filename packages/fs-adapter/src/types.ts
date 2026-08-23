@@ -22,6 +22,16 @@ export interface ImportSourcePicker {
   readBlob(file: FileRef): Promise<Blob>;
 }
 
+/** Result of a zip export. `blob` is returned for in-app/download exports (web/memory);
+ *  `outputPath` is returned when the platform wrote the zip natively (Electron save dialog). */
+export interface ZipExportResult {
+  kind: 'blob' | 'file';
+  blob?: Blob;
+  outputPath?: string;
+  totalImages: number;
+  exportedCount: number;
+}
+
 /** Manages the app-owned album library. */
 export interface LibraryStore {
   getLibraryRoot(): Promise<FolderRef>;
@@ -36,5 +46,5 @@ export interface LibraryStore {
   move(entry: FsEntry, toFolder: FolderRef, newName?: string): Promise<FsEntry>;
   remove(entry: FsEntry): Promise<void>;
   /** Zips targetRelPath (empty = whole library) preserving directory structure. */
-  zipLibrary(targetRelPath: string, onProgress?: (done: number, total: number) => void): Promise<Blob>;
+  zipLibrary(targetRelPath: string, onProgress?: (done: number, total: number) => void): Promise<ZipExportResult>;
 }

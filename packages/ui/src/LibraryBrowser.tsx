@@ -1,16 +1,20 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  applyOrganize,
   childrenOf,
   directImagesOf,
   imagesOf,
   importFolder,
   scanLibrary,
+  undoOrganize,
   type FolderNode,
   type ImageEntry,
   type ImportSkippedFile,
   type ImportTask,
   type LibrarySnapshot,
   type OrganizeBinding,
+  type OrganizeManifest,
+  type OrganizeResult,
 } from '../../core/src/index';
 import type { ImportSourcePicker, LibraryStore } from '../../fs-adapter/src/types';
 import { organizeByFolder } from '../../organizer/src/index';
@@ -28,6 +32,17 @@ function skippedReasonLabel(reason: ImportSkippedFile['reason']): string {
   }
 }
 
+function downloadBlob(blob: Blob, fileName: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 export function LibraryBrowser({
   picker,
   store,
@@ -41,6 +56,11 @@ export function LibraryBrowser({
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [organizePreview, setOrganizePreview] = useState<OrganizeBinding[] | null>(null);
+  const [organizeResult, setOrganizeResult] = useState<OrganizeResult | null>(null);
+  const [lastManifest, setLastManifest] = useState<OrganizeManifest | null>(null);
+  const [organizing, setOrganizing] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [exportProgress, setExportProgress] = useState<{ done: number; total: number } | null>(null);
   const [importReport, setImportReport] = useState<ImportTask | null>(null);
   const [expandedFolders, setExpandedFolders] = useState<ReadonlySet<string>>(new Set());
 
@@ -146,6 +166,76 @@ export function LibraryBrowser({
   const openOrganizePreview = () => {
     if (!snapshot || !selectedFolder) return;
     setOrganizePreview(organizeByFolder(imagesOf(snapshot, selectedFolder.id)));
+    setOrganizeResult(null);
+  };
+
+  const handleApplyOrganize = async () => {
+    if (!snapshot || !selectedFolder || !organizePreview) return;
+    setOrganizing(true);
+    try {
+      const result = await applyOrganize(store, snapshot, selectedFolder.relPath, organizePreview);
+      setOrganizePreview(null);
+      setOrganizeResult(result);
+      setLastManifest(result.manifest);
+      await refresh();
+      setMessage(
+        result.conflicts.length > 0
+          ? `Organized ${result.appliedCount} file(s), ${result.conflicts.length} conflict(s) — see report.`
+          : `Organized ${result.appliedCount} file(s).`,
+      );
+    } catch (err) {
+      setMessage(`Organize failed: ${String(err)}`);
+    } finally {
+      setOrganizing(false);
+    }
+  };
+
+  const handleUndoOrganize = async () => {
+    if (!lastManifest) return;
+    setBusy(true);
+    setMessage('Undoing organize…');
+    try {
+      const result = await undoOrganize(store, lastManifest);
+      setLastManifest(null);
+      setOrganizeResult(null);
+      await refresh();
+      setMessage(
+        result.errors.length > 0
+          ? `Undo: ${result.undone} restored, ${result.errors.length} error(s).`
+          : `Undo: ${result.undone} file(s) restored.`,
+      );
+    } catch (err) {
+      setMessage(`Undo failed: ${String(err)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleExport = async () => {
+    if (!selectedFolder) return;
+    setExporting(true);
+    setExportProgress({ done: 0, total: 0 });
+    setMessage('Exporting ZIP…');
+    try {
+      const result = await store.zipLibrary(selectedFolder.relPath, (done, total) => {
+        setExportProgress({ done, total });
+      });
+      setExportProgress(null);
+      if (result.kind === 'blob' && result.blob) {
+        const base = selectedFolder.relPath ? selectedFolder.relPath.split('/').pop() : 'albums';
+        downloadBlob(result.blob, `${base}.zip`);
+        setMessage(`Exported ${result.exportedCount} image(s) as ZIP (download).`);
+      } else if (result.outputPath) {
+        setMessage(`Exported ${result.exportedCount} image(s) to ${result.outputPath}.`);
+      } else {
+        setMessage(`Exported ${result.exportedCount} image(s).`);
+      }
+    } catch (err) {
+      setExportProgress(null);
+      setMessage(`Export failed: ${String(err)}`);
+    } finally {
+      setExporting(false);
+    }
   };
 
   const viewerImages = folderImages;
@@ -169,6 +259,12 @@ export function LibraryBrowser({
           <button disabled={!selectedFolder} onClick={openOrganizePreview}>
             Organize Preview
           </button>
+          <button disabled={!lastManifest || busy} onClick={handleUndoOrganize}>
+            Undo Last Organize
+          </button>
+          <button disabled={!selectedFolder || busy || exporting} onClick={handleExport}>
+            {exporting ? 'Exporting…' : 'Export ZIP'}
+          </button>
           {importReport && (
             <button onClick={() => setImportReport(importReport)}>Import Report</button>
           )}
@@ -186,6 +282,13 @@ export function LibraryBrowser({
           />
         )}
         {message && <div className="message">{message}</div>}
+        {exporting && exportProgress && (
+          <div className="message export-progress">
+            {exportProgress.total > 0
+              ? `Packaging ZIP… ${exportProgress.done}/${exportProgress.total}`
+              : 'Packaging ZIP…'}
+          </div>
+        )}
       </aside>
 
       <main className="content">
@@ -295,17 +398,58 @@ export function LibraryBrowser({
             <tbody>
               {organizePreview.map((b) => {
                 const img = snapshot?.images[b.imageId];
+                const keep = b.confidence < 0.5;
                 return (
                   <tr key={b.imageId}>
                     <td>{img?.name ?? b.imageId}</td>
-                    <td>{b.virtualPath}</td>
+                    <td>{keep ? `${b.virtualPath} (left in place)` : b.virtualPath}</td>
                     <td>{b.confidence.toFixed(2)}</td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
-          <button onClick={() => setOrganizePreview(null)}>Close</button>
+          <div className="organize-actions">
+            <button disabled={organizing} onClick={handleApplyOrganize}>
+              {organizing ? 'Applying…' : `Apply (${organizePreview.length} files)`}
+            </button>
+            <button onClick={() => setOrganizePreview(null)}>Close</button>
+          </div>
+          <p className="organize-hint">
+            Files with confidence below 0.50 are left in place. Targets are created under the current folder.
+          </p>
+        </div>
+      )}
+
+      {organizeResult && (
+        <div className="organize-preview organize-result">
+          <h3>Organize result</h3>
+          <div className="report-summary">
+            <span>Applied: {organizeResult.appliedCount}</span>
+            <span>Skipped (low confidence): {organizeResult.skippedLowConfidenceCount}</span>
+            <span>Conflicts: {organizeResult.conflicts.length}</span>
+          </div>
+          {organizeResult.conflicts.length > 0 && (
+            <table>
+              <thead>
+                <tr>
+                  <th>File</th>
+                  <th>Target</th>
+                  <th>Reason</th>
+                </tr>
+              </thead>
+              <tbody>
+                {organizeResult.conflicts.map((c, i) => (
+                  <tr key={`${c.imageId}-${i}`}>
+                    <td>{c.name}</td>
+                    <td>{c.targetRelPath}</td>
+                    <td>{c.reason}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          <button onClick={() => setOrganizeResult(null)}>Close</button>
         </div>
       )}
 

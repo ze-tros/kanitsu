@@ -1,4 +1,4 @@
-import type { FileRef, FolderRef, FsEntry, ImportSourcePicker, LibraryStore } from './types';
+import type { FileRef, FolderRef, FsEntry, ImportSourcePicker, LibraryStore, ZipExportResult } from './types';
 
 export interface DesktopFsEntry {
   id: string;
@@ -24,6 +24,12 @@ export interface KanituDesktopBridge {
   readLibraryThumbnail(file: DesktopFsEntry, maxSize: number): Promise<Uint8Array>;
   moveLibraryEntry(entry: DesktopFsEntry, toFolder: DesktopFsEntry, newName?: string): Promise<DesktopFsEntry>;
   removeLibraryEntry(entry: DesktopFsEntry): Promise<void>;
+  exportZip(targetRelPath: string): Promise<{
+    canceled: boolean;
+    outputPath?: string;
+    totalImages?: number;
+    exportedCount?: number;
+  }>;
 }
 
 declare global {
@@ -126,9 +132,16 @@ export class ElectronLibraryStore implements LibraryStore {
     await requireBridge().removeLibraryEntry(toEntry(entry));
   }
 
-  async zipLibrary(targetRelPath: string, onProgress?: (done: number, total: number) => void): Promise<Blob> {
-    void targetRelPath;
-    void onProgress;
-    throw new Error('ElectronLibraryStore.zipLibrary is not implemented yet. Use the native zip export in the main process.');
+  async zipLibrary(targetRelPath: string, onProgress?: (done: number, total: number) => void): Promise<ZipExportResult> {
+    onProgress?.(0, 0);
+    const result = await requireBridge().exportZip(targetRelPath);
+    if (result.canceled) throw new Error('Export canceled');
+    onProgress?.(result.exportedCount ?? 0, result.totalImages ?? 0);
+    return {
+      kind: 'file',
+      outputPath: result.outputPath,
+      totalImages: result.totalImages ?? 0,
+      exportedCount: result.exportedCount ?? 0,
+    };
   }
 }

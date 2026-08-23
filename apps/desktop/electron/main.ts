@@ -1,7 +1,24 @@
 // Electron main process: native file system for import and album library.
 import { app, BrowserWindow, dialog, ipcMain, nativeImage } from 'electron';
-import { promises as fs } from 'node:fs';
+import { promises as fs, createWriteStream } from 'node:fs';
 import path from 'node:path';
+import archiver from 'archiver';
+
+const IMAGE_EXT = new Set(['jpg', 'jpeg', 'png', 'webp', 'avif', 'bmp', 'gif']);
+
+async function countLibraryFiles(dirPath: string): Promise<number> {
+  let count = 0;
+  const entries = await fs.readdir(dirPath, { withFileTypes: true });
+  for (const entry of entries) {
+    const full = path.join(dirPath, entry.name);
+    if (entry.isDirectory()) {
+      count += await countLibraryFiles(full);
+    } else if (IMAGE_EXT.has(path.extname(entry.name).toLowerCase().slice(1))) {
+      count++;
+    }
+  }
+  return count;
+}
 
 let libraryRoot = '';
 const allowedSourceRoots = new Set<string>();
@@ -198,6 +215,41 @@ function registerIpc(): void {
   ipcMain.handle('library:remove', async (_event, entry: DesktopFsEntry): Promise<void> => {
     assertInsideLibrary(entry.id);
     await fs.rm(entry.id, { recursive: true, force: true });
+  });
+
+  // Export a folder (or the whole library) as a ZIP. Streams to a user-chosen path
+  // so large libraries don't buffer entirely in memory. Uses STORE (no compression).
+  ipcMain.handle('library:exportZip', async (_event, targetRelPath: string) => {
+    const libraryRoot = getLibraryRoot();
+    await ensureDir(libraryRoot);
+    const norm = String(targetRelPath || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+    const sourceDir = norm ? path.join(libraryRoot, ...norm.split('/')) : libraryRoot;
+    assertInsideLibrary(sourceDir);
+    const baseName = norm ? path.basename(norm) : 'albums';
+
+    const { canceled, filePath } = await dialog.showSaveDialog({
+      title: 'Export album as ZIP',
+      defaultPath: path.join(app.getPath('desktop'), `${baseName}.zip`),
+      filters: [{ name: 'ZIP', extensions: ['zip'] }],
+    });
+    if (canceled || !filePath) return { canceled: true };
+
+    const totalImages = await countLibraryFiles(sourceDir);
+    const output = createWriteStream(filePath);
+    const archive = archiver('zip', { zlib: { level: 0 } });
+    const done = new Promise<void>((resolve, reject) => {
+      output.on('close', () => resolve());
+      output.on('error', reject);
+      archive.on('error', reject);
+    });
+
+    archive.pipe(output);
+    if (norm) archive.directory(sourceDir, baseName);
+    else archive.directory(sourceDir, false);
+    await archive.finalize();
+    await done;
+
+    return { canceled: false, outputPath: filePath, totalImages, exportedCount: totalImages };
   });
 }
 

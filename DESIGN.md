@@ -583,6 +583,8 @@ score = 0.50 * representativeness   # 目录内代表度
 - 导入报告（跳过文件与原因）
 - Electron 大图预览与缩略图内存安全处理
 - 命名整理虚拟预览
+- 命名整理落盘（移动/重命名 + 冲突检测）+ 一键撤销（undo manifest）
+- zip 导出（Electron 主进程 `archiver` 流式写到保存对话框路径；Web/Memory 用内置 STORE zip 编码器下载）
 
 详细的进度、问题复盘与下一阶段计划见：
 

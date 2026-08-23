@@ -1,4 +1,5 @@
-import type { FileRef, FolderRef, FsEntry, ImportSourcePicker, LibraryStore } from './types';
+import type { FileRef, FolderRef, FsEntry, ImportSourcePicker, LibraryStore, ZipExportResult } from './types';
+import { buildZip, type ZipEntry } from './zip';
 
 interface MemNode {
   name: string;
@@ -22,6 +23,26 @@ function baseName(path: string): string {
   if (path === '/') return '';
   return path.slice(path.lastIndexOf('/') + 1);
 }
+
+function normalizeRel(p: string): string {
+  return p.replace(/\\/g, '/').replace(/\/{2,}/g, '/').replace(/^\/+|\/+$/g, '');
+}
+
+function joinSeg(...parts: string[]): string {
+  return parts.filter(Boolean).join('/').replace(/\/{2,}/g, '/').replace(/^\/+|\/+$/g, '');
+}
+
+function lastSegment(p: string): string {
+  const idx = p.lastIndexOf('/');
+  return idx < 0 ? p : p.slice(idx + 1);
+}
+
+function extOfName(name: string): string {
+  const idx = name.lastIndexOf('.');
+  return idx < 0 ? '' : name.slice(idx + 1).toLowerCase();
+}
+
+const SUPPORTED_IMAGE_EXT = new Set(['jpg', 'jpeg', 'png', 'webp', 'avif', 'bmp', 'gif']);
 
 function toFolderRef(node: MemNode, id: string): FolderRef {
   return { id, name: node.name, kind: 'folder' };
@@ -223,8 +244,51 @@ export class MemoryLibraryStore implements LibraryStore {
     this.tree.remove(entry.id);
   }
 
-  async zipLibrary(_targetRelPath: string, _onProgress?: (done: number, total: number) => void): Promise<Blob> {
-    throw new Error('MemoryLibraryStore.zipLibrary is not implemented yet; use Electron/Android implementation.');
+  async zipLibrary(targetRelPath: string, onProgress?: (done: number, total: number) => void): Promise<ZipExportResult> {
+    const norm = normalizeRel(targetRelPath || '');
+    const targetId = norm ? `/${norm}` : '/';
+    const targetNode = this.tree.get(targetId) ?? this.tree.root;
+    const targetFolder: FolderRef = { id: targetId, name: targetNode.name || 'Albums', kind: 'folder' };
+    const base = norm ? lastSegment(norm) : '';
+
+    const entries: ZipEntry[] = [];
+    let total = 0;
+    let processed = 0;
+
+    const walkCount = async (folder: FolderRef, suffix: string): Promise<void> => {
+      for await (const child of this.tree.listChildren(folder)) {
+        if (child.kind === 'folder') {
+          await walkCount(child, joinSeg(suffix, child.name));
+        } else if (SUPPORTED_IMAGE_EXT.has(extOfName(child.name))) {
+          total++;
+        }
+      }
+    };
+    await walkCount(targetFolder, '');
+
+    const collect = async (folder: FolderRef, suffix: string): Promise<void> => {
+      for await (const child of this.tree.listChildren(folder)) {
+        if (child.kind === 'folder') {
+          await collect(child, joinSeg(suffix, child.name));
+        } else if (SUPPORTED_IMAGE_EXT.has(extOfName(child.name))) {
+          const node = this.tree.get(child.id);
+          if (!node?.blob) continue;
+          const data = new Uint8Array(await node.blob.arrayBuffer());
+          entries.push({ name: joinSeg(base, suffix, child.name), data });
+          processed++;
+          onProgress?.(processed, total);
+        }
+      }
+    };
+    await collect(targetFolder, '');
+
+    const bytes = buildZip(entries);
+    return {
+      kind: 'blob',
+      blob: new Blob([bytes as BlobPart], { type: 'application/zip' }),
+      totalImages: total,
+      exportedCount: processed,
+    };
   }
 }
 

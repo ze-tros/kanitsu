@@ -9,3 +9,4 @@ apps/desktop/dist-electron/
 apps/desktop/dist/
 *.js.map
 *.d.ts
+.test-build/

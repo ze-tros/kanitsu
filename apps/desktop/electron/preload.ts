@@ -32,6 +32,12 @@ const bridge = {
   moveLibraryEntry: (entry: DesktopEntry, toFolder: DesktopEntry, newName?: string): Promise<DesktopEntry> =>
     ipcRenderer.invoke('library:move', entry, toFolder, newName),
   removeLibraryEntry: (entry: DesktopEntry): Promise<void> => ipcRenderer.invoke('library:remove', entry),
+  exportZip: (targetRelPath: string): Promise<{
+    canceled: boolean;
+    outputPath?: string;
+    totalImages?: number;
+    exportedCount?: number;
+  }> => ipcRenderer.invoke('library:exportZip', targetRelPath),
 };
 
 contextBridge.exposeInMainWorld('kanituDesktop', bridge);
