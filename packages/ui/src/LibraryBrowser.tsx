@@ -143,6 +143,49 @@ export function LibraryBrowser({
     [],
   );
 
+  // Move selection among the siblings of the current folder (same level).
+  const navigateSibling = useCallback(
+    (dir: number) => {
+      if (!snapshot) return;
+      const currentId = selectedFolderId || snapshot.rootId;
+      if (currentId === snapshot.rootId) return;
+      const parentId = snapshot.folders[currentId]?.parentId ?? snapshot.rootId;
+      const siblings = childrenOf(snapshot, parentId).sort((a, b) => a.name.localeCompare(b.name));
+      if (siblings.length === 0) return;
+      const index = siblings.findIndex((f) => f.id === currentId);
+      const next = siblings[(index + dir + siblings.length) % siblings.length]!;
+      handleSelectFolder(next);
+    },
+    [snapshot, selectedFolderId, handleSelectFolder],
+  );
+
+  // Go up to the parent folder.
+  const goToParent = useCallback(() => {
+    if (!snapshot) return;
+    const currentId = selectedFolderId || snapshot.rootId;
+    const parentId = snapshot.folders[currentId]?.parentId;
+    if (parentId) setSelectedFolderId(parentId);
+  }, [snapshot, selectedFolderId]);
+
+  // Browser-level keyboard navigation (ignored while the viewer is open).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (viewerImageId) return;
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        navigateSibling(-1);
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        navigateSibling(1);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        goToParent();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [viewerImageId, navigateSibling, goToParent]);
+
   const handleAdd = async () => {
     setBusy(true);
     setMessage('Importing...');
