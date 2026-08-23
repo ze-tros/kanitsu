@@ -6,18 +6,63 @@ import archiver from 'archiver';
 
 const IMAGE_EXT = new Set(['jpg', 'jpeg', 'png', 'webp', 'avif', 'bmp', 'gif']);
 
-async function countLibraryFiles(dirPath: string): Promise<number> {
+interface FsFileMeta {
+  relPath: string;
+  size: number;
+  mtime: number;
+}
+
+/** Walks a library subtree, counting images and collecting archive-relative metadata. */
+async function collectLibraryFiles(dirPath: string, root: string, out: FsFileMeta[]): Promise<number> {
   let count = 0;
   const entries = await fs.readdir(dirPath, { withFileTypes: true });
   for (const entry of entries) {
     const full = path.join(dirPath, entry.name);
     if (entry.isDirectory()) {
-      count += await countLibraryFiles(full);
+      count += await collectLibraryFiles(full, root, out);
     } else if (IMAGE_EXT.has(path.extname(entry.name).toLowerCase().slice(1))) {
+      const stat = await fs.stat(full);
+      const rel = path.relative(root, full).split(path.sep).join('/');
+      out.push({ relPath: rel, size: stat.size, mtime: stat.mtimeMs });
       count++;
     }
   }
   return count;
+}
+
+const indexBase = (relPath: string): string => (relPath.lastIndexOf('/') < 0 ? relPath : relPath.slice(relPath.lastIndexOf('/') + 1));
+const indexParent = (relPath: string): string => {
+  const i = relPath.lastIndexOf('/');
+  return i < 0 ? '' : relPath.slice(0, i);
+};
+const indexExt = (relPath: string): string => {
+  const i = relPath.lastIndexOf('.');
+  return i < 0 ? '' : relPath.slice(i + 1).toLowerCase();
+};
+
+/** JSON index embedded into exported zips (mirrors fs-adapter/src/exportIndex.ts). */
+function buildIndexJson(root: string, files: FsFileMeta[], exportedAt = Date.now()): string {
+  const images = files
+    .map((f) => ({ relPath: f.relPath, name: indexBase(f.relPath), size: f.size, mtime: f.mtime, ext: indexExt(f.relPath) }))
+    .sort((a, b) => a.relPath.localeCompare(b.relPath));
+  const folderSet = new Set<string>();
+  for (const image of images) {
+    let p = indexParent(image.relPath);
+    while (p && !folderSet.has(p)) {
+      folderSet.add(p);
+      p = indexParent(p);
+    }
+  }
+  const folders = [...folderSet]
+    .sort((a, b) => a.localeCompare(b))
+    .map((relPath) => ({
+      relPath,
+      name: indexBase(relPath),
+      directImageCount: images.filter((x) => indexParent(x.relPath) === relPath).length,
+      imageCount: images.filter((x) => x.relPath.startsWith(`${relPath}/`)).length,
+      childCount: [...folderSet].filter((x) => indexParent(x) === relPath).length,
+    }));
+  return JSON.stringify({ version: 1, exportedAt, root, folders, images });
 }
 
 let libraryRoot = '';
@@ -234,7 +279,10 @@ function registerIpc(): void {
     });
     if (canceled || !filePath) return { canceled: true };
 
-    const totalImages = await countLibraryFiles(sourceDir);
+    const files: FsFileMeta[] = [];
+    const totalImages = await collectLibraryFiles(sourceDir, libraryRoot, files);
+    const indexRoot = norm ? baseName : '';
+
     const output = createWriteStream(filePath);
     const archive = archiver('zip', { zlib: { level: 0 } });
     const done = new Promise<void>((resolve, reject) => {
@@ -246,6 +294,8 @@ function registerIpc(): void {
     archive.pipe(output);
     if (norm) archive.directory(sourceDir, baseName);
     else archive.directory(sourceDir, false);
+    // Embed a portable index describing the exported folder tree + image metadata.
+    archive.append(Buffer.from(buildIndexJson(indexRoot, files)), { name: 'index.json' });
     await archive.finalize();
     await done;
 

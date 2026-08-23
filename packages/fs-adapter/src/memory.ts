@@ -1,5 +1,6 @@
 import type { FileRef, FolderRef, FsEntry, ImportSourcePicker, LibraryStore, ZipExportResult } from './types';
 import { buildZip, type ZipEntry } from './zip';
+import { buildExportIndexJson, type ExportFileMeta } from './exportIndex';
 
 interface MemNode {
   name: string;
@@ -252,6 +253,7 @@ export class MemoryLibraryStore implements LibraryStore {
     const base = norm ? lastSegment(norm) : '';
 
     const entries: ZipEntry[] = [];
+    const meta: ExportFileMeta[] = [];
     let total = 0;
     let processed = 0;
 
@@ -273,14 +275,19 @@ export class MemoryLibraryStore implements LibraryStore {
         } else if (SUPPORTED_IMAGE_EXT.has(extOfName(child.name))) {
           const node = this.tree.get(child.id);
           if (!node?.blob) continue;
+          const relPath = joinSeg(base, suffix, child.name);
           const data = new Uint8Array(await node.blob.arrayBuffer());
-          entries.push({ name: joinSeg(base, suffix, child.name), data });
+          entries.push({ name: relPath, data });
+          meta.push({ relPath, size: node.blob.size, mtime: node.mtime ?? 0 });
           processed++;
           onProgress?.(processed, total);
         }
       }
     };
     await collect(targetFolder, '');
+
+    // Embed a portable index describing the exported folder tree + image metadata.
+    entries.push({ name: 'index.json', data: new TextEncoder().encode(buildExportIndexJson(base, meta)) });
 
     const bytes = buildZip(entries);
     return {
