@@ -791,6 +791,10 @@ function Viewer({
         onNavigate(images[(index - 1 + images.length) % images.length]!.id);
       } else if (e.key === 'ArrowRight') {
         onNavigate(images[(index + 1) % images.length]!.id);
+      } else if (e.key === 'ArrowUp') {
+        onNavigate(images[(index - 1 + images.length) % images.length]!.id);
+      } else if (e.key === 'ArrowDown') {
+        onNavigate(images[(index + 1) % images.length]!.id);
       } else if (e.key === '+' || e.key === '=') {
         zoomBy(1.25);
       } else if (e.key === '-') {
