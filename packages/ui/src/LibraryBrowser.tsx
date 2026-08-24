@@ -27,9 +27,9 @@ import { BlobImage } from './BlobImage';
 function skippedReasonLabel(reason: ImportSkippedFile['reason']): string {
   switch (reason) {
     case 'no-extension':
-      return 'No extension';
+      return '无扩展名';
     case 'unsupported-format':
-      return 'Unsupported format';
+      return '不支持的格式';
     default:
       return reason;
   }
@@ -46,6 +46,37 @@ function downloadBlob(blob: Blob, fileName: string): void {
   URL.revokeObjectURL(url);
 }
 
+const BLUR_STORAGE_KEY = 'kanitu-blurred-albums';
+
+function loadBlurredPaths(): ReadonlySet<string> {
+  try {
+    const raw = localStorage.getItem(BLUR_STORAGE_KEY);
+    return new Set<string>(raw ? (JSON.parse(raw) as string[]) : []);
+  } catch {
+    return new Set<string>();
+  }
+}
+
+function saveBlurredPaths(paths: ReadonlySet<string>): void {
+  try {
+    localStorage.setItem(BLUR_STORAGE_KEY, JSON.stringify([...paths]));
+  } catch {
+    // ignore storage errors
+  }
+}
+
+function isPathBlurred(relPath: string | undefined, blurred: ReadonlySet<string>): boolean {
+  if (!relPath) return false;
+  let p = relPath;
+  while (p) {
+    if (blurred.has(p)) return true;
+    const idx = p.lastIndexOf('/');
+    if (idx < 0) break;
+    p = p.slice(0, idx);
+  }
+  return false;
+}
+
 export function LibraryBrowser({
   picker,
   store,
@@ -60,6 +91,7 @@ export function LibraryBrowser({
   const [viewerImageId, setViewerImageId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
+  const [messageKind, setMessageKind] = useState<'info' | 'success' | 'error'>('info');
   const [organizePreview, setOrganizePreview] = useState<OrganizeBinding[] | null>(null);
   const [organizeResult, setOrganizeResult] = useState<OrganizeResult | null>(null);
   const [lastManifest, setLastManifest] = useState<OrganizeManifest | null>(null);
@@ -68,10 +100,18 @@ export function LibraryBrowser({
   const [exportProgress, setExportProgress] = useState<{ done: number; total: number } | null>(null);
   const [importReport, setImportReport] = useState<ImportTask | null>(null);
   const [expandedFolders, setExpandedFolders] = useState<ReadonlySet<string>>(new Set());
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [blurredPaths, setBlurredPaths] = useState<ReadonlySet<string>>(() => loadBlurredPaths());
 
   const applySnapshot = useCallback((next: LibrarySnapshot) => {
     setSnapshot(next);
     setSelectedFolderId((prev) => (prev && next.folders[prev] ? prev : next.rootId));
+  }, []);
+
+  const notify = useCallback((text: string, kind?: 'info' | 'success' | 'error') => {
+    const detected = kind ?? (/失败|错误/.test(text) ? 'error' : (/完成|成功|^已/.test(text) ? 'success' : 'info'));
+    setMessage(text);
+    setMessageKind(detected);
   }, []);
 
   // Startup: load the cached index (no full re-scan). Fallback scans + persists.
@@ -87,6 +127,13 @@ export function LibraryBrowser({
     applySnapshot(next);
     return next;
   }, [store, index, applySnapshot]);
+
+  // Auto-dismiss the toast message after a short delay (like the demo).
+  useEffect(() => {
+    if (!message) return;
+    const t = setTimeout(() => notify(''), 3500);
+    return () => clearTimeout(t);
+  }, [message]);
 
   const folderImages = useMemo(() => {
     if (!snapshot) return [];
@@ -109,6 +156,16 @@ export function LibraryBrowser({
   }, [snapshot, childFolders]);
 
   const selectedFolder = snapshot?.folders[selectedFolderId || snapshot?.rootId || ''] ?? null;
+  const rootFolder = snapshot?.folders[snapshot.rootId] ?? null;
+  const runtimeLabel =
+    (window as { kanituDesktop?: { platform?: string } }).kanituDesktop?.platform === 'electron'
+      ? 'Electron v0.5 · daisyUI 5'
+      : 'Web demo v0.5 · daisyUI 5';
+  const isRootSelected = !selectedFolderId || selectedFolderId === snapshot?.rootId;
+  const effectiveBlur = useMemo(
+    () => (selectedFolder ? isPathBlurred(selectedFolder.relPath, blurredPaths) : false),
+    [selectedFolder, blurredPaths],
+  );
 
   // Breadcrumb path from the library root to the selected folder.
   const crumbs = useMemo(() => {
@@ -156,7 +213,6 @@ export function LibraryBrowser({
   );
 
   // In the viewer: switch to a sibling folder (same level) and show its first image.
-  // The directory tree / grid view has no keyboard shortcuts.
   const handleViewerSwitchSibling = useCallback(
     (dir: number) => {
       if (!snapshot) return;
@@ -176,11 +232,11 @@ export function LibraryBrowser({
 
   const handleAdd = async () => {
     setBusy(true);
-    setMessage('Importing...');
+    notify('正在导入…');
     try {
       const task = await importFolder(picker, store, {
         onProgress: (p) =>
-          setMessage(`Importing: scanned ${p.scanned}, copied ${p.copied}, skipped ${p.skipped}`),
+          notify(`导入中：已扫描 ${p.scanned}，已复制 ${p.copied}，已跳过 ${p.skipped}`),
       });
       setImportReport(task);
       const next = await refresh();
@@ -195,13 +251,13 @@ export function LibraryBrowser({
           return nextSet;
         });
       }
-      setMessage(
+      notify(
         task.skippedCount > 0
-          ? `Import completed: ${task.copiedImageCount} copied, ${task.skippedCount} skipped. See report.`
-          : `Import completed: ${task.copiedImageCount} copied.`,
+          ? `导入完成：复制 ${task.copiedImageCount} 张，跳过 ${task.skippedCount} 张。`
+          : `导入完成：复制 ${task.copiedImageCount} 张。`,
       );
     } catch (err) {
-      setMessage(`Import failed: ${String(err)}`);
+      notify(`导入失败：${String(err)}`);
     } finally {
       setBusy(false);
     }
@@ -222,13 +278,13 @@ export function LibraryBrowser({
       setOrganizeResult(result);
       setLastManifest(result.manifest);
       await refresh();
-      setMessage(
+      notify(
         result.conflicts.length > 0
-          ? `Organized ${result.appliedCount} file(s), ${result.conflicts.length} conflict(s) — see report.`
-          : `Organized ${result.appliedCount} file(s).`,
+          ? `已整理 ${result.appliedCount} 个文件，${result.conflicts.length} 个冲突。`
+          : `已整理 ${result.appliedCount} 个文件。`,
       );
     } catch (err) {
-      setMessage(`Organize failed: ${String(err)}`);
+      notify(`整理失败：${String(err)}`);
     } finally {
       setOrganizing(false);
     }
@@ -237,19 +293,19 @@ export function LibraryBrowser({
   const handleUndoOrganize = async () => {
     if (!lastManifest) return;
     setBusy(true);
-    setMessage('Undoing organize…');
+    notify('正在撤销整理…');
     try {
       const result = await undoOrganize(store, lastManifest);
       setLastManifest(null);
       setOrganizeResult(null);
       await refresh();
-      setMessage(
+      notify(
         result.errors.length > 0
-          ? `Undo: ${result.undone} restored, ${result.errors.length} error(s).`
-          : `Undo: ${result.undone} file(s) restored.`,
+          ? `撤销：已还原 ${result.undone} 个，${result.errors.length} 个错误。`
+          : `撤销：已还原 ${result.undone} 个文件。`,
       );
     } catch (err) {
-      setMessage(`Undo failed: ${String(err)}`);
+      notify(`撤销失败：${String(err)}`);
     } finally {
       setBusy(false);
     }
@@ -259,7 +315,7 @@ export function LibraryBrowser({
     if (!selectedFolder) return;
     setExporting(true);
     setExportProgress({ done: 0, total: 0 });
-    setMessage('Exporting ZIP…');
+    notify('正在导出 ZIP…');
     try {
       const result = await store.zipLibrary(selectedFolder.relPath, (done, total) => {
         setExportProgress({ done, total });
@@ -268,130 +324,196 @@ export function LibraryBrowser({
       if (result.kind === 'blob' && result.blob) {
         const base = selectedFolder.relPath ? selectedFolder.relPath.split('/').pop() : 'albums';
         downloadBlob(result.blob, `${base}.zip`);
-        setMessage(`Exported ${result.exportedCount} image(s) as ZIP (download).`);
+        notify(`已导出 ${result.exportedCount} 张图片为 ZIP。`);
       } else if (result.outputPath) {
-        setMessage(`Exported ${result.exportedCount} image(s) to ${result.outputPath}.`);
+        notify(`已导出 ${result.exportedCount} 张图片到 ${result.outputPath}。`);
       } else {
-        setMessage(`Exported ${result.exportedCount} image(s).`);
+        notify(`已导出 ${result.exportedCount} 张图片。`);
       }
     } catch (err) {
       setExportProgress(null);
-      setMessage(`Export failed: ${String(err)}`);
+      notify(`导出失败：${String(err)}`);
     } finally {
       setExporting(false);
     }
   };
 
-  const handleDelete = async () => {
+  const performDelete = async () => {
     if (!selectedFolder || !selectedFolder.relPath) return;
     const name = selectedFolder.name;
-    if (!window.confirm(`Delete "${name}" and all of its subfolders? This cannot be undone.`)) return;
     setBusy(true);
-    setMessage(`Deleting "${name}"…`);
+    notify(`正在删除“${name}”…`);
     const parentId = selectedFolder.parentId;
     try {
       await deleteLibraryFolder(store, selectedFolder.relPath);
       await refresh();
       if (parentId) setSelectedFolderId(parentId);
-      setMessage(`Deleted "${name}".`);
+      notify(`已删除“${name}”。`);
     } catch (err) {
-      setMessage(`Delete failed: ${String(err)}`);
+      notify(`删除失败：${String(err)}`);
     } finally {
       setBusy(false);
     }
   };
 
+  const requestDelete = () => setConfirmDelete(true);
+  const confirmDeleteHandler = () => {
+    setConfirmDelete(false);
+    void performDelete();
+  };
+
+  const toggleBlur = useCallback(() => {
+    if (!selectedFolder || !selectedFolder.relPath) return;
+    const path = selectedFolder.relPath;
+    setBlurredPaths((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      saveBlurredPaths(next);
+      return next;
+    });
+  }, [selectedFolder]);
+
   const viewerImages = folderImages;
   const viewerIndex = viewerImages.findIndex((img) => img.id === viewerImageId);
 
   return (
-    <div className="library-browser">
-      <aside className="sidebar">
-        <div className="toolbar">
-          <button disabled={busy} onClick={handleAdd}>
-            Add Album
-          </button>
-          <button
-            disabled={!selectedFolder}
-            onClick={() => {
-              void refresh();
-            }}
-          >
-            Refresh
-          </button>
-          <button disabled={!selectedFolder} onClick={openOrganizePreview}>
-            Organize Preview
-          </button>
-          <button disabled={!lastManifest || busy} onClick={handleUndoOrganize}>
-            Undo Last Organize
-          </button>
-          <button disabled={!selectedFolder || busy || exporting} onClick={handleExport}>
-            {exporting ? 'Exporting…' : 'Export ZIP'}
-          </button>
-          <button
-            disabled={!selectedFolder || !selectedFolder.relPath || busy || exporting}
-            onClick={handleDelete}
-          >
-            Delete Album
-          </button>
-          {importReport && (
-            <button onClick={() => setImportReport(importReport)}>Import Report</button>
-          )}
-        </div>
-          <div className="tree-version">Tree v0.4 (subfolder covers)</div>
-        {snapshot && (
-          <FolderTree
-            snapshot={snapshot}
-            folderId={snapshot.rootId}
-            selectedFolderId={selectedFolderId || snapshot.rootId}
-            onSelect={handleSelectFolder}
-            expandedFolders={expandedFolders}
-            onToggleFolder={toggleFolder}
-            depth={0}
-          />
-        )}
-        {message && <div className="message">{message}</div>}
-        {exporting && exportProgress && (
-          <div className="message export-progress">
-            {exportProgress.total > 0
-              ? `Packaging ZIP… ${exportProgress.done}/${exportProgress.total}`
-              : 'Packaging ZIP…'}
-          </div>
-        )}
-      </aside>
+    <div className="drawer lg:drawer-open">
+      <input id="app-drawer" type="checkbox" className="drawer-toggle" />
 
-      <main className="content">
-        <header className="content-header">
-          <nav className="breadcrumb" aria-label="Breadcrumb">
-            {crumbs.map((crumb, i) => (
-              <span key={crumb.id} className="crumb-wrap">
-                {i > 0 && <span className="crumb-sep">›</span>}
-                {i < crumbs.length - 1 ? (
-                  <button className="crumb" onClick={() => handleSelectFolder(crumb)}>
-                    {crumb.name}
-                  </button>
-                ) : (
-                  <span className="crumb current">{crumb.name}</span>
-                )}
-              </span>
-            ))}
-          </nav>
-          <h2>{selectedFolder?.name ?? 'Albums'}</h2>
-          <div className="meta">
-            {selectedFolder && (
-              <>
-                <span>
-                  {selectedFolder.imageCount} images / {selectedFolder.childCount} folders
-                </span>
-                {cover && (
-                  <span>
-                    Cover: {snapshot?.images[cover.imageId]?.name ?? cover.imageId}
-                  </span>
-                )}
-              </>
-            )}
+      <div className="drawer-content flex flex-col min-h-screen">
+        <div className="navbar bg-base-200 border-b border-base-300 px-4 gap-2 sticky top-0 z-10">
+          <div className="flex-none lg:hidden">
+            <label htmlFor="app-drawer" className="btn btn-square btn-ghost" aria-label="打开侧边栏">☰</label>
           </div>
-        </header>
+          <div className="flex-1 min-w-0">
+            <nav className="breadcrumbs text-sm" aria-label="Breadcrumb">
+              <ul>
+                {crumbs.map((crumb, i) => (
+                  <li key={crumb.id} className={i === crumbs.length - 1 ? 'font-semibold' : ''}>
+                    {i < crumbs.length - 1 ? (
+                      <a className="link link-hover" onClick={() => handleSelectFolder(crumb)}>{crumb.name}</a>
+                    ) : (
+                      <span>{crumb.name}</span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </nav>
+          </div>
+          <div className="flex-none">
+            <ThemeToggle />
+          </div>
+        </div>
+
+        <div className="bg-base-100 px-5 lg:px-8 py-3 flex items-end justify-between gap-3">
+          <div className="min-w-0">
+            <div className="min-w-0">
+              <h2 className="text-2xl font-bold min-w-0">{selectedFolder?.name ?? '相册'}</h2>
+              {(selectedFolder || cover) && (
+                <div className="mt-1 text-sm opacity-70 flex flex-wrap gap-x-4 gap-y-1">
+                  {selectedFolder && (
+                    <span>{selectedFolder.imageCount} 图片 / {selectedFolder.childCount} 子目录</span>
+                  )}
+                  {cover && (
+                    <span>封面：{snapshot?.images[cover.imageId]?.name ?? cover.imageId}</span>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="flex flex-none shrink-0 flex-wrap justify-end gap-2">
+            <button className="btn btn-primary btn-sm" disabled={busy} onClick={handleAdd}>导入相册</button>
+            <button className="btn btn-ghost btn-sm" disabled={!selectedFolder} onClick={() => void refresh()}>刷新</button>
+            <button className="btn btn-ghost btn-sm" disabled={!selectedFolder} onClick={openOrganizePreview}>整理</button>
+            <button className="btn btn-ghost btn-sm" disabled={!lastManifest || busy} onClick={handleUndoOrganize}>撤销</button>
+            <button className="btn btn-ghost btn-sm" disabled={!selectedFolder || busy || exporting} onClick={handleExport}>
+              {exporting ? '导出中…' : '导出 ZIP'}
+            </button>
+            <button
+              className={`btn btn-sm ${effectiveBlur ? 'btn-active' : 'btn-ghost'}`}
+              disabled={!selectedFolder || !selectedFolder.relPath}
+              onClick={toggleBlur}
+              title={effectiveBlur ? '关闭模糊预览（当前相册及子文件夹）' : '开启模糊预览（当前相册及子文件夹）'}
+            >
+              {effectiveBlur ? '已模糊' : '模糊预览'}
+            </button>
+            <button className="btn btn-error btn-sm btn-outline" disabled={!selectedFolder || !selectedFolder.relPath || busy || exporting} onClick={requestDelete}>删除</button>
+            {importReport && <button className="btn btn-ghost btn-sm" onClick={() => setImportReport(importReport)}>报告</button>}
+          </div>
+        </div>
+
+        <main className="flex-1 overflow-y-auto p-5 lg:p-8">
+          {childFolderCards.length > 0 && (
+            <section className="mb-8">
+              <h3 className="text-sm font-semibold opacity-70 mb-3">子文件夹</h3>
+              <div className="folder-grid">
+                {childFolderCards.map(({ folder, cover }) => (
+                  <div key={folder.id} className="card bg-base-200 border border-base-300 shadow hover:shadow-lg transition cursor-pointer overflow-hidden" onClick={() => handleSelectFolder(folder)}>
+                    <figure className="aspect-[4/3] overflow-hidden relative">
+                      {cover ? (
+                        <BlobImage
+                          store={store}
+                          fileRef={{
+                            id: snapshot?.images[cover.imageId]?.fileRefId ?? cover.imageId,
+                            name: snapshot?.images[cover.imageId]?.name ?? '',
+                            kind: 'file',
+                          }}
+                          alt={folder.name}
+                          className="w-full h-full object-cover"
+                          thumbnail
+                          lazy
+                          blur={isPathBlurred(folder.relPath, blurredPaths)}
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center opacity-60 text-sm">无图片</div>
+                      )}
+                    </figure>
+                    <figcaption className="p-3 flex items-center justify-between gap-2">
+                      <span className="text-sm font-medium truncate">{folder.name}</span>
+                      <span className="text-[11px] opacity-60 whitespace-nowrap">{folder.imageCount} 图 / {folder.childCount} 子</span>
+                    </figcaption>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {folderImages.length > 0 && (
+            <section className="mb-8">
+              <h3 className="text-sm font-semibold opacity-70 mb-3">图片</h3>
+              <div className="gallery-grid">
+                {folderImages.map((image) => (
+                  <div key={image.id} className="card bg-base-200 border border-base-300 shadow hover:shadow-lg transition cursor-pointer overflow-hidden" onClick={() => setViewerImageId(image.id)}>
+                    <figure className="aspect-[4/3] overflow-hidden relative">
+                      <BlobImage
+                        store={store}
+                        fileRef={{ id: image.fileRefId ?? image.id, name: image.name, kind: 'file' }}
+                        alt={image.name}
+                        className="w-full h-full object-cover"
+                        thumbnail
+                        lazy
+                        blur={effectiveBlur}
+                      />
+                    </figure>
+                    <figcaption className="p-3">
+                      <span className="text-xs truncate block">{image.name}</span>
+                    </figcaption>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {childFolderCards.length === 0 && folderImages.length === 0 && (
+            <div className="border-2 border-dashed border-base-300 rounded-2xl p-12 text-center">
+              <p className="text-4xl mb-3">◻</p>
+              <div className="text-lg font-medium mb-1">该目录暂无图片</div>
+              <p className="text-sm opacity-70 mb-4">导入照片，开始整理你的图库</p>
+              <button className="btn btn-primary" disabled={busy} onClick={handleAdd}>导入图片</button>
+            </div>
+          )}
+        </main>
 
         {viewerImageId && viewerIndex >= 0 ? (
           <Viewer
@@ -403,171 +525,170 @@ export function LibraryBrowser({
             onSwitchSibling={handleViewerSwitchSibling}
           />
         ) : (
-          <div className="album-content">
-              {childFolderCards.length > 0 && (
-                <section className="folder-section">
-                  <h3>Subfolders</h3>
-                  <div className="folder-grid">
-                    {childFolderCards.map(({ folder, cover }) => (
-                      <figure
-                        key={folder.id}
-                        className="folder-card"
-                        onClick={() => handleSelectFolder(folder)}
-                      >
-                        {cover ? (
-                          <BlobImage
-                            store={store}
-                            fileRef={{
-                              id: snapshot?.images[cover.imageId]?.fileRefId ?? cover.imageId,
-                              name: snapshot?.images[cover.imageId]?.name ?? '',
-                              kind: 'file',
-                            }}
-                            alt={folder.name}
-                            className="folder-cover"
-                            thumbnail
-                          />
-                        ) : (
-                          <div className="folder-cover empty-folder-cover">No images</div>
-                        )}
-                        <figcaption>
-                          <span>{folder.name}</span>
-                          <span className="count">
-                            {folder.imageCount} img / {folder.childCount} sub
-                          </span>
-                        </figcaption>
-                      </figure>
-                    ))}
-                  </div>
-                </section>
-              )}
-
-              {folderImages.length > 0 && (
-                <section className="image-section">
-                  <h3>Images</h3>
-                  <div className="grid">
-                    {folderImages.map((image) => (
-                      <figure key={image.id} className="card" onClick={() => setViewerImageId(image.id)}>
-                        <BlobImage
-                          store={store}
-                          fileRef={{ id: image.fileRefId ?? image.id, name: image.name, kind: 'file' }}
-                          alt={image.name}
-                          className="thumb"
-                          thumbnail
-                        />
-                        <figcaption>{image.name}</figcaption>
-                      </figure>
-                    ))}
-                  </div>
-                </section>
-              )}
-
-              {childFolderCards.length === 0 && folderImages.length === 0 && (
-                <div className="empty">No images in this folder</div>
-              )}
-            </div>
+          <div className="toast toast-end">
+            {message && <div className={`alert alert-${messageKind} shadow-lg`}><span>{message}</span></div>}
+            {exporting && exportProgress && (
+              <div className="alert alert-info shadow-lg">
+                <span>打包中… {exportProgress.done}/{exportProgress.total}</span>
+                <progress className="progress progress-info w-24" value={exportProgress.done} max={exportProgress.total || 1} />
+              </div>
+            )}
+          </div>
         )}
-      </main>
+      </div>
+
+      <div className="drawer-side">
+        <label htmlFor="app-drawer" className="drawer-overlay"></label>
+        <aside className="bg-base-200 h-full w-72 p-4 flex flex-col gap-4 overflow-y-auto">
+          <div className="flex items-center gap-3 px-1">
+            <div className="bg-gradient-to-br from-sky-500 to-violet-500 rounded-xl w-10 h-10 flex items-center justify-center text-white text-xl">◉</div>
+            <span className="text-lg font-bold">全能看图王</span>
+          </div>
+
+          {rootFolder && (
+            <div>
+              <div className="menu-title text-xs opacity-60 px-1 mt-1">快捷</div>
+              <div
+                className={`flex items-center gap-2 rounded-lg py-1.5 pl-1 pr-2 cursor-pointer ${isRootSelected ? 'bg-primary/15 text-primary' : 'hover:bg-base-300/60'}`}
+                onClick={() => handleSelectFolder(rootFolder)}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 flex-shrink-0"><path d="M3 10.5L12 3l9 7.5V21H3z"/></svg>
+                <span className="truncate">全部相册</span>
+                {rootFolder.imageCount > 0 && <span className={`badge badge-sm ml-auto ${isRootSelected ? 'badge-primary' : 'badge-ghost'}`}>{rootFolder.imageCount}</span>}
+              </div>
+            </div>
+          )}
+
+          <div className="menu-title text-xs opacity-60 px-1 mt-1">目录树</div>
+          {snapshot && (
+            <FolderTree
+              snapshot={snapshot}
+              folderId={snapshot.rootId}
+              selectedFolderId={selectedFolderId || snapshot.rootId}
+              onSelect={handleSelectFolder}
+              expandedFolders={expandedFolders}
+              onToggleFolder={toggleFolder}
+              depth={0}
+            />
+          )}
+
+          <div className="mt-auto flex flex-col gap-2 text-sm">
+            {importReport && (
+              <button className="btn btn-ghost btn-sm justify-start" onClick={() => setImportReport(importReport)}>导入报告</button>
+            )}
+            <div className="text-xs opacity-60 px-1">{runtimeLabel}</div>
+          </div>
+        </aside>
+      </div>
 
       {organizePreview && (
-        <div className="organize-preview">
-          <h3>Organize preview (virtual only, no files are moved)</h3>
-          <table>
-            <thead>
-              <tr>
-                <th>Original name</th>
-                <th>Target path</th>
-                <th>Confidence</th>
-              </tr>
-            </thead>
-            <tbody>
-              {organizePreview.map((b) => {
-                const img = snapshot?.images[b.imageId];
-                const keep = b.confidence < 0.5;
-                return (
-                  <tr key={b.imageId}>
-                    <td>{img?.name ?? b.imageId}</td>
-                    <td>{keep ? `${b.virtualPath} (left in place)` : b.virtualPath}</td>
-                    <td>{b.confidence.toFixed(2)}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-          <div className="organize-actions">
-            <button disabled={organizing} onClick={handleApplyOrganize}>
-              {organizing ? 'Applying…' : `Apply (${organizePreview.length} files)`}
-            </button>
-            <button onClick={() => setOrganizePreview(null)}>Close</button>
+        <div className="modal modal-open">
+          <div className="modal-box max-w-3xl">
+            <h3 className="font-bold text-lg">整理预览（仅虚拟，不移文件）</h3>
+            <div className="overflow-x-auto">
+              <table className="table table-sm">
+                <thead>
+                  <tr><th>原文件名</th><th>目标路径</th><th>置信度</th></tr>
+                </thead>
+                <tbody>
+                  {organizePreview.map((b) => {
+                    const img = snapshot?.images[b.imageId];
+                    const keep = b.confidence < 0.5;
+                    return (
+                      <tr key={b.imageId}>
+                        <td>{img?.name ?? b.imageId}</td>
+                        <td>{keep ? `${b.virtualPath} (保留原位)` : b.virtualPath}</td>
+                        <td>{b.confidence.toFixed(2)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <p className="text-xs opacity-70 mt-2">置信度低于 0.50 的文件保留原位。目标目录创建于当前目录下。</p>
+            <div className="modal-action">
+              <button className="btn btn-primary" disabled={organizing} onClick={handleApplyOrganize}>
+                {organizing ? '应用…' : `应用（${organizePreview.length} 个文件）`}
+              </button>
+              <button className="btn btn-ghost" onClick={() => setOrganizePreview(null)}>关闭</button>
+            </div>
           </div>
-          <p className="organize-hint">
-            Files with confidence below 0.50 are left in place. Targets are created under the current folder.
-          </p>
         </div>
       )}
 
       {organizeResult && (
-        <div className="organize-preview organize-result">
-          <h3>Organize result</h3>
-          <div className="report-summary">
-            <span>Applied: {organizeResult.appliedCount}</span>
-            <span>Skipped (low confidence): {organizeResult.skippedLowConfidenceCount}</span>
-            <span>Conflicts: {organizeResult.conflicts.length}</span>
+        <div className="modal modal-open">
+          <div className="modal-box max-w-3xl">
+            <h3 className="font-bold text-lg">整理结果</h3>
+            <div className="flex flex-wrap gap-4 text-sm mb-3">
+              <span>已应用：{organizeResult.appliedCount}</span>
+              <span>低置信跳过：{organizeResult.skippedLowConfidenceCount}</span>
+              <span>冲突：{organizeResult.conflicts.length}</span>
+            </div>
+            {organizeResult.conflicts.length > 0 && (
+              <div className="overflow-x-auto">
+                <table className="table table-sm">
+                  <thead>
+                    <tr><th>文件</th><th>目标</th><th>原因</th></tr>
+                  </thead>
+                  <tbody>
+                    {organizeResult.conflicts.map((c, i) => (
+                      <tr key={`${c.imageId}-${i}`}>
+                        <td>{c.name}</td>
+                        <td>{c.targetRelPath}</td>
+                        <td>{c.reason}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <div className="modal-action"><button className="btn btn-ghost" onClick={() => setOrganizeResult(null)}>关闭</button></div>
           </div>
-          {organizeResult.conflicts.length > 0 && (
-            <table>
-              <thead>
-                <tr>
-                  <th>File</th>
-                  <th>Target</th>
-                  <th>Reason</th>
-                </tr>
-              </thead>
-              <tbody>
-                {organizeResult.conflicts.map((c, i) => (
-                  <tr key={`${c.imageId}-${i}`}>
-                    <td>{c.name}</td>
-                    <td>{c.targetRelPath}</td>
-                    <td>{c.reason}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-          <button onClick={() => setOrganizeResult(null)}>Close</button>
         </div>
       )}
 
       {importReport && (
-        <div className="organize-preview import-report">
-          <h3>Import report</h3>
-          <div className="report-summary">
-            <span>Source: {importReport.sourceFolderName}</span>
-            <span>Scanned: {importReport.scannedFileCount}</span>
-            <span>Copied: {importReport.copiedImageCount}</span>
-            <span>Skipped: {importReport.skippedCount}</span>
+        <div className="modal modal-open">
+          <div className="modal-box max-w-3xl">
+            <h3 className="font-bold text-lg">导入报告</h3>
+            <div className="flex flex-wrap gap-4 text-sm mb-3">
+              <span>来源：{importReport.sourceFolderName}</span>
+              <span>扫描：{importReport.scannedFileCount}</span>
+              <span>复制：{importReport.copiedImageCount}</span>
+              <span>跳过：{importReport.skippedCount}</span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="table table-sm">
+                <thead><tr><th>跳过的文件</th><th>原因</th></tr></thead>
+                <tbody>
+                  {importReport.skippedFiles.map((item, idx) => (
+                    <tr key={`${item.path}-${idx}`}>
+                      <td className="font-mono text-xs">{item.path}</td>
+                      <td>{skippedReasonLabel(item.reason)}</td>
+                    </tr>
+                  ))}
+                  {importReport.skippedFiles.length === 0 && (
+                    <tr><td colSpan={2} className="opacity-60">没有跳过文件</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <div className="modal-action"><button className="btn btn-ghost" onClick={() => setImportReport(null)}>关闭</button></div>
           </div>
-          <table>
-            <thead>
-              <tr>
-                <th>Skipped file</th>
-                <th>Reason</th>
-              </tr>
-            </thead>
-            <tbody>
-              {importReport.skippedFiles.map((item, index) => (
-                <tr key={`${item.path}-${index}`}>
-                  <td>{item.path}</td>
-                  <td>{skippedReasonLabel(item.reason)}</td>
-                </tr>
-              ))}
-              {importReport.skippedFiles.length === 0 && (
-                <tr>
-                  <td colSpan={2}>No skipped files</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-          <button onClick={() => setImportReport(null)}>Close</button>
+        </div>
+      )}
+
+      {confirmDelete && selectedFolder && selectedFolder.relPath && (
+        <div className="modal modal-open">
+          <div className="modal-box">
+            <h3 className="font-bold text-lg">确认删除</h3>
+            <p className="py-4 text-sm opacity-80">确定要删除“{selectedFolder.name}”及其全部子目录吗？此操作不可撤销。</p>
+            <div className="modal-action">
+              <button className="btn btn-ghost" onClick={() => setConfirmDelete(false)}>取消</button>
+              <button className="btn btn-error" onClick={confirmDeleteHandler}>删除</button>
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -594,35 +715,31 @@ function FolderTree({
   const children = childrenOf(snapshot, folderId).sort((a, b) => a.name.localeCompare(b.name));
   if (children.length === 0) return null;
   return (
-    <ul className="folder-tree" style={{ paddingLeft: depth === 0 ? 0 : 12 }}>
+    <ul className="flex flex-col gap-0.5" style={{ marginLeft: depth === 0 ? 0 : 12 }}>
       {children.map((folder) => {
-        // Use the actual snapshot children so the arrow is always in sync with reality.
         const childFolders = childrenOf(snapshot, folder.id);
         const hasChildren = childFolders.length > 0;
         const expanded = expandedFolders.has(folder.id);
         const active = folder.id === selectedFolderId;
         return (
           <li key={folder.id}>
-            <div className={`folder-row${active ? ' active' : ''}`}>
+            <div className={`flex items-center rounded-lg ${active ? 'bg-primary/15 text-primary' : 'hover:bg-base-300/60'}`}>
               <button
-                className="chevron"
+                className={`chevron-btn ${hasChildren ? '' : 'invisible'} ${expanded ? 'expanded' : ''}`}
                 disabled={!hasChildren}
-                aria-label={hasChildren ? (expanded ? 'Collapse' : 'Expand') : undefined}
-                title={hasChildren ? (expanded ? 'Collapse' : 'Expand') : undefined}
+                aria-label={hasChildren ? (expanded ? '收起' : '展开') : undefined}
                 onClick={(e) => {
                   e.stopPropagation();
                   if (hasChildren) onToggleFolder(folder.id);
                 }}
               >
-                {hasChildren ? (
-                  <span className={expanded ? 'chevron-icon expanded' : 'chevron-icon'} />
-                ) : null}
+                <svg className="chevron-icon" viewBox="0 0 12 12" width="12" height="12" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M3.5 2.2L8.5 6l-5 3.8z" fill="currentColor" />
+                </svg>
               </button>
-              <button className="folder-name" onClick={() => onSelect(folder)}>
-                <span>{folder.name}</span>
-                <span className="count">
-                  {folder.imageCount} img / {childFolders.length} sub
-                </span>
+              <button className="flex-1 min-w-0 text-left flex items-center justify-between gap-2 py-1.5 pr-2" onClick={() => onSelect(folder)}>
+                <span className="truncate">{folder.name}</span>
+                <span className={`badge badge-sm ${active ? 'badge-primary' : 'badge-ghost'}`}>{folder.imageCount}</span>
               </button>
             </div>
             {hasChildren && expanded && (
@@ -640,6 +757,25 @@ function FolderTree({
         );
       })}
     </ul>
+  );
+}
+
+function ThemeToggle() {
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    const saved = localStorage.getItem('kanitu-theme');
+    if (saved === 'light' || saved === 'dark') return saved;
+    return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  });
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('kanitu-theme', theme);
+  }, [theme]);
+  return (
+    <label className="swap swap-rotate btn btn-ghost btn-square btn-sm" title="切换主题">
+      <input type="checkbox" checked={theme === 'light'} onChange={(e) => setTheme(e.target.checked ? 'light' : 'dark')} />
+      <svg className="swap-off fill-current w-5 h-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 3v2M12 19v2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M3 12h2M19 12h2M5.6 18.4L7 17M17 7l1.4-1.4M12 7a5 5 0 010 10z"/></svg>
+      <svg className="swap-on fill-current w-5 h-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1111.2 3 7 7 0 0021 12.8z"/></svg>
+    </label>
   );
 }
 
@@ -672,7 +808,6 @@ function Viewer({
 
   const fileRefFor = (img: ImageEntry) => ({ id: img.fileRefId ?? img.id, name: img.name, kind: 'file' as const });
 
-  // Track the container size so "fit" can be computed correctly.
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -683,7 +818,6 @@ function Viewer({
     return () => ro.disconnect();
   }, []);
 
-  // Load the ORIGINAL-resolution URL for the current image, releasing the previous one.
   useEffect(() => {
     if (!image) return;
     let cancelled = false;
@@ -701,14 +835,12 @@ function Viewer({
     };
   }, [image, store]);
 
-  // Release the URL when the viewer unmounts.
   useEffect(() => {
     return () => {
       if (viewerUrlRef.current) store.releaseViewerUrl(viewerUrlRef.current);
     };
   }, [store]);
 
-  // Reset transforms when switching images.
   useEffect(() => {
     setZoom(1);
     setRotate(0);
@@ -716,7 +848,6 @@ function Viewer({
     setNatural(null);
   }, [image?.id]);
 
-  // Preload adjacent images for smoother navigation.
   useEffect(() => {
     if (!images.length) return;
     for (const offset of [-1, 1]) {
@@ -796,23 +927,22 @@ function Viewer({
   if (!image) return null;
 
   return (
-    <div className="viewer">
-      <div className="viewer-toolbar">
-        <button onClick={onClose}>✕ Close</button>
-        <button onClick={() => onNavigate(images[(index - 1 + images.length) % images.length]!.id)}>‹ Prev</button>
-        <span>
-          {index + 1} / {images.length}
-        </span>
-        <button onClick={() => onNavigate(images[(index + 1) % images.length]!.id)}>Next ›</button>
-        <span className="viewer-divider" />
-        <button onClick={() => zoomBy(1.25)}>＋</button>
-        <button onClick={() => zoomBy(0.8)}>－</button>
-        <button onClick={fit}>Fit</button>
-        <button onClick={percent}>100%</button>
-        <button onClick={rotateCW}>↻</button>
+    <div className="fixed inset-0 z-50 bg-black flex flex-col">
+      <div className="flex items-center justify-between gap-3 p-4 text-white">
+        <button className="btn btn-ghost btn-square text-white" onClick={onClose} aria-label="关闭">✕</button>
+        <div className="flex items-center gap-3">
+          <button className="btn btn-ghost text-white" onClick={() => onNavigate(images[(index - 1 + images.length) % images.length]!.id)}>‹</button>
+          <span className="text-sm opacity-80">{index + 1} / {images.length}</span>
+          <button className="btn btn-ghost text-white" onClick={() => onNavigate(images[(index + 1) % images.length]!.id)}>›</button>
+        </div>
+        <div className="flex items-center gap-1">
+          <button className="btn btn-ghost btn-sm text-white" onClick={fit}>适应</button>
+          <button className="btn btn-ghost btn-sm text-white" onClick={percent}>100%</button>
+          <button className="btn btn-ghost btn-sm text-white" onClick={rotateCW}>↻</button>
+        </div>
       </div>
       <div
-        className="viewer-canvas"
+        className="flex-1 flex items-center justify-center overflow-hidden cursor-grab active:cursor-grabbing"
         ref={containerRef}
         onWheel={(e) => {
           e.preventDefault();
@@ -835,7 +965,7 @@ function Viewer({
       >
         {viewerUrl && (
           <img
-            className="viewer-image"
+            className="select-none pointer-events-none"
             src={viewerUrl}
             alt={image.name}
             draggable={false}
@@ -847,7 +977,16 @@ function Viewer({
           />
         )}
       </div>
-      <div className="viewer-caption">{image.name}</div>
+      <div className="flex gap-2 px-4 pb-4 pt-2 bg-black/40 overflow-x-auto flex-shrink-0">
+        {images.map((img, i) => (
+          <button key={img.id} className={`filmstrip-thumb ${i === index ? 'active' : ''}`} onClick={() => onNavigate(img.id)}>
+            <BlobImage store={store} fileRef={fileRefFor(img)} alt={img.name} className="w-full h-full object-cover" thumbnail lazy />
+          </button>
+        ))}
+      </div>
+      <div className="absolute bottom-20 right-5 text-xs text-white/80 bg-black/50 rounded-lg px-3 py-2">
+        {image.name} · {natural ? `${natural.w}×${natural.h}` : '—'} · {Math.round(zoom * 100)}%
+      </div>
     </div>
   );
 }

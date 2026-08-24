@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { FileRef, LibraryStore } from '../../fs-adapter/src/types';
 
 export function BlobImage({
@@ -7,17 +7,42 @@ export function BlobImage({
   alt,
   className,
   thumbnail = false,
+  lazy = false,
+  blur = false,
 }: {
   store: LibraryStore;
   fileRef: FileRef;
   alt?: string;
   className?: string;
   thumbnail?: boolean;
+  lazy?: boolean;
+  blur?: boolean;
 }) {
   const [url, setUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
+  const [visible, setVisible] = useState(!lazy);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Lazily start loading only when the element scrolls near the viewport.
+  useEffect(() => {
+    if (!lazy || visible) return;
+    const el = containerRef.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setVisible(true);
+          io.disconnect();
+        }
+      },
+      { rootMargin: '300px' },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [lazy, visible]);
 
   useEffect(() => {
+    if (!visible) return;
     let objectUrl: string | null = null;
     let cancelled = false;
     setUrl(null);
@@ -35,9 +60,22 @@ export function BlobImage({
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [store, fileRef.id]);
+  }, [store, fileRef.id, visible, thumbnail]);
 
-  if (failed) return <div className={`blob-image failed ${className ?? ''}`}>Cannot read</div>;
-  if (!url) return <div className={`blob-image loading ${className ?? ''}`}>...</div>;
-  return <img src={url} alt={alt ?? fileRef.name} className={className} />;
+  if (failed) {
+    return (
+      <div className={`blob-image failed w-full h-full flex items-center justify-center ${className ?? ''}`} ref={containerRef}>
+        <span className="text-sm opacity-60">图片读取失败</span>
+      </div>
+    );
+  }
+  if (!url) {
+    return (
+      <div className={`blob-image w-full h-full ${className ?? ''}`} ref={containerRef} aria-label="加载中">
+        <div className="blob-image-shimmer" />
+        <div className="blob-image-spinner" aria-hidden="true" />
+      </div>
+    );
+  }
+  return <img src={url} alt={alt ?? fileRef.name} className={`${className ?? ''}${blur ? ' blur-preview' : ''}`} loading="lazy" />;
 }

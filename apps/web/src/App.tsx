@@ -17,13 +17,11 @@ export default function App() {
       return {
         picker: new ElectronImportSourcePicker(),
         store: new ElectronLibraryStore(),
-        mode: 'Electron v0.5',
       };
     }
     return {
       picker: MemoryImportSourcePicker.fromDemo(),
       store: new MemoryLibraryStore(),
-      mode: 'Web demo v0.5',
     };
   }, []);
 
@@ -35,10 +33,5 @@ export default function App() {
       : createMemoryPersistentIndex(),
   );
 
-  return (
-    <>
-      <div className="mode-badge">{adapters.mode}</div>
-      <LibraryBrowser picker={adapters.picker} store={adapters.store} index={index} />
-    </>
-  );
+  return <LibraryBrowser picker={adapters.picker} store={adapters.store} index={index} />;
 }

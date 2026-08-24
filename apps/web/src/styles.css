@@ -1,351 +1,227 @@
-:root {
-  color-scheme: dark;
-  font-family: 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif;
-  background: #1e1e1e;
-  color: #e8e8e8;
+@import "tailwindcss";
+
+@plugin "daisyui" {
+  themes: light --default, dark --prefersdark;
 }
 
-* { box-sizing: border-box; }
+/* Scan classes used in shared UI packages too */
+@source "../../../packages/ui/src";
 
-html, body, #root { height: 100%; margin: 0; }
+:root {
+  font-family: 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif;
+}
 
-.library-browser {
-  display: grid;
-  grid-template-columns: 280px 1fr;
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  overflow: hidden;
+  background: var(--color-base-100);
+  color: var(--color-base-content);
+}
+
+/* The app shell must fill the viewport exactly, so the ONLY scroll region
+   is the main content area. Sidebar gets its own thin scrollbar only when needed. */
+.drawer {
   height: 100vh;
 }
-
-.mode-badge {
-  position: fixed;
-  top: 8px;
-  right: 12px;
-  z-index: 20;
-  background: #0e639c;
-  color: white;
-  padding: 3px 10px;
-  border-radius: 999px;
-  font-size: 12px;
-  pointer-events: none;
-}
-
-.sidebar {
-  background: #252526;
-  border-right: 1px solid #3c3c3c;
-  overflow-y: auto;
-  padding: 12px;
-}
-
-.toolbar {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 12px;
-  flex-wrap: wrap;
-}
-
-.tree-version {
-  font-size: 11px;
-  color: #7cb8e0;
-  margin-bottom: 8px;
-}
-
-button {
-  background: #0e639c;
-  color: white;
-  border: none;
-  border-radius: 4px;
-  padding: 6px 10px;
-  cursor: pointer;
-  font-size: 13px;
-}
-button:disabled { background: #444; cursor: not-allowed; }
-
-.folder-tree { list-style: none; margin: 0; padding: 0; }
-.folder-tree li { margin: 2px 0; }
-.folder-row {
-  display: flex;
-  align-items: center;
-  border-radius: 4px;
-}
-.folder-row.active { background: #094771; }
-.folder-row.active .folder-name { color: white; }
-.folder-row .chevron {
-  width: 22px;
-  min-width: 22px;
-  padding: 4px 0;
-  background: transparent;
-  color: #d0d0d0;
-  border: none;
-  cursor: pointer;
-  font-size: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.folder-row .chevron:disabled { cursor: default; color: #444; }
-
-.chevron-icon {
-  width: 0;
-  height: 0;
-  border-left: 5px solid #d0d0d0;
-  border-top: 4px solid transparent;
-  border-bottom: 4px solid transparent;
-  transition: transform 0.12s ease;
-}
-.chevron-icon.expanded {
-  transform: rotate(90deg);
-}
-.folder-row .folder-name {
-  flex: 1;
-  display: flex;
-  justify-content: space-between;
-  text-align: left;
-  background: transparent;
-  color: #d0d0d0;
-  padding: 5px 6px 5px 0;
-  border: none;
-  cursor: pointer;
-  border-radius: 4px;
-}
-.folder-row .folder-name:hover { background: rgba(255, 255, 255, 0.06); }
-.folder-tree .count { color: #9a9a9a; font-size: 12px; }
-
-.message { margin-top: 12px; font-size: 12px; color: #b8b8b8; }
-.message.export-progress { color: #7fd1ff; }
-
-.content { overflow-y: auto; display: flex; flex-direction: column; }
-
-.content-header {
-  padding: 12px 20px;
-  border-bottom: 1px solid #3c3c3c;
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  position: sticky;
-  top: 0;
-  background: #1e1e1e;
-}
-.content-header h2 { margin: 0; font-size: 20px; }
-.meta { display: flex; gap: 16px; color: #b0b0b0; font-size: 13px; }
-
-.grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-  gap: 16px;
-  padding: 20px;
-}
-
-.card {
-  margin: 0;
-  background: #2d2d2d;
-  border: 1px solid #3c3c3c;
-  border-radius: 8px;
+.drawer-content {
+  height: 100vh;
   overflow: hidden;
-  cursor: pointer;
-  transition: transform 0.12s ease, border-color 0.12s ease;
-}
-.card:hover { transform: translateY(-2px); border-color: #0e639c; }
-.thumb {
-  width: 100%;
-  height: 140px;
-  object-fit: cover;
-  display: block;
-  background: #1a1a1a;
-}
-.card figcaption {
-  padding: 6px 8px;
-  font-size: 12px;
-  color: #ccc;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.album-content {
-  padding: 20px;
-}
-
-.folder-section h3,
-.image-section h3 {
-  margin: 0 0 12px;
-  font-size: 14px;
-  color: #b0b0b0;
-}
-
-.folder-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-  gap: 16px;
-  margin-bottom: 24px;
-}
-
-.folder-card {
-  margin: 0;
-  background: #2d2d2d;
-  border: 1px solid #3c3c3c;
-  border-radius: 8px;
-  overflow: hidden;
-  cursor: pointer;
-  transition: transform 0.12s ease, border-color 0.12s ease;
-}
-.folder-card:hover { transform: translateY(-2px); border-color: #0e639c; }
-
-.folder-cover {
-  width: 100%;
-  height: 140px;
-  object-fit: cover;
-  display: block;
-  background: #1a1a1a;
-}
-.empty-folder-cover {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #777;
-  font-size: 12px;
-}
-.folder-card figcaption {
-  padding: 6px 8px;
-  font-size: 12px;
-  color: #ccc;
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-}
-.folder-card .count { color: #9a9a9a; font-size: 11px; white-space: nowrap; }
-
-.empty { padding: 40px; color: #777; text-align: center; }
-
-.viewer {
-  position: relative;
-  flex: 1;
-  background: #111;
-  min-height: 0;
-  overflow: hidden;
-}
-.viewer-toolbar {
-  position: absolute;
-  top: 12px;
-  left: 16px;
-  right: 16px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  z-index: 2;
-  flex-wrap: wrap;
-}
-.viewer-toolbar button {
-  background: rgba(255, 255, 255, 0.12);
-  color: #eee;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 6px;
-  padding: 5px 10px;
-  cursor: pointer;
-  font-size: 13px;
-}
-.viewer-toolbar button:hover {
-  background: rgba(255, 255, 255, 0.22);
-}
-.viewer-divider {
-  width: 1px;
-  height: 20px;
-  background: rgba(255, 255, 255, 0.3);
-  margin: 0 2px;
-}
-.viewer-canvas {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-  cursor: grab;
-}
-.viewer-canvas:active {
-  cursor: grabbing;
-}
-.viewer-image {
-  transform-origin: center;
-  user-select: none;
-  pointer-events: none;
-}
-.viewer-caption {
-  position: absolute;
-  bottom: 12px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: rgba(0, 0, 0, 0.6);
-  padding: 4px 12px;
-  border-radius: 4px;
-  font-size: 13px;
-  white-space: nowrap;
-  max-width: 90%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.breadcrumb {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex-wrap: wrap;
-  font-size: 13px;
-  margin-bottom: 6px;
-}
-.crumb-wrap { display: inline-flex; align-items: center; gap: 4px; }
-.crumb-sep { color: #777; }
-.crumb {
-  background: none;
-  border: none;
-  color: #7fd1ff;
-  cursor: pointer;
-  font-size: 13px;
-  padding: 2px 4px;
-  border-radius: 4px;
-}
-.crumb:hover { background: rgba(127, 209, 255, 0.15); }
-.crumb.current { color: #eee; cursor: default; }
-.crumb.current:hover { background: none; }
-
-.blob-image.loading {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #777;
-}
-
-.organize-preview {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.7);
   display: flex;
   flex-direction: column;
-  padding: 32px;
-  overflow: auto;
-  z-index: 10;
 }
-.organize-preview h3 { margin-top: 0; }
-.organize-preview table { border-collapse: collapse; width: 100%; }
-.organize-preview th, .organize-preview td {
-  border: 1px solid #555;
-  padding: 6px 10px;
-  text-align: left;
-  font-size: 13px;
-}
-.organize-preview button { align-self: flex-start; margin-top: 16px; }
-.organize-actions { display: flex; gap: 12px; align-items: center; }
-.organize-preview .organize-actions button { align-self: auto; }
-.organize-hint { font-size: 12px; color: #aaa; margin-top: 12px; }
 
-.report-summary {
+/* Thin, subtle scrollbars everywhere (dark + light aware). */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb, rgba(128, 128, 128, 0.35)) transparent;
+}
+
+/* The sidebar is still scrollable, but visually we hide its scrollbar so the
+   only visible scroll region is the main content area (no "multiple scrollbars"). */
+.drawer-side aside {
+  scrollbar-width: none;
+}
+.drawer-side aside::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb, rgba(128, 128, 128, 0.35));
+  border-radius: 999px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover, rgba(128, 128, 128, 0.55));
+}
+:root[data-theme="light"] {
+  --scrollbar-thumb: rgba(31, 41, 55, 0.22);
+  --scrollbar-thumb-hover: rgba(31, 41, 55, 0.35);
+}
+:root[data-theme="dark"] {
+  --scrollbar-thumb: rgba(255, 255, 255, 0.18);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.3);
+}
+:root {
+  --scrollbar-thumb: rgba(128, 128, 128, 0.35);
+  --scrollbar-thumb-hover: rgba(128, 128, 128, 0.55);
+}
+
+/* Single-line breadcrumbs: never wrap, never scroll. Earlier segments are
+   shrink-proof and capped only at a generous max; the current (last) segment
+   flexes to fill the remaining width and ellipsizes only when it must. */
+.breadcrumbs {
+  overflow-x: hidden;
+  white-space: nowrap;
+}
+.breadcrumbs > ul {
+  flex-wrap: nowrap;
+  white-space: nowrap;
+  min-width: 0;
+  width: 100%;
+}
+.breadcrumbs > ul > li {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.breadcrumbs > ul > li:not(:last-child) {
+  flex: 0 0 auto;
+  max-width: 220px;
+}
+.breadcrumbs > ul > li:last-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.breadcrumbs > ul > li > a,
+.breadcrumbs > ul > li > span {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+/* Folder / image galleries: responsive cards. */
+.folder-grid,
+.gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 1rem;
+}
+
+/* Viewer filmstrip thumbnails. */
+.filmstrip-thumb {
+  width: 72px;
+  height: 54px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 2px solid transparent;
+  cursor: pointer;
+  flex-shrink: 0;
   display: flex;
-  gap: 16px;
-  flex-wrap: wrap;
-  margin-bottom: 12px;
-  font-size: 14px;
-  color: #e0e0e0;
+  align-items: center;
+  justify-content: center;
+  background: #1c1c1c;
+  transition: border-color 0.12s ease;
+}
+.filmstrip-thumb:hover {
+  border-color: rgba(255, 255, 255, 0.4);
+}
+.filmstrip-thumb.active {
+  border-color: var(--color-primary, #4f8cff);
 }
 
-.import-report table td:first-child {
-  font-family: Consolas, 'Courier New', monospace;
-  font-size: 12px;
+/* Visible loading state for thumbnails / covers: shimmer sweep + spinner. */
+.blob-image {
+  position: relative;
+  overflow: hidden;
+}
+.blob-image-shimmer {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    100deg,
+    var(--color-base-300) 20%,
+    color-mix(in srgb, var(--color-base-content) 12%, var(--color-base-300)) 50%,
+    var(--color-base-300) 80%
+  );
+  background-size: 200% 100%;
+  animation: blob-shimmer 1.2s linear infinite;
+}
+@keyframes blob-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.blob-image-spinner {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.blob-image-spinner::before {
+  content: "";
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  border-top-color: var(--color-base-content);
+  opacity: 0.6;
+  animation: blob-spin 0.8s linear infinite;
+}
+@keyframes blob-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Blurred preview (per-album privacy setting). Scale up slightly so the
+   blur does not reveal a clear frame edge around the image. */
+.blur-preview {
+  filter: blur(18px);
+  transform: scale(1.06);
+}
+
+/* Folder tree chevron. */
+.chevron-btn {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: currentColor;
+  opacity: 0.5;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.12s ease, opacity 0.12s ease;
+}
+.chevron-btn:hover {
+  background: color-mix(in srgb, var(--color-base-content) 10%, transparent);
+  opacity: 1;
+}
+.chevron-btn:disabled {
+  cursor: default;
+}
+.chevron-btn.invisible {
+  visibility: hidden;
+}
+.chevron-icon {
+  display: block;
+  transition: transform 0.15s ease;
+}
+.chevron-btn.expanded .chevron-icon {
+  transform: rotate(90deg);
 }
