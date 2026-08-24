@@ -535,26 +535,6 @@ export function LibraryBrowser({
           )}
         </main>
 
-        {viewerImageId && viewerIndex >= 0 ? (
-          <Viewer
-            images={viewerImages}
-            index={viewerIndex}
-            store={store}
-            onClose={() => setViewerImageId(null)}
-            onNavigate={(id) => setViewerImageId(id)}
-            onSwitchSibling={handleViewerSwitchSibling}
-          />
-        ) : (
-          <div className="toast toast-end">
-            {message && <div className={`alert alert-${messageKind} shadow-lg`}><span>{message}</span></div>}
-            {exporting && exportProgress && (
-              <div className="alert alert-info shadow-lg">
-                <span>打包中… {exportProgress.done}/{exportProgress.total}</span>
-                <progress className="progress progress-info w-24" value={exportProgress.done} max={exportProgress.total || 1} />
-              </div>
-            )}
-          </div>
-        )}
       </div>
 
       <div className="drawer-side">
@@ -723,6 +703,27 @@ export function LibraryBrowser({
         </div>
       )}
       </div>
+
+      {viewerImageId && viewerIndex >= 0 ? (
+        <Viewer
+          images={viewerImages}
+          index={viewerIndex}
+          store={store}
+          onClose={() => setViewerImageId(null)}
+          onNavigate={(id) => setViewerImageId(id)}
+          onSwitchSibling={handleViewerSwitchSibling}
+        />
+      ) : (
+        <div className="toast toast-end">
+          {message && <div className={`alert alert-${messageKind} shadow-lg`}><span>{message}</span></div>}
+          {exporting && exportProgress && (
+            <div className="alert alert-info shadow-lg">
+              <span>打包中… {exportProgress.done}/{exportProgress.total}</span>
+              <progress className="progress progress-info w-24" value={exportProgress.done} max={exportProgress.total || 1} />
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -1013,7 +1014,7 @@ function Viewer({
   if (!image) return null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black flex flex-col">
+    <div className="fixed inset-0 z-[100] bg-black flex flex-col">
       <div className="flex items-center justify-between gap-3 p-4 text-white">
         <button className="btn btn-ghost btn-square text-white" onClick={onClose} aria-label="关闭">✕</button>
         <div className="flex items-center gap-3">
