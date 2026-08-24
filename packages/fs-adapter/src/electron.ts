@@ -6,6 +6,8 @@ export interface DesktopFsEntry {
   kind: 'folder' | 'file';
   size?: number;
   mtime?: number;
+  width?: number;
+  height?: number;
 }
 
 export interface KanituDesktopBridge {
@@ -14,6 +16,7 @@ export interface KanituDesktopBridge {
   pickSourceFolder(): Promise<DesktopFsEntry | null>;
   listSourceChildren(folder: DesktopFsEntry): Promise<DesktopFsEntry[]>;
   readSourceBlob(file: DesktopFsEntry): Promise<Uint8Array>;
+  releaseSource(): Promise<void>;
   getLibraryRoot(): Promise<DesktopFsEntry>;
   ensureLibraryRoot(): Promise<DesktopFsEntry>;
   createLibraryFolder(parent: DesktopFsEntry, name: string): Promise<DesktopFsEntry>;
@@ -30,6 +33,8 @@ export interface KanituDesktopBridge {
     totalImages?: number;
     exportedCount?: number;
   }>;
+  getLibraryFingerprint(): Promise<string>;
+  onExportProgress(callback: (progress: { done: number; total: number }) => void): () => void;
   minimizeWindow(): Promise<void>;
   maximizeWindowToggle(): Promise<boolean>;
   closeWindow(): Promise<void>;
@@ -48,7 +53,7 @@ function toFolderRef(entry: DesktopFsEntry): FolderRef {
 }
 
 function toFileRef(entry: DesktopFsEntry): FileRef {
-  return { id: entry.id, name: entry.name, kind: 'file', size: entry.size, mtime: entry.mtime };
+  return { id: entry.id, name: entry.name, kind: 'file', size: entry.size, mtime: entry.mtime, width: entry.width, height: entry.height };
 }
 
 function toEntry(ref: FolderRef | FileRef): DesktopFsEntry {
@@ -58,6 +63,8 @@ function toEntry(ref: FolderRef | FileRef): DesktopFsEntry {
     kind: ref.kind,
     size: ref.kind === 'file' ? ref.size : undefined,
     mtime: ref.kind === 'file' ? ref.mtime : undefined,
+    width: ref.kind === 'file' ? ref.width : undefined,
+    height: ref.kind === 'file' ? ref.height : undefined,
   };
 }
 
@@ -85,6 +92,10 @@ export class ElectronImportSourcePicker implements ImportSourcePicker {
   async readBlob(file: FileRef): Promise<Blob> {
     const data = await requireBridge().readSourceBlob(toEntry(file));
     return new Blob([data as BlobPart]);
+  }
+
+  async release(): Promise<void> {
+    await requireBridge().releaseSource();
   }
 }
 
@@ -128,6 +139,10 @@ export class ElectronLibraryStore implements LibraryStore {
     return new Blob([data as BlobPart]);
   }
 
+  async getLibraryFingerprint(): Promise<string> {
+    return requireBridge().getLibraryFingerprint();
+  }
+
   async getViewerUrl(file: FileRef): Promise<string> {
     // The main process serves the ORIGINAL file through the guarded kanitu-file protocol.
     return `kanitu-file://file/?p=${encodeURIComponent(file.id)}`;
@@ -147,15 +162,21 @@ export class ElectronLibraryStore implements LibraryStore {
   }
 
   async zipLibrary(targetRelPath: string, onProgress?: (done: number, total: number) => void): Promise<ZipExportResult> {
-    onProgress?.(0, 0);
-    const result = await requireBridge().exportZip(targetRelPath);
-    if (result.canceled) throw new Error('导出已取消。');
-    onProgress?.(result.exportedCount ?? 0, result.totalImages ?? 0);
-    return {
-      kind: 'file',
-      outputPath: result.outputPath,
-      totalImages: result.totalImages ?? 0,
-      exportedCount: result.exportedCount ?? 0,
-    };
+    const bridge = requireBridge();
+    const off = bridge.onExportProgress((progress) => onProgress?.(progress.done, progress.total));
+    try {
+      onProgress?.(0, 0);
+      const result = await bridge.exportZip(targetRelPath);
+      if (result.canceled) throw new Error('导出已取消。');
+      onProgress?.(result.exportedCount ?? 0, result.totalImages ?? 0);
+      return {
+        kind: 'file',
+        outputPath: result.outputPath,
+        totalImages: result.totalImages ?? 0,
+        exportedCount: result.exportedCount ?? 0,
+      };
+    } finally {
+      off();
+    }
   }
 }

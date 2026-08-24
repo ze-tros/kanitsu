@@ -200,6 +200,15 @@ export class MemoryLibraryStore implements LibraryStore {
     return { id: '/', name: '全部相册', kind: 'folder' };
   }
 
+  async getLibraryFingerprint(): Promise<string> {
+    const root = await this.getLibraryRoot();
+    const parts: string[] = [];
+    for await (const entry of this.listChildren(root)) {
+      parts.push(`${entry.kind}:${entry.name}`);
+    }
+    return parts.join('|');
+  }
+
   async ensureLibraryRoot(): Promise<FolderRef> {
     return this.getLibraryRoot();
   }

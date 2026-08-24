@@ -77,6 +77,33 @@ describe('applyOrganize / undoOrganize', () => {
     assert.ok(result.conflicts.some((c) => c.reason === 'target-exists'), 'conflict reported');
   });
 
+  test('undo skips a file when the original path is already occupied', async () => {
+    const store = await seedStore();
+    let snapshot = await scanLibrary(store);
+
+    const bindings = organizeByFolder(imagesOf(snapshot, snapshot.rootId));
+    const result = await applyOrganize(store, snapshot, '', bindings);
+    assert.equal(result.appliedCount, 3);
+
+    // Re-create the original p001 path with a newer file after organizing.
+    const root = await store.ensureLibraryRoot();
+    const manga = await store.createFolder(root, 'MangaA');
+    const vol = await store.createFolder(manga, 'Vol.01');
+    await store.writeBlob(vol, 'Attack_on_Titan_Vol.01_p001.jpg', new Blob(['new'], { type: 'image/svg+xml' }));
+
+    const undone = await undoOrganize(store, result.manifest);
+    assert.equal(undone.undone, 2, 'p001 must be skipped, the other two actions should restore');
+    assert.equal(undone.errors.length, 1);
+    assert.match(undone.errors[0]!, /目标已存在/);
+
+    snapshot = await scanLibrary(store);
+    const relPaths = Object.values(snapshot.images).map((image) => image.relPath);
+    assert.ok(
+      relPaths.includes('MangaA/Vol.01/Attack_on_Titan_Vol.01_p001.jpg'),
+      'the newly written file at the original path must survive',
+    );
+  });
+
   test('empty manifest undoes cleanly', async () => {
     const manifest: OrganizeManifest = { id: 'x', createdAt: 0, containerRelPath: '', actions: [] };
     const store = new MemoryLibraryStore();

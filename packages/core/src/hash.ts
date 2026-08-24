@@ -1,3 +1,5 @@
+import { normalizeRelPath } from './path';
+
 /** djb2 string hash used for stable local ids. */
 export function stableHash(input: string): string {
   let h = 5381;
@@ -12,5 +14,5 @@ export function folderIdFor(relPath: string): string {
 }
 
 export function imageIdFor(relPath: string): string {
-  return `img:${stableHash(relPath)}`;
+  return `img:${normalizeRelPath(relPath)}`;
 }

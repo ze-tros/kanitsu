@@ -33,6 +33,20 @@ describe('loadOrScan / rescanLibrary', () => {
     assert.deepEqual(second.images, first.images);
   });
 
+  test('loadOrScan rescans when the library fingerprint changes', async () => {
+    const store = await seedStore();
+    const index = createMemoryPersistentIndex();
+    await loadOrScan(store, index);
+
+    // Simulate an external top-level change: no explicit rescanLibrary call.
+    const root = await store.ensureLibraryRoot();
+    await store.createFolder(root, 'NewAlbum');
+
+    const snapshot = await loadOrScan(store, index);
+    const names = Object.values(snapshot.folders).map((f) => f.name);
+    assert.ok(names.includes('NewAlbum'), 'stale cache must be refreshed');
+  });
+
   test('rescanLibrary updates the cache after a mutation', async () => {
     const store = await seedStore();
     const index = createMemoryPersistentIndex();

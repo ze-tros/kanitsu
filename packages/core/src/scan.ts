@@ -5,6 +5,7 @@ import { extOf, isSupportedImage, joinRelPath } from './path';
 
 export async function scanLibrary(store: LibraryStore): Promise<LibrarySnapshot> {
   const root = await store.getLibraryRoot();
+  const fingerprint = await store.getLibraryFingerprint();
   const folders: Record<string, FolderNode> = {};
   const images: Record<string, ImageEntry> = {};
 
@@ -39,6 +40,8 @@ export async function scanLibrary(store: LibraryStore): Promise<LibrarySnapshot>
           ext: extOf(child.name),
           size: child.size ?? 0,
           mtime: child.mtime ?? 0,
+          width: child.width,
+          height: child.height,
           fileRefId: child.id,
         };
         images[image.id] = image;
@@ -54,7 +57,7 @@ export async function scanLibrary(store: LibraryStore): Promise<LibrarySnapshot>
 
   await walk(root, '', null);
   const rootId = folderIdFor('');
-  return { rootId, folders, images };
+  return { rootId, folders, images, fingerprint };
 }
 
 export function childrenOf(snapshot: LibrarySnapshot, folderId: string): FolderNode[] {

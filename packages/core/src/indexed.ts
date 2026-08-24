@@ -2,7 +2,7 @@ import type { FolderNode, ImageEntry, LibrarySnapshot } from './types';
 import type { PersistentIndex } from './library';
 
 const DB_NAME = 'kanitu-index';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const FOLDERS = 'folders';
 const IMAGES = 'images';
 const META = 'meta';
@@ -12,9 +12,14 @@ function openDb(): Promise<IDBDatabase> {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = () => {
       const db = req.result;
-      if (!db.objectStoreNames.contains(FOLDERS)) db.createObjectStore(FOLDERS, { keyPath: 'id' });
-      if (!db.objectStoreNames.contains(IMAGES)) db.createObjectStore(IMAGES, { keyPath: 'id' });
-      if (!db.objectStoreNames.contains(META)) db.createObjectStore(META);
+      // v2 changed image id generation; drop any stale index rows so the next
+      // load falls back to a fresh disk scan instead of mixing old ids.
+      for (const name of [FOLDERS, IMAGES, META]) {
+        if (db.objectStoreNames.contains(name)) db.deleteObjectStore(name);
+      }
+      db.createObjectStore(FOLDERS, { keyPath: 'id' });
+      db.createObjectStore(IMAGES, { keyPath: 'id' });
+      db.createObjectStore(META);
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error ?? new Error('indexedDB open failed'));

@@ -10,6 +10,8 @@ export interface FileRef {
   kind: 'file';
   size?: number;
   mtime?: number;
+  width?: number;
+  height?: number;
 }
 
 export type FsEntry = FolderRef | FileRef;
@@ -20,6 +22,8 @@ export interface ImportSourcePicker {
   pickFolder(): Promise<FolderRef>;
   listChildren(folder: FolderRef): AsyncGenerator<FsEntry, void, void>;
   readBlob(file: FileRef): Promise<Blob>;
+  /** Releases any platform-side source-folder grant held by this picker. */
+  release?(): Promise<void>;
 }
 
 /** Result of a zip export. `blob` is returned for in-app/download exports (web/memory);
@@ -35,6 +39,8 @@ export interface ZipExportResult {
 /** Manages the app-owned album library. */
 export interface LibraryStore {
   getLibraryRoot(): Promise<FolderRef>;
+  /** Lightweight fingerprint used to detect stale cached indexes. */
+  getLibraryFingerprint(): Promise<string>;
   ensureLibraryRoot(): Promise<FolderRef>;
   createFolder(parent: FolderRef, name: string): Promise<FolderRef>;
   createTopFolder(name: string): Promise<FolderRef>;

@@ -4,6 +4,7 @@ import { promises as fs, createWriteStream } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import archiver from 'archiver';
+import { imageSize } from 'image-size';
 
 const IMAGE_EXT = new Set(['jpg', 'jpeg', 'png', 'webp', 'avif', 'bmp', 'gif']);
 
@@ -69,7 +70,7 @@ function buildIndexJson(root: string, files: FsFileMeta[], exportedAt = Date.now
 }
 
 let libraryRoot = '';
-const allowedSourceRoots = new Set<string>();
+let allowedSourceRoot: string | null = null;
 
 interface DesktopFsEntry {
   id: string;
@@ -77,6 +78,8 @@ interface DesktopFsEntry {
   kind: 'folder' | 'file';
   size?: number;
   mtime?: number;
+  width?: number;
+  height?: number;
 }
 
 function getLibraryRoot(): string {
@@ -97,22 +100,48 @@ function assertInsideLibrary(p: string): void {
 }
 
 function assertSourceAllowed(p: string): void {
+  const root = allowedSourceRoot;
+  if (!root) throw new Error('当前没有已授权的源文件夹。');
   const target = path.resolve(p);
-  for (const root of allowedSourceRoots) {
-    const r = path.resolve(root);
-    if (target === r || target.startsWith(r + path.sep)) return;
-  }
+  const r = path.resolve(root);
+  if (target === r || target.startsWith(r + path.sep)) return;
   throw new Error(`路径不在所选源文件夹内：${p}`);
+}
+
+async function readImageDimensions(filePath: string): Promise<{ width: number; height: number } | undefined> {
+  if (!IMAGE_EXT.has(path.extname(filePath).toLowerCase().slice(1))) return undefined;
+  try {
+    const handle = await fs.open(filePath, 'r');
+    try {
+      const buffer = new Uint8Array(256 * 1024);
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+      const size = imageSize(buffer.subarray(0, bytesRead));
+      if (size.width && size.height) return { width: size.width, height: size.height };
+    } finally {
+      await handle.close();
+    }
+  } catch {
+    // fall through to nativeImage
+  }
+  const image = nativeImage.createFromPath(filePath);
+  if (!image.isEmpty()) {
+    const size = image.getSize();
+    if (size.width > 0 && size.height > 0) return { width: size.width, height: size.height };
+  }
+  return undefined;
 }
 
 async function entryFor(fullPath: string, name?: string): Promise<DesktopFsEntry> {
   const stat = await fs.stat(fullPath);
   const isDir = stat.isDirectory();
+  const dimensions = isDir ? undefined : await readImageDimensions(fullPath);
   return {
     id: fullPath,
     name: name ?? path.basename(fullPath),
     kind: isDir ? 'folder' : 'file',
-    ...(isDir ? {} : { size: stat.size, mtime: stat.mtimeMs }),
+    ...(isDir
+      ? {}
+      : { size: stat.size, mtime: stat.mtimeMs, width: dimensions?.width, height: dimensions?.height }),
   };
 }
 
@@ -122,11 +151,15 @@ async function listEntries(dirPath: string): Promise<DesktopFsEntry[]> {
   for (const dirent of dirents) {
     const full = path.join(dirPath, dirent.name);
     const stat = await fs.stat(full);
+    const isDir = dirent.isDirectory();
+    const dimensions = isDir ? undefined : await readImageDimensions(full);
     entries.push({
       id: full,
       name: dirent.name,
-      kind: dirent.isDirectory() ? 'folder' : 'file',
-      ...(dirent.isDirectory() ? {} : { size: stat.size, mtime: stat.mtimeMs }),
+      kind: isDir ? 'folder' : 'file',
+      ...(isDir
+        ? {}
+        : { size: stat.size, mtime: stat.mtimeMs, width: dimensions?.width, height: dimensions?.height }),
     });
   }
   return entries.sort((a, b) =>
@@ -170,8 +203,12 @@ function registerIpc(): void {
     });
     if (result.canceled || result.filePaths.length === 0) return null;
     const selected = path.resolve(result.filePaths[0]!);
-    allowedSourceRoots.add(selected);
+    allowedSourceRoot = selected;
     return entryFor(selected);
+  });
+
+  ipcMain.handle('import:releaseSource', async (): Promise<void> => {
+    allowedSourceRoot = null;
   });
 
   ipcMain.handle('import:listChildren', async (_event, folder: DesktopFsEntry): Promise<DesktopFsEntry[]> => {
@@ -196,6 +233,13 @@ function registerIpc(): void {
     const root = getLibraryRoot();
     await ensureDir(root);
     return entryFor(root, '全部相册');
+  });
+
+  ipcMain.handle('library:fingerprint', async (): Promise<string> => {
+    const root = getLibraryRoot();
+    await ensureDir(root);
+    const stat = await fs.stat(root);
+    return String(stat.mtimeMs);
   });
 
   ipcMain.handle('library:createFolder', async (_event, parent: DesktopFsEntry, name: string): Promise<DesktopFsEntry> => {
@@ -271,7 +315,7 @@ function registerIpc(): void {
 
   // Export a folder (or the whole library) as a ZIP. Streams to a user-chosen path
   // so large libraries don't buffer entirely in memory. Uses STORE (no compression).
-  ipcMain.handle('library:exportZip', async (_event, targetRelPath: string) => {
+  ipcMain.handle('library:exportZip', async (event, targetRelPath: string) => {
     const libraryRoot = getLibraryRoot();
     await ensureDir(libraryRoot);
     const norm = String(targetRelPath || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
@@ -298,9 +342,18 @@ function registerIpc(): void {
       archive.on('error', reject);
     });
 
+    archive.on('progress', (progress) => {
+      if (event.sender.isDestroyed()) return;
+      event.sender.send('library:exportProgress', {
+        done: Math.min(progress.entries.processed, totalImages),
+        total: totalImages,
+      });
+    });
+
     archive.pipe(output);
-    if (norm) archive.directory(sourceDir, baseName);
-    else archive.directory(sourceDir, false);
+    for (const file of files) {
+      archive.file(path.join(libraryRoot, file.relPath), { name: file.relPath });
+    }
     // Embed a portable index describing the exported folder tree + image metadata.
     archive.append(Buffer.from(buildIndexJson(indexRoot, files)), { name: 'index.json' });
     await archive.finalize();
@@ -367,7 +420,9 @@ function createWindow() {
   });
 
   // Avoid stale renderer bundles during development.
-  void win.webContents.session.clearCache();
+  if (process.env.VITE_DEV_SERVER_URL) {
+    void win.webContents.session.clearCache();
+  }
 
   if (process.env.VITE_DEV_SERVER_URL) {
     const url = process.env.VITE_DEV_SERVER_URL;

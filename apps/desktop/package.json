@@ -10,7 +10,8 @@
     "pack": "npm run build && electron-builder --win nsis"
   },
   "dependencies": {
-    "archiver": "^5.3.2"
+    "archiver": "^5.3.2",
+    "image-size": "^2.0.2"
   },
   "devDependencies": {
     "electron": "^33.2.0",

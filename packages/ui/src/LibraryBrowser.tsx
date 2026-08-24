@@ -685,6 +685,23 @@ export function LibraryBrowser({
                 </tbody>
               </table>
             </div>
+            {importReport.errors.length > 0 && (
+              <div className="mt-4">
+                <h4 className="text-sm font-semibold mb-2">失败项</h4>
+                <div className="overflow-x-auto">
+                  <table className="table table-sm">
+                    <thead><tr><th>错误</th></tr></thead>
+                    <tbody>
+                      {importReport.errors.map((error, idx) => (
+                        <tr key={`error-${idx}`}>
+                          <td className="font-mono text-xs text-error">{error}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
             <div className="modal-action"><button className="btn btn-ghost" onClick={() => setImportReport(null)}>关闭</button></div>
           </div>
         </div>

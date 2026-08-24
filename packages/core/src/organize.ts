@@ -1,6 +1,6 @@
 import type { FileRef, FolderRef, FsEntry, LibraryStore } from '../../fs-adapter/src/types';
 import type { LibrarySnapshot, OrganizeBinding } from './types';
-import { baseNameOfRelPath, joinRelPath, normalizeRelPath, parentRelPath } from './path';
+import { baseNameOfRelPath, canonicalizeRelPath, joinRelPath, normalizeRelPath, parentRelPath } from './path';
 import { stableHash } from './hash';
 
 /**
@@ -109,7 +109,7 @@ export async function applyOrganize(
 ): Promise<OrganizeResult> {
   const conflictMode = options.conflict ?? 'skip';
   const threshold = options.confidenceThreshold ?? 0.5;
-  const containerRel = normalizeRelPath(containerRelPath);
+  const containerRel = canonicalizeRelPath(containerRelPath);
 
   const actions: OrganizeAction[] = [];
   const conflicts: OrganizeConflict[] = [];
@@ -133,7 +133,18 @@ export async function applyOrganize(
       continue;
     }
 
-    const targetAbsRel = joinRelPath(containerRel, normalizeRelPath(binding.virtualPath));
+    let targetAbsRel: string;
+    try {
+      targetAbsRel = joinRelPath(containerRel, canonicalizeRelPath(binding.virtualPath));
+    } catch {
+      conflicts.push({
+        imageId: binding.imageId,
+        name: image.name,
+        targetRelPath: binding.virtualPath,
+        reason: 'move-failed',
+      });
+      continue;
+    }
     const targetFolderRel = parentRelPath(targetAbsRel);
     const targetName = baseNameOfRelPath(targetAbsRel);
 
@@ -213,6 +224,11 @@ export async function undoOrganize(
         continue;
       }
       const fromFolder = await ensureFolderRel(store, action.fromRelPath);
+      if (await findChildFile(store, fromFolder, action.fromName)) {
+        errors.push(`目标已存在，跳过还原：${action.fromRelPath}/${action.fromName}`);
+        onProgress?.(undone, total);
+        continue;
+      }
       await store.move(source, fromFolder, action.fromName);
       undone++;
     } catch (err) {

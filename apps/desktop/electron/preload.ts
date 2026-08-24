@@ -7,6 +7,8 @@ type DesktopEntry = {
   kind: 'folder' | 'file';
   size?: number;
   mtime?: number;
+  width?: number;
+  height?: number;
 };
 
 const bridge = {
@@ -16,6 +18,7 @@ const bridge = {
   listSourceChildren: (folder: DesktopEntry): Promise<DesktopEntry[]> =>
     ipcRenderer.invoke('import:listChildren', folder),
   readSourceBlob: (file: DesktopEntry): Promise<Uint8Array> => ipcRenderer.invoke('import:readBlob', file),
+  releaseSource: (): Promise<void> => ipcRenderer.invoke('import:releaseSource'),
   getLibraryRoot: (): Promise<DesktopEntry> => ipcRenderer.invoke('library:getRoot'),
   ensureLibraryRoot: (): Promise<DesktopEntry> => ipcRenderer.invoke('library:ensureRoot'),
   createLibraryFolder: (parent: DesktopEntry, name: string): Promise<DesktopEntry> =>
@@ -38,6 +41,12 @@ const bridge = {
     totalImages?: number;
     exportedCount?: number;
   }> => ipcRenderer.invoke('library:exportZip', targetRelPath),
+  getLibraryFingerprint: (): Promise<string> => ipcRenderer.invoke('library:fingerprint'),
+  onExportProgress: (callback: (progress: { done: number; total: number }) => void): (() => void) => {
+    const listener = (_event: unknown, progress: { done: number; total: number }) => callback(progress);
+    ipcRenderer.on('library:exportProgress', listener);
+    return () => ipcRenderer.removeListener('library:exportProgress', listener);
+  },
 
   minimizeWindow: (): Promise<void> => ipcRenderer.invoke('window:minimize'),
   maximizeWindowToggle: (): Promise<boolean> => ipcRenderer.invoke('window:maximize-toggle'),

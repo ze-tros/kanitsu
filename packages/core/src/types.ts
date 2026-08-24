@@ -74,6 +74,8 @@ export interface LibrarySnapshot {
   rootId: string;
   folders: Record<string, FolderNode>;
   images: Record<string, ImageEntry>;
+  /** Platform fingerprint captured at scan time; used to invalidate stale indexes. */
+  fingerprint?: string;
 }
 
 export interface SyncProvider {
