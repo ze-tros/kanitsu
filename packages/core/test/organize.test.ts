@@ -33,7 +33,7 @@ describe('applyOrganize / undoOrganize', () => {
     const result = await applyOrganize(store, snapshot, '', bindings);
 
     // The two volume files + the date file are high-confidence and should move;
-    // pic001.jpg falls to 'Unsorted' (0.2) and must stay in place.
+    // pic001.jpg falls to '未分类' (0.2) and must stay in place.
     assert.equal(result.appliedCount, 3, 'three structured files moved');
     assert.equal(result.conflicts.length, 0, 'no conflicts on clean seed');
     assert.equal(result.skippedLowConfidenceCount, 1, 'pic001.jpg skipped');

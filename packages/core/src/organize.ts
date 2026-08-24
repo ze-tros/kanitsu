@@ -208,7 +208,7 @@ export async function undoOrganize(
       const toFolder = await ensureFolderRel(store, action.toRelPath);
       const source = await findChildFile(store, toFolder, action.toName);
       if (!source) {
-        errors.push(`Cannot restore missing file: ${action.toRelPath}/${action.toName}`);
+        errors.push(`无法还原缺失的文件：${action.toRelPath}/${action.toName}`);
         onProgress?.(undone, total);
         continue;
       }
@@ -216,7 +216,7 @@ export async function undoOrganize(
       await store.move(source, fromFolder, action.fromName);
       undone++;
     } catch (err) {
-      errors.push(`Undo failed for ${action.toName}: ${String(err)}`);
+      errors.push(`撤销失败：${action.toName}：${String(err)}`);
     }
     onProgress?.(undone, total);
   }

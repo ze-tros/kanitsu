@@ -63,7 +63,7 @@ function toEntry(ref: FolderRef | FileRef): DesktopFsEntry {
 
 function requireBridge(): KanituDesktopBridge {
   const bridge = window.kanituDesktop;
-  if (!bridge) throw new Error('kanituDesktop bridge is not available. Run this code inside the Electron shell.');
+  if (!bridge) throw new Error('kanituDesktop 桥未就绪，请在 Electron 环境中运行。');
   return bridge;
 }
 
@@ -71,7 +71,7 @@ function requireBridge(): KanituDesktopBridge {
 export class ElectronImportSourcePicker implements ImportSourcePicker {
   async pickFolder(): Promise<FolderRef> {
     const entry = await requireBridge().pickSourceFolder();
-    if (!entry) throw new Error('Folder selection canceled');
+    if (!entry) throw new Error('已取消选择文件夹。');
     return toFolderRef(entry);
   }
 
@@ -149,7 +149,7 @@ export class ElectronLibraryStore implements LibraryStore {
   async zipLibrary(targetRelPath: string, onProgress?: (done: number, total: number) => void): Promise<ZipExportResult> {
     onProgress?.(0, 0);
     const result = await requireBridge().exportZip(targetRelPath);
-    if (result.canceled) throw new Error('Export canceled');
+    if (result.canceled) throw new Error('导出已取消。');
     onProgress?.(result.exportedCount ?? 0, result.totalImages ?? 0);
     return {
       kind: 'file',

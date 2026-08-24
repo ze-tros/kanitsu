@@ -36,6 +36,19 @@ function skippedReasonLabel(reason: ImportSkippedFile['reason']): string {
   }
 }
 
+function conflictReasonLabel(reason: string): string {
+  switch (reason) {
+    case 'source-missing':
+      return '源文件缺失';
+    case 'target-exists':
+      return '目标已存在';
+    case 'move-failed':
+      return '移动失败';
+    default:
+      return reason;
+  }
+}
+
 function downloadBlob(blob: Blob, fileName: string): void {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -164,8 +177,8 @@ export function LibraryBrowser({
   const rootFolder = snapshot?.folders[snapshot.rootId] ?? null;
   const runtimeLabel =
     (window as { kanituDesktop?: { platform?: string } }).kanituDesktop?.platform === 'electron'
-      ? 'Electron v0.5 · daisyUI 5'
-      : 'Web demo v0.5 · daisyUI 5';
+      ? 'Electron 模式 v0.5 · daisyUI 5'
+      : 'Web 模式 v0.5 · daisyUI 5';
   const isRootSelected = !selectedFolderId || selectedFolderId === snapshot?.rootId;
   const effectiveBlur = useMemo(
     () => (selectedFolder ? isPathBlurred(selectedFolder.relPath, blurredPaths) : false),
@@ -327,7 +340,7 @@ export function LibraryBrowser({
       });
       setExportProgress(null);
       if (result.kind === 'blob' && result.blob) {
-        const base = selectedFolder.relPath ? selectedFolder.relPath.split('/').pop() : 'albums';
+        const base = selectedFolder.relPath ? selectedFolder.relPath.split('/').pop() : '相册';
         downloadBlob(result.blob, `${base}.zip`);
         notify(`已导出 ${result.exportedCount} 张图片为 ZIP。`);
       } else if (result.outputPath) {
@@ -394,7 +407,7 @@ export function LibraryBrowser({
             <label htmlFor="app-drawer" className="btn btn-square btn-ghost" aria-label="打开侧边栏">☰</label>
           </div>
           <div className="flex-1 min-w-0">
-            <nav className="breadcrumbs text-sm" aria-label="Breadcrumb">
+            <nav className="breadcrumbs text-sm" aria-label="面包屑">
               <ul>
                 {crumbs.map((crumb, i) => (
                   <li key={crumb.id} className={i === crumbs.length - 1 ? 'font-semibold' : ''}>
@@ -416,7 +429,7 @@ export function LibraryBrowser({
         <div className="bg-base-100 px-5 lg:px-8 py-3 flex items-end justify-between gap-3">
           <div className="min-w-0">
             <div className="min-w-0">
-              <h2 className="text-2xl font-bold min-w-0">{selectedFolder?.name ?? '相册'}</h2>
+              <h2 className="text-2xl font-bold min-w-0">{selectedFolder?.name ?? '全部相册'}</h2>
               {(selectedFolder || cover) && (
                 <div className="mt-1 text-sm opacity-70 flex flex-wrap gap-x-4 gap-y-1">
                   {selectedFolder && (
@@ -654,7 +667,7 @@ export function LibraryBrowser({
                       <tr key={`${c.imageId}-${i}`}>
                         <td>{c.name}</td>
                         <td>{c.targetRelPath}</td>
-                        <td>{c.reason}</td>
+                        <td>{conflictReasonLabel(c.reason)}</td>
                       </tr>
                     ))}
                   </tbody>

@@ -28,9 +28,9 @@ async function resolveFolder(store: LibraryStore, relPath: string): Promise<Fold
  */
 export async function deleteLibraryFolder(store: LibraryStore, relPath: string): Promise<string> {
   const normalized = normalizeRelPath(relPath);
-  if (!normalized) throw new Error('Cannot delete the library root.');
+  if (!normalized) throw new Error('不能删除库根目录。');
   const folder = await resolveFolder(store, normalized);
-  if (!folder) throw new Error(`Folder not found: ${normalized}`);
+  if (!folder) throw new Error(`未找到文件夹：${normalized}`);
   await store.remove(folder);
   return normalized;
 }

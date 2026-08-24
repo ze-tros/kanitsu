@@ -31,7 +31,17 @@ export function createMemoryPersistentIndex(): PersistentIndex {
 /** Load the cached index if present, otherwise scan the library and persist it. */
 export async function loadOrScan(store: LibraryStore, index: PersistentIndex): Promise<LibrarySnapshot> {
   const cached = await index.load();
-  if (cached) return cached;
+  if (cached) {
+    // The library root display name is live metadata (it can change, e.g. through
+    // i18n/localization), so never trust the cached root name: refresh it from the
+    // store before returning, instead of doing a full re-scan just for a name change.
+    const currentRoot = await store.getLibraryRoot();
+    const rootNode = cached.folders[cached.rootId];
+    if (rootNode) {
+      rootNode.name = currentRoot.name;
+      return cached;
+    }
+  }
   const snapshot = await scanLibrary(store);
   await index.save(snapshot);
   return snapshot;

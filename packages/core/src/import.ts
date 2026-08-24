@@ -26,7 +26,7 @@ export async function importFolder(
   };
 
   const sourceRoot = await picker.pickFolder();
-  task.sourceFolderName = sourceRoot.name || 'Untitled album';
+  task.sourceFolderName = sourceRoot.name || '未命名相册';
   options.onProgress?.({ status: 'scanning', scanned: 0, copied: 0, skipped: 0, current: sourceRoot.name });
 
   await store.ensureLibraryRoot();

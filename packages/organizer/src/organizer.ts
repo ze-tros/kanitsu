@@ -17,7 +17,7 @@ const DATE_RE = /^(\d{4})[-_.\u5e74](\d{1,2})(?:[-_.\u6708](\d{1,2}))?\u65e5?[_ 
 
 export function parseImageName(fileName: string): ParsedName {
   const base = fileName.replace(/\.[^.]+$/, '').trim();
-  if (!base) return { virtualPath: `Unsorted/${fileName}`, confidence: 0, rule: 'empty' };
+  if (!base) return { virtualPath: `未分类/${fileName}`, confidence: 0, rule: 'empty' };
 
   // 1. Explicit hierarchy separators (fullwidth slash, backslash, raquo, etc.)
   if (FULLWIDTH_SEP.test(base)) {
@@ -62,7 +62,7 @@ export function parseImageName(fileName: string): ParsedName {
   }
 
   // 6. Conservative fallback
-  return { virtualPath: `Unsorted/${fileName}`, confidence: 0.2, rule: 'fallback' };
+  return { virtualPath: `未分类/${fileName}`, confidence: 0.2, rule: 'fallback' };
 }
 
 function extSuffix(fileName: string): string {

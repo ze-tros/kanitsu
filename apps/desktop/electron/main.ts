@@ -92,7 +92,7 @@ function assertInsideLibrary(p: string): void {
   const root = path.resolve(getLibraryRoot());
   const target = path.resolve(p);
   if (target !== root && !target.startsWith(root + path.sep)) {
-    throw new Error(`Path is outside library: ${p}`);
+    throw new Error(`路径不在图库内：${p}`);
   }
 }
 
@@ -102,7 +102,7 @@ function assertSourceAllowed(p: string): void {
     const r = path.resolve(root);
     if (target === r || target.startsWith(r + path.sep)) return;
   }
-  throw new Error(`Path is outside selected source folder: ${p}`);
+  throw new Error(`路径不在所选源文件夹内：${p}`);
 }
 
 async function entryFor(fullPath: string, name?: string): Promise<DesktopFsEntry> {
@@ -165,7 +165,7 @@ function registerIpc(): void {
   // Source picker (import only)
   ipcMain.handle('import:pickFolder', async (): Promise<DesktopFsEntry | null> => {
     const result = await dialog.showOpenDialog({
-      title: 'Select a folder to import',
+      title: '选择要导入的文件夹',
       properties: ['openDirectory'],
     });
     if (result.canceled || result.filePaths.length === 0) return null;
@@ -189,13 +189,13 @@ function registerIpc(): void {
   ipcMain.handle('library:getRoot', async (): Promise<DesktopFsEntry> => {
     const root = getLibraryRoot();
     await ensureDir(root);
-    return entryFor(root, 'Albums');
+    return entryFor(root, '全部相册');
   });
 
   ipcMain.handle('library:ensureRoot', async (): Promise<DesktopFsEntry> => {
     const root = getLibraryRoot();
     await ensureDir(root);
-    return entryFor(root, 'Albums');
+    return entryFor(root, '全部相册');
   });
 
   ipcMain.handle('library:createFolder', async (_event, parent: DesktopFsEntry, name: string): Promise<DesktopFsEntry> => {
@@ -230,7 +230,7 @@ function registerIpc(): void {
     // This avoids allocating a giant JS Buffer for very large photos.
     const image = nativeImage.createFromPath(file.id);
     if (image.isEmpty()) {
-      throw new Error(`Cannot decode image: ${file.id}`);
+      throw new Error(`无法解码图片：${file.id}`);
     }
     const size = image.getSize();
     const maxDim = 2560;
@@ -245,7 +245,7 @@ function registerIpc(): void {
     assertInsideLibrary(file.id);
     const image = nativeImage.createFromPath(file.id);
     if (image.isEmpty()) {
-      throw new Error(`Cannot decode image: ${file.id}`);
+      throw new Error(`无法解码图片：${file.id}`);
     }
     const targetSize = Math.max(64, Math.min(maxSize || 512, 1024));
     const resized = image.resize({ width: targetSize, height: targetSize, quality: 'good' });
@@ -273,10 +273,10 @@ function registerIpc(): void {
     const norm = String(targetRelPath || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
     const sourceDir = norm ? path.join(libraryRoot, ...norm.split('/')) : libraryRoot;
     assertInsideLibrary(sourceDir);
-    const baseName = norm ? path.basename(norm) : 'albums';
+    const baseName = norm ? path.basename(norm) : '相册';
 
     const { canceled, filePath } = await dialog.showSaveDialog({
-      title: 'Export album as ZIP',
+      title: '导出相册为 ZIP',
       defaultPath: path.join(app.getPath('desktop'), `${baseName}.zip`),
       filters: [{ name: 'ZIP', extensions: ['zip'] }],
     });
@@ -314,16 +314,16 @@ function registerIpc(): void {
 function registerViewerProtocol(): void {
   protocol.handle('kanitu-file', async (request) => {
     const filePath = new URL(request.url).searchParams.get('p');
-    if (!filePath) return new Response('Bad request', { status: 400 });
+    if (!filePath) return new Response('错误请求', { status: 400 });
     try {
       assertInsideLibrary(filePath);
     } catch {
-      return new Response('Forbidden', { status: 403 });
+      return new Response('禁止访问', { status: 403 });
     }
     try {
       return await net.fetch(pathToFileURL(filePath).toString());
     } catch {
-      return new Response('Not found', { status: 404 });
+      return new Response('未找到', { status: 404 });
     }
   });
 }

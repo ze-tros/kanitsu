@@ -179,7 +179,7 @@ export class MemoryImportSourcePicker implements ImportSourcePicker {
   }
 
   async pickFolder(): Promise<FolderRef> {
-    return { id: '/', name: this.root.name || 'Demo Album', kind: 'folder' };
+    return { id: '/', name: this.root.name || '演示相册', kind: 'folder' };
   }
 
   async *listChildren(folder: FolderRef): AsyncGenerator<FsEntry, void, void> {
@@ -188,7 +188,7 @@ export class MemoryImportSourcePicker implements ImportSourcePicker {
 
   async readBlob(file: FileRef): Promise<Blob> {
     const node = this.tree.get(file.id);
-    if (!node || node.kind !== 'file' || !node.blob) throw new Error(`Missing source file: ${file.id}`);
+    if (!node || node.kind !== 'file' || !node.blob) throw new Error(`缺少源文件：${file.id}`);
     return node.blob;
   }
 }
@@ -197,7 +197,7 @@ export class MemoryLibraryStore implements LibraryStore {
   private readonly tree = new MemoryTree();
 
   async getLibraryRoot(): Promise<FolderRef> {
-    return { id: '/', name: 'Albums', kind: 'folder' };
+    return { id: '/', name: '全部相册', kind: 'folder' };
   }
 
   async ensureLibraryRoot(): Promise<FolderRef> {
@@ -210,7 +210,7 @@ export class MemoryLibraryStore implements LibraryStore {
   }
 
   async createTopFolder(name: string): Promise<FolderRef> {
-    const root: FolderRef = { id: '/', name: 'Albums', kind: 'folder' };
+    const root: FolderRef = { id: '/', name: '全部相册', kind: 'folder' };
     const node = this.tree.createUniqueFolder(root, name);
     return { id: joinMemPath('/', node.name), name: node.name, kind: 'folder' };
   }
@@ -226,7 +226,7 @@ export class MemoryLibraryStore implements LibraryStore {
 
   async readBlob(file: FileRef): Promise<Blob> {
     const node = this.tree.get(file.id);
-    if (!node || node.kind !== 'file' || !node.blob) throw new Error(`Missing library file: ${file.id}`);
+    if (!node || node.kind !== 'file' || !node.blob) throw new Error(`缺少图库文件：${file.id}`);
     return node.blob;
   }
 
@@ -245,7 +245,7 @@ export class MemoryLibraryStore implements LibraryStore {
 
   async move(entry: FsEntry, toFolder: FolderRef, newName?: string): Promise<FsEntry> {
     const node = this.tree.move(entry.id, toFolder, newName);
-    if (!node) throw new Error(`Move failed: ${entry.id}`);
+    if (!node) throw new Error(`移动失败：${entry.id}`);
     const newId = joinMemPath(toFolder.id, node.name);
     return node.kind === 'folder' ? toFolderRef(node, newId) : toFileRef(node, newId);
   }
@@ -258,7 +258,7 @@ export class MemoryLibraryStore implements LibraryStore {
     const norm = normalizeRel(targetRelPath || '');
     const targetId = norm ? `/${norm}` : '/';
     const targetNode = this.tree.get(targetId) ?? this.tree.root;
-    const targetFolder: FolderRef = { id: targetId, name: targetNode.name || 'Albums', kind: 'folder' };
+    const targetFolder: FolderRef = { id: targetId, name: targetNode.name || '全部相册', kind: 'folder' };
     const base = norm ? lastSegment(norm) : '';
 
     const entries: ZipEntry[] = [];
