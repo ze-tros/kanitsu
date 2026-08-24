@@ -248,7 +248,11 @@ function registerIpc(): void {
       throw new Error(`无法解码图片：${file.id}`);
     }
     const targetSize = Math.max(64, Math.min(maxSize || 512, 1024));
-    const resized = image.resize({ width: targetSize, height: targetSize, quality: 'good' });
+    const size = image.getSize();
+    const scale = Math.min(1, targetSize / Math.max(size.width, size.height));
+    const width = Math.max(1, Math.round(size.width * scale));
+    const height = Math.max(1, Math.round(size.height * scale));
+    const resized = image.resize({ width, height, quality: 'good' });
     return resized.toJPEG(80);
   });
 
