@@ -669,22 +669,21 @@ export function LibraryBrowser({
               <span>复制：{importReport.copiedImageCount}</span>
               <span>跳过：{importReport.skippedCount}</span>
             </div>
-            <div className="overflow-x-auto">
-              <table className="table table-sm">
-                <thead><tr><th>跳过的文件</th><th>原因</th></tr></thead>
-                <tbody>
-                  {importReport.skippedFiles.map((item, idx) => (
-                    <tr key={`${item.path}-${idx}`}>
-                      <td className="font-mono text-xs">{item.path}</td>
-                      <td>{skippedReasonLabel(item.reason)}</td>
-                    </tr>
-                  ))}
-                  {importReport.skippedFiles.length === 0 && (
-                    <tr><td colSpan={2} className="opacity-60">没有跳过文件</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+            {importReport.skippedFiles.length > 0 && (
+              <div className="overflow-x-auto">
+                <table className="table table-sm">
+                  <thead><tr><th>跳过的文件</th><th>原因</th></tr></thead>
+                  <tbody>
+                    {importReport.skippedFiles.map((item, idx) => (
+                      <tr key={`${item.path}-${idx}`}>
+                        <td className="font-mono text-xs">{item.path}</td>
+                        <td>{skippedReasonLabel(item.reason)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
             {importReport.errors.length > 0 && (
               <div className="mt-4">
                 <h4 className="text-sm font-semibold mb-2">失败项</h4>
