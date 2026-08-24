@@ -1014,7 +1014,7 @@ function Viewer({
   if (!image) return null;
 
   return (
-    <div className="fixed inset-0 z-[100] bg-black flex flex-col">
+    <div className="viewer-overlay fixed inset-0 z-[100] bg-black flex flex-col">
       <div className="flex items-center justify-between gap-3 p-4 text-white">
         <button className="btn btn-ghost btn-square text-white" onClick={onClose} aria-label="关闭">✕</button>
         <div className="flex items-center gap-3">

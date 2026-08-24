@@ -37,6 +37,13 @@ body {
   -webkit-app-region: no-drag;
 }
 
+/* The full-screen viewer overlays the custom title bar (a drag region). Make it
+   non-draggable so its top toolbar buttons stay clickable inside the Electron
+   drag band. Without this, the native drag region intercepts clicks in the top. */
+.viewer-overlay {
+  -webkit-app-region: no-drag;
+}
+
 /* When the app shell wraps the drawer (custom title bar), the drawer and its
    content must fill only the space below the title bar instead of 100vh. */
 .app-shell {
