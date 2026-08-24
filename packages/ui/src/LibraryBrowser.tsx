@@ -155,8 +155,9 @@ export function LibraryBrowser({
     [],
   );
 
-  // Move selection among the siblings of the current folder (same level).
-  const navigateSibling = useCallback(
+  // In the viewer: switch to a sibling folder (same level) and show its first image.
+  // The directory tree / grid view has no keyboard shortcuts.
+  const handleViewerSwitchSibling = useCallback(
     (dir: number) => {
       if (!snapshot) return;
       const currentId = selectedFolderId || snapshot.rootId;
@@ -167,36 +168,11 @@ export function LibraryBrowser({
       const index = siblings.findIndex((f) => f.id === currentId);
       const next = siblings[(index + dir + siblings.length) % siblings.length]!;
       handleSelectFolder(next);
+      const first = directImagesOf(snapshot, next.id)[0];
+      if (first) setViewerImageId(first.id);
     },
     [snapshot, selectedFolderId, handleSelectFolder],
   );
-
-  // Go up to the parent folder.
-  const goToParent = useCallback(() => {
-    if (!snapshot) return;
-    const currentId = selectedFolderId || snapshot.rootId;
-    const parentId = snapshot.folders[currentId]?.parentId;
-    if (parentId) setSelectedFolderId(parentId);
-  }, [snapshot, selectedFolderId]);
-
-  // Browser-level keyboard navigation (ignored while the viewer is open).
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (viewerImageId) return;
-      if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        navigateSibling(-1);
-      } else if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        navigateSibling(1);
-      } else if (e.key === 'Escape') {
-        e.preventDefault();
-        goToParent();
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [viewerImageId, navigateSibling, goToParent]);
 
   const handleAdd = async () => {
     setBusy(true);
@@ -424,6 +400,7 @@ export function LibraryBrowser({
             store={store}
             onClose={() => setViewerImageId(null)}
             onNavigate={(id) => setViewerImageId(id)}
+            onSwitchSibling={handleViewerSwitchSibling}
           />
         ) : (
           <div className="album-content">
@@ -672,12 +649,14 @@ function Viewer({
   store,
   onClose,
   onNavigate,
+  onSwitchSibling,
 }: {
   images: ImageEntry[];
   index: number;
   store: LibraryStore;
   onClose: () => void;
   onNavigate: (id: string) => void;
+  onSwitchSibling: (dir: number) => void;
 }) {
   const image = images[index];
   const [viewerUrl, setViewerUrl] = useState<string | null>(null);
@@ -792,9 +771,9 @@ function Viewer({
       } else if (e.key === 'ArrowRight') {
         onNavigate(images[(index + 1) % images.length]!.id);
       } else if (e.key === 'ArrowUp') {
-        onNavigate(images[(index - 1 + images.length) % images.length]!.id);
+        onSwitchSibling(-1);
       } else if (e.key === 'ArrowDown') {
-        onNavigate(images[(index + 1) % images.length]!.id);
+        onSwitchSibling(1);
       } else if (e.key === '+' || e.key === '=') {
         zoomBy(1.25);
       } else if (e.key === '-') {
@@ -807,7 +786,7 @@ function Viewer({
         rotateCW();
       }
     },
-    [images, index, onClose, onNavigate, zoomBy, fit, percent, rotateCW],
+    [images, index, onClose, onNavigate, onSwitchSibling, zoomBy, fit, percent, rotateCW],
   );
   useEffect(() => {
     window.addEventListener('keydown', onKey);
