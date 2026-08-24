@@ -287,6 +287,11 @@ function registerIpc(): void {
 
   ipcMain.handle('library:readThumbnail', async (_event, file: DesktopFsEntry, maxSize: number): Promise<Uint8Array> => {
     assertInsideLibrary(file.id);
+    // Electron's nativeImage cannot decode animated GIFs on Windows. Return the
+    // original GIF bytes for thumbnails instead of failing; GIFs are usually small.
+    if (path.extname(file.id).toLowerCase() === '.gif') {
+      return await fs.readFile(file.id);
+    }
     const image = nativeImage.createFromPath(file.id);
     if (image.isEmpty()) {
       throw new Error(`无法解码图片：${file.id}`);

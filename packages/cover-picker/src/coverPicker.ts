@@ -8,6 +8,8 @@ export interface CoverScore {
 
 export interface CoverOptions {
   now?: number;
+  /** Explicitly pinned cover image id. When present and valid it always wins. */
+  preferredId?: string;
 }
 
 const NAME_PRIORITY = [
@@ -56,6 +58,8 @@ function qualityScore(image: ImageEntry): number {
 /** Picks a smart cover for a folder. With <10k images a full scan is fine. */
 export function pickCover(images: ImageEntry[], options: CoverOptions = {}): CoverScore | null {
   if (images.length === 0) return null;
+  const preferred = images.find((image) => image.id === options.preferredId);
+  if (preferred) return { imageId: preferred.id, score: 2, reason: 'user-pinned' };
   const now = options.now ?? Date.now();
   const maxAgeMs = 365 * 24 * 60 * 60 * 1000;
   let best: CoverScore | null = null;

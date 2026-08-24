@@ -1,12 +1,17 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import {
   applyOrganize,
   childrenOf,
+  createSubfolder,
+  deleteImage,
   deleteLibraryFolder,
   directImagesOf,
   imagesOf,
   importFolder,
+  joinRelPath,
   loadOrScan,
+  renameFolder,
+  renameImage,
   rescanLibrary,
   undoOrganize,
   type FolderNode,
@@ -21,9 +26,15 @@ import {
 } from '../../core/src/index';
 import type { ImportSourcePicker, LibraryStore } from '../../fs-adapter/src/types';
 import type { KanituDesktopBridge } from '../../fs-adapter/src/electron';
-import { organizeByFolder } from '../../organizer/src/index';
+import { organizeByFolder, type CustomOrganizeRule } from '../../organizer/src/index';
 import { pickCover } from '../../cover-picker/src/index';
 import { BlobImage } from './BlobImage';
+import { ContextMenu, type ContextMenuItem, type ContextMenuModel } from './ContextMenu';
+import { loadCustomRules, saveCustomRules } from './OrganizeRulesModal';
+import { OrganizePreview } from './OrganizePreview';
+import { FolderUpIcon, HomeIcon, NavButton, NavIconButton, PanelLeftIcon, SettingsIcon } from './NavButton';
+import { SidebarResizeHandle } from './SidebarResizeHandle';
+import { SettingsPage } from './SettingsPage';
 
 function skippedReasonLabel(reason: ImportSkippedFile['reason']): string {
   switch (reason) {
@@ -61,6 +72,24 @@ function downloadBlob(blob: Blob, fileName: string): void {
 }
 
 const BLUR_STORAGE_KEY = 'kanitu-blurred-albums';
+const PINNED_COVERS_KEY = 'kanitu-pinned-covers';
+
+function loadPinnedCovers(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem(PINNED_COVERS_KEY);
+    return raw ? (JSON.parse(raw) as Record<string, string>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function savePinnedCovers(covers: Record<string, string>): void {
+  try {
+    localStorage.setItem(PINNED_COVERS_KEY, JSON.stringify(covers));
+  } catch {
+    // ignore storage errors
+  }
+}
 
 function loadBlurredPaths(): ReadonlySet<string> {
   try {
@@ -110,13 +139,32 @@ export function LibraryBrowser({
   const [organizeResult, setOrganizeResult] = useState<OrganizeResult | null>(null);
   const [lastManifest, setLastManifest] = useState<OrganizeManifest | null>(null);
   const [organizing, setOrganizing] = useState(false);
+  const [organizeProgress, setOrganizeProgress] = useState<{ done: number; total: number } | null>(null);
   const [exporting, setExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState<{ done: number; total: number } | null>(null);
   const [importReport, setImportReport] = useState<ImportTask | null>(null);
   const [expandedFolders, setExpandedFolders] = useState<ReadonlySet<string>>(new Set());
-  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<{ kind: 'folder'; folder: FolderNode } | { kind: 'image'; image: ImageEntry } | null>(null);
+  const [promptState, setPromptState] = useState<{
+    kind: 'rename-image' | 'rename-folder' | 'create-folder';
+    title: string;
+    label: string;
+    initialValue: string;
+    image?: ImageEntry;
+    folder?: FolderNode;
+  } | null>(null);
+  const [promptValue, setPromptValue] = useState('');
   const [blurredPaths, setBlurredPaths] = useState<ReadonlySet<string>>(() => loadBlurredPaths());
   const [searchQuery, setSearchQuery] = useState('');
+  const [sidebarHidden, setSidebarHidden] = useState(() => localStorage.getItem('kanitu-sidebar-hidden') === '1');
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    const value = Number(localStorage.getItem('kanitu-sidebar-width'));
+    return Number.isFinite(value) && value >= 200 && value <= 480 ? value : 288;
+  });
+  const [customRules, setCustomRules] = useState<CustomOrganizeRule[]>(() => loadCustomRules());
+  const [showSettings, setShowSettings] = useState(false);
+  const [contextMenu, setContextMenu] = useState<ContextMenuModel | null>(null);
+  const [pinnedCovers, setPinnedCovers] = useState<Record<string, string>>(() => loadPinnedCovers());
 
   const applySnapshot = useCallback((next: LibrarySnapshot) => {
     setSnapshot(next);
@@ -128,6 +176,23 @@ export function LibraryBrowser({
     setMessage(text);
     setMessageKind(detected);
   }, []);
+
+  // Persist sidebar appearance across sessions.
+  useEffect(() => {
+    try {
+      localStorage.setItem('kanitu-sidebar-hidden', sidebarHidden ? '1' : '0');
+    } catch {
+      // Ignore storage errors.
+    }
+  }, [sidebarHidden]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('kanitu-sidebar-width', String(sidebarWidth));
+    } catch {
+      // Ignore storage errors.
+    }
+  }, [sidebarWidth]);
 
   // Startup: load the cached index (no full re-scan). Fallback scans + persists.
   useEffect(() => {
@@ -169,12 +234,13 @@ export function LibraryBrowser({
     if (!snapshot) return [];
     return childFolders.map((child) => ({
       folder: child,
-      cover: pickCover(imagesOf(snapshot, child.id)),
+      cover: pickCover(imagesOf(snapshot, child.id), { preferredId: pinnedCovers[child.id] }),
     }));
-  }, [snapshot, childFolders]);
+  }, [snapshot, childFolders, pinnedCovers]);
 
   const selectedFolder = snapshot?.folders[selectedFolderId || snapshot?.rootId || ''] ?? null;
   const rootFolder = snapshot?.folders[snapshot.rootId] ?? null;
+  const selectedParentFolder = selectedFolder?.parentId ? snapshot?.folders[selectedFolder.parentId] ?? null : null;
   const runtimeLabel =
     (window as { kanituDesktop?: { platform?: string } }).kanituDesktop?.platform === 'electron'
       ? 'Electron 模式 v0.5 · daisyUI 5'
@@ -200,8 +266,8 @@ export function LibraryBrowser({
   const cover = useMemo(() => {
     if (!selectedFolder || !snapshot) return null;
     const images = directImagesOf(snapshot, selectedFolder.id);
-    return pickCover(images);
-  }, [snapshot, selectedFolder]);
+    return pickCover(images, { preferredId: pinnedCovers[selectedFolder.id] });
+  }, [snapshot, selectedFolder, pinnedCovers]);
 
   const toggleFolder = useCallback((id: string) => {
     setExpandedFolders((prev) => {
@@ -229,6 +295,16 @@ export function LibraryBrowser({
     },
     [],
   );
+
+  const handleGoUp = useCallback(() => {
+    if (!snapshot || !selectedFolder?.parentId) return;
+    const parent = snapshot.folders[selectedFolder.parentId];
+    if (parent) handleSelectFolder(parent);
+  }, [snapshot, selectedFolder, handleSelectFolder]);
+
+  const handleGoRoot = useCallback(() => {
+    if (rootFolder) handleSelectFolder(rootFolder);
+  }, [rootFolder, handleSelectFolder]);
 
   // In the viewer: switch to a sibling folder (same level) and show its first image.
   const handleViewerSwitchSibling = useCallback(
@@ -281,17 +357,31 @@ export function LibraryBrowser({
     }
   };
 
-  const openOrganizePreview = () => {
-    if (!snapshot || !selectedFolder) return;
-    setOrganizePreview(organizeByFolder(imagesOf(snapshot, selectedFolder.id)));
+  const openOrganizePreviewFor = (folder: FolderNode) => {
+    if (!snapshot || !folder) return;
+    setSelectedFolderId(folder.id);
+    setOrganizePreview(organizeByFolder(imagesOf(snapshot, folder.id), { customRules }));
     setOrganizeResult(null);
+    setOrganizeProgress(null);
   };
+
+  const openOrganizePreview = () => {
+    if (selectedFolder) openOrganizePreviewFor(selectedFolder);
+  };
+
+  const handleCustomRulesChange = useCallback((rules: CustomOrganizeRule[]) => {
+    setCustomRules(rules);
+    saveCustomRules(rules);
+  }, []);
 
   const handleApplyOrganize = async () => {
     if (!snapshot || !selectedFolder || !organizePreview) return;
     setOrganizing(true);
+    setOrganizeProgress({ done: 0, total: organizePreview.length });
     try {
-      const result = await applyOrganize(store, snapshot, selectedFolder.relPath, organizePreview);
+      const result = await applyOrganize(store, snapshot, selectedFolder.relPath, organizePreview, {
+        onProgress: (done, total) => setOrganizeProgress({ done, total }),
+      });
       setOrganizePreview(null);
       setOrganizeResult(result);
       setLastManifest(result.manifest);
@@ -305,6 +395,7 @@ export function LibraryBrowser({
       notify(`整理失败：${String(err)}`);
     } finally {
       setOrganizing(false);
+      setOrganizeProgress(null);
     }
   };
 
@@ -329,18 +420,18 @@ export function LibraryBrowser({
     }
   };
 
-  const handleExport = async () => {
-    if (!selectedFolder) return;
+  const exportFolder = async (folder: FolderNode) => {
+    if (!folder) return;
     setExporting(true);
     setExportProgress({ done: 0, total: 0 });
     notify('正在导出 ZIP…');
     try {
-      const result = await store.zipLibrary(selectedFolder.relPath, (done, total) => {
+      const result = await store.zipLibrary(folder.relPath, (done, total) => {
         setExportProgress({ done, total });
       });
       setExportProgress(null);
       if (result.kind === 'blob' && result.blob) {
-        const base = selectedFolder.relPath ? selectedFolder.relPath.split('/').pop() : '相册';
+        const base = folder.relPath ? folder.relPath.split('/').pop() : '相册';
         downloadBlob(result.blob, `${base}.zip`);
         notify(`已导出 ${result.exportedCount} 张图片为 ZIP。`);
       } else if (result.outputPath) {
@@ -356,14 +447,18 @@ export function LibraryBrowser({
     }
   };
 
-  const performDelete = async () => {
-    if (!selectedFolder || !selectedFolder.relPath) return;
-    const name = selectedFolder.name;
+  const handleExport = async () => {
+    if (selectedFolder) await exportFolder(selectedFolder);
+  };
+
+  const performDelete = async (folder: FolderNode = selectedFolder!) => {
+    if (!folder || !folder.relPath) return;
+    const name = folder.name;
     setBusy(true);
     notify(`正在删除“${name}”…`);
-    const parentId = selectedFolder.parentId;
+    const parentId = folder.parentId;
     try {
-      await deleteLibraryFolder(store, selectedFolder.relPath);
+      await deleteLibraryFolder(store, folder.relPath);
       await refresh();
       if (parentId) setSelectedFolderId(parentId);
       notify(`已删除“${name}”。`);
@@ -374,11 +469,11 @@ export function LibraryBrowser({
     }
   };
 
-  const requestDelete = () => setConfirmDelete(true);
-  const confirmDeleteHandler = () => {
-    setConfirmDelete(false);
-    void performDelete();
+  const requestDelete = () => {
+    if (selectedFolder && selectedFolder.relPath) setDeleteTarget({ kind: 'folder', folder: selectedFolder });
   };
+  const requestDeleteImage = (image: ImageEntry) => setDeleteTarget({ kind: 'image', image });
+  const requestDeleteFolder = (folder: FolderNode) => setDeleteTarget({ kind: 'folder', folder });
 
   const toggleBlur = useCallback(() => {
     if (!selectedFolder || !selectedFolder.relPath) return;
@@ -392,19 +487,208 @@ export function LibraryBrowser({
     });
   }, [selectedFolder]);
 
+  const copyPath = useCallback(async (text: string, label = '路径') => {
+    try {
+      await navigator.clipboard.writeText(text);
+      notify(`已复制${label}。`);
+    } catch {
+      notify(`无法复制，请手动复制：${text}`);
+    }
+  }, [notify]);
+
+  const pinCover = useCallback((folderId: string, imageId: string | null) => {
+    setPinnedCovers((prev) => {
+      const next = { ...prev };
+      if (imageId) next[folderId] = imageId;
+      else delete next[folderId];
+      savePinnedCovers(next);
+      return next;
+    });
+    notify(imageId ? '已设为相册封面。' : '已取消固定封面。');
+  }, [notify]);
+
+  const handleRenameImage = (image: ImageEntry) => {
+    setPromptState({ kind: 'rename-image', title: '重命名图片', label: '新名称', initialValue: image.name, image });
+    setPromptValue(image.name);
+  };
+
+  const executeRenameImage = async (image: ImageEntry, nextName: string) => {
+    const name = nextName.trim();
+    if (!name || name === image.name) return;
+    setBusy(true);
+    try {
+      const renamed = await renameImage(store, image, name);
+      await refresh();
+      notify(`已重命名为“${renamed.name}”。`);
+    } catch (err) {
+      notify(`重命名失败：${String(err)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const executeDeleteImage = async (image: ImageEntry) => {
+    if (!image) return;
+    setBusy(true);
+    try {
+      await deleteImage(store, image);
+      await refresh();
+      notify(`已删除图片“${image.name}”。`);
+    } catch (err) {
+      notify(`删除失败：${String(err)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const confirmDeleteTarget = async () => {
+    if (!deleteTarget) return;
+    const target = deleteTarget;
+    setDeleteTarget(null);
+    if (target.kind === 'image') await executeDeleteImage(target.image);
+    else await performDelete(target.folder);
+  };
+
+  const handleCreateSubfolder = (folder: FolderNode) => {
+    setPromptState({
+      kind: 'create-folder',
+      title: `在“${folder.name}”中新建子文件夹`,
+      label: '文件夹名称',
+      initialValue: '新建文件夹',
+      folder,
+    });
+    setPromptValue('新建文件夹');
+  };
+
+  const executeCreateSubfolder = async (folder: FolderNode, name: string) => {
+    const clean = name.trim();
+    if (!clean) return;
+    setBusy(true);
+    try {
+      const createdRel = joinRelPath(folder.relPath, clean);
+      await createSubfolder(store, folder.relPath, clean);
+      const next = await refresh();
+      const created = Object.values(next.folders).find((item) => item.relPath === createdRel);
+      if (created) {
+        setSelectedFolderId(created.id);
+        setExpandedFolders((prev) => {
+          const nextSet = new Set(prev);
+          nextSet.add(folder.id);
+          return nextSet;
+        });
+      }
+      notify(`已创建“${clean}”。`);
+    } catch (err) {
+      notify(`新建失败：${String(err)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleRenameFolder = (folder: FolderNode) => {
+    if (!folder.relPath) return;
+    setPromptState({ kind: 'rename-folder', title: '重命名图包', label: '新名称', initialValue: folder.name, folder });
+    setPromptValue(folder.name);
+  };
+
+  const executeRenameFolder = async (folder: FolderNode, nextName: string) => {
+    const name = nextName.trim();
+    if (!name || name === folder.name) return;
+    setBusy(true);
+    try {
+      await renameFolder(store, folder, name);
+      await refresh();
+      notify(`已重命名为“${name}”。`);
+    } catch (err) {
+      notify(`重命名失败：${String(err)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submitPrompt = async () => {
+    if (!promptState) return;
+    const state = promptState;
+    const value = promptValue.trim();
+    if (!value) return;
+    setPromptState(null);
+    if (state.kind === 'rename-image' && state.image) await executeRenameImage(state.image, value);
+    else if (state.kind === 'rename-folder' && state.folder) await executeRenameFolder(state.folder, value);
+    else if (state.kind === 'create-folder' && state.folder) await executeCreateSubfolder(state.folder, value);
+  };
+
+  const openContextMenu = useCallback((event: ReactMouseEvent, items: ContextMenuItem[]) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setContextMenu({ x: event.clientX, y: event.clientY, items });
+  }, []);
+
+  const buildImageMenu = (image: ImageEntry): ContextMenuItem[] => [
+    { label: '查看图片', icon: '🔍', onSelect: () => setViewerImageId(image.id) },
+    {
+      label: pinnedCovers[image.folderId] === image.id ? '取消固定封面' : '设为封面',
+      icon: '⭐',
+      onSelect: () => pinCover(image.folderId, pinnedCovers[image.folderId] === image.id ? null : image.id),
+    },
+    { label: '重命名…', icon: '✏️', onSelect: () => void handleRenameImage(image) },
+    { label: '复制路径', icon: '📋', onSelect: () => void copyPath(image.relPath) },
+    { label: '删除', icon: '🗑️', danger: true, separator: true, onSelect: () => requestDeleteImage(image) },
+  ];
+
+  const buildFolderMenu = (folder: FolderNode): ContextMenuItem[] => {
+    const items: ContextMenuItem[] = [
+      { label: '打开', icon: '📂', onSelect: () => handleSelectFolder(folder) },
+      { label: '新建子文件夹…', icon: '➕', onSelect: () => void handleCreateSubfolder(folder) },
+    ];
+    if (folder.relPath && folder.childCount > 0) {
+      items.push({
+        label: expandedFolders.has(folder.id) ? '收起子目录' : '展开子目录',
+        icon: expandedFolders.has(folder.id) ? '▾' : '▸',
+        onSelect: () => toggleFolder(folder.id),
+      });
+    }
+    if (folder.relPath) {
+      items.push({ label: '重命名…', icon: '✏️', onSelect: () => void handleRenameFolder(folder) });
+    }
+    items.push(
+      { label: '整理…', icon: '🧹', onSelect: () => openOrganizePreviewFor(folder) },
+      { label: '导出 ZIP…', icon: '📦', onSelect: () => void exportFolder(folder) },
+      { label: '复制路径', icon: '📋', onSelect: () => void copyPath(folder.relPath || '根目录') },
+    );
+    if (folder.relPath) {
+      items.push({ label: '删除', icon: '🗑️', danger: true, separator: true, onSelect: () => requestDeleteFolder(folder) });
+    }
+    return items;
+  };
+
   const viewerImages = folderImages;
   const viewerIndex = viewerImages.findIndex((img) => img.id === viewerImageId);
 
   return (
     <div className="app-shell flex h-screen flex-col">
       <TitleBar />
-      <div className="drawer lg:drawer-open flex-1 min-h-0">
-        <input id="app-drawer" type="checkbox" className="drawer-toggle" />
+      <div className={'drawer flex-1 min-h-0' + (sidebarHidden ? '' : ' lg:drawer-open')}>
+        <input id="app-drawer" type="checkbox" className="drawer-toggle" checked={!sidebarHidden} onChange={(event) => setSidebarHidden(!event.target.checked)} />
 
       <div className="drawer-content flex flex-col min-h-0">
         <div className="navbar bg-base-200 border-b border-base-300 px-4 gap-2 sticky top-0 z-10">
           <div className="flex-none lg:hidden">
             <label htmlFor="app-drawer" className="btn btn-square btn-ghost" aria-label="打开侧边栏">☰</label>
+          </div>
+          <div className="flex-none flex items-center gap-1">
+            <NavIconButton
+              onClick={() => setSidebarHidden((value) => !value)}
+              className="hidden lg:inline-flex"
+              title={sidebarHidden ? '显示侧边栏' : '隐藏侧边栏'}
+            >
+              <PanelLeftIcon />
+            </NavIconButton>
+            <NavIconButton onClick={handleGoUp} disabled={!selectedParentFolder} title="上一级目录">
+              <FolderUpIcon />
+            </NavIconButton>
+            <NavIconButton onClick={handleGoRoot} disabled={isRootSelected} active={isRootSelected} title="全部相册">
+              <HomeIcon />
+            </NavIconButton>
           </div>
           <div className="flex-1 min-w-0">
             <nav className="breadcrumbs text-sm" aria-label="面包屑">
@@ -469,7 +753,12 @@ export function LibraryBrowser({
               <h3 className="text-sm font-semibold opacity-70 mb-3">子文件夹</h3>
               <div className="folder-grid">
                 {childFolderCards.map(({ folder, cover }) => (
-                  <div key={folder.id} className="card bg-base-200 border border-base-300 shadow hover:shadow-lg transition cursor-pointer overflow-hidden" onClick={() => handleSelectFolder(folder)}>
+                  <div
+                    key={folder.id}
+                    className="card bg-base-200 border border-base-300 shadow hover:shadow-lg transition cursor-pointer overflow-hidden"
+                    onClick={() => handleSelectFolder(folder)}
+                    onContextMenu={(event) => openContextMenu(event, buildFolderMenu(folder))}
+                  >
                     <figure className="aspect-[4/3] overflow-hidden relative">
                       {cover ? (
                         <BlobImage
@@ -504,7 +793,12 @@ export function LibraryBrowser({
               <h3 className="text-sm font-semibold opacity-70 mb-3">图片</h3>
               <div className="gallery-grid">
                 {folderImages.map((image) => (
-                  <div key={image.id} className="card bg-base-200 border border-base-300 shadow hover:shadow-lg transition cursor-pointer overflow-hidden" onClick={() => setViewerImageId(image.id)}>
+                  <div
+                    key={image.id}
+                    className="card bg-base-200 border border-base-300 shadow hover:shadow-lg transition cursor-pointer overflow-hidden"
+                    onClick={() => setViewerImageId(image.id)}
+                    onContextMenu={(event) => openContextMenu(event, buildImageMenu(image))}
+                  >
                     <figure className="aspect-[4/3] overflow-hidden relative">
                       <BlobImage
                         store={store}
@@ -539,8 +833,10 @@ export function LibraryBrowser({
 
       <div className="drawer-side">
         <label htmlFor="app-drawer" className="drawer-overlay"></label>
-        <aside className="bg-base-200 h-full w-72 p-4 flex flex-col gap-4 overflow-y-auto">
-          <div className="px-1">
+        <aside className="bg-base-200 h-full flex flex-col relative shrink-0" style={{ width: sidebarWidth }}>
+          <SidebarResizeHandle width={sidebarWidth} onResize={setSidebarWidth} />
+          <div className="p-4 pb-0 flex-1 min-h-0 overflow-y-auto flex flex-col gap-4">
+            <div className="px-1">
             <label className="input input-sm w-full flex items-center gap-2 bg-base-100 border-base-300">
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 opacity-60"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
               <input
@@ -562,6 +858,7 @@ export function LibraryBrowser({
               <div
                 className={`flex items-center gap-2 rounded-lg py-1.5 pl-1 pr-2 cursor-pointer ${isRootSelected ? 'bg-primary/15 text-primary' : 'hover:bg-base-300/60'}`}
                 onClick={() => handleSelectFolder(rootFolder)}
+                onContextMenu={(event) => openContextMenu(event, buildFolderMenu(rootFolder))}
               >
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 flex-shrink-0"><path d="M3 10.5L12 3l9 7.5V21H3z"/></svg>
                 <span className="truncate">全部相册</span>
@@ -579,52 +876,47 @@ export function LibraryBrowser({
               onSelect={handleSelectFolder}
               expandedFolders={expandedFolders}
               onToggleFolder={toggleFolder}
+              onFolderContextMenu={(event, folder) => openContextMenu(event, buildFolderMenu(folder))}
               depth={0}
             />
           )}
 
-          <div className="mt-auto flex flex-col gap-2 text-sm">
+          </div>
+          <div className="p-4 pt-3 border-t border-base-300 shrink-0 flex flex-col gap-2 text-sm bg-base-200">
             {importReport && (
-              <button className="btn btn-ghost btn-sm justify-start" onClick={() => setImportReport(importReport)}>导入报告</button>
+              <NavButton onClick={() => setImportReport(importReport)} className="w-full">
+                <span>导入报告</span>
+              </NavButton>
             )}
+            <NavButton onClick={() => setShowSettings(true)} className="w-full" title="设置">
+              <SettingsIcon />
+              <span>设置</span>
+            </NavButton>
             <div className="text-xs opacity-60 px-1">{runtimeLabel}</div>
           </div>
         </aside>
       </div>
 
+      {showSettings && (
+        <SettingsPage
+          rules={customRules}
+          onChange={handleCustomRulesChange}
+          onBack={() => setShowSettings(false)}
+          runtimeLabel={runtimeLabel}
+          sidebarWidth={sidebarWidth}
+          onSidebarWidthChange={setSidebarWidth}
+        />
+      )}
+
       {organizePreview && (
-        <div className="modal modal-open">
-          <div className="modal-box max-w-3xl">
-            <h3 className="font-bold text-lg">整理预览（仅虚拟，不移文件）</h3>
-            <div className="overflow-x-auto">
-              <table className="table table-sm">
-                <thead>
-                  <tr><th>原文件名</th><th>目标路径</th><th>置信度</th></tr>
-                </thead>
-                <tbody>
-                  {organizePreview.map((b) => {
-                    const img = snapshot?.images[b.imageId];
-                    const keep = b.confidence < 0.5;
-                    return (
-                      <tr key={b.imageId}>
-                        <td>{img?.name ?? b.imageId}</td>
-                        <td>{keep ? `${b.virtualPath} (保留原位)` : b.virtualPath}</td>
-                        <td>{b.confidence.toFixed(2)}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-            <p className="text-xs opacity-70 mt-2">置信度低于 0.50 的文件保留原位。目标目录创建于当前目录下。</p>
-            <div className="modal-action">
-              <button className="btn btn-primary" disabled={organizing} onClick={handleApplyOrganize}>
-                {organizing ? '应用…' : `应用（${organizePreview.length} 个文件）`}
-              </button>
-              <button className="btn btn-ghost" onClick={() => setOrganizePreview(null)}>关闭</button>
-            </div>
-          </div>
-        </div>
+        <OrganizePreview
+          bindings={organizePreview}
+          organizing={organizing}
+          progress={organizeProgress}
+          onChange={(next) => setOrganizePreview(next)}
+          onApply={handleApplyOrganize}
+          onClose={() => setOrganizePreview(null)}
+        />
       )}
 
       {organizeResult && (
@@ -706,14 +998,43 @@ export function LibraryBrowser({
         </div>
       )}
 
-      {confirmDelete && selectedFolder && selectedFolder.relPath && (
+      {deleteTarget && (
         <div className="modal modal-open">
           <div className="modal-box">
             <h3 className="font-bold text-lg">确认删除</h3>
-            <p className="py-4 text-sm opacity-80">确定要删除“{selectedFolder.name}”及其全部子目录吗？此操作不可撤销。</p>
+            <p className="py-4 text-sm opacity-80">
+              {deleteTarget.kind === 'image'
+                ? `确定要删除图片“${deleteTarget.image.name}”吗？此操作不可撤销。`
+                : `确定要删除图包“${deleteTarget.folder.name}”及其全部子目录吗？此操作不可撤销。`}
+            </p>
             <div className="modal-action">
-              <button className="btn btn-ghost" onClick={() => setConfirmDelete(false)}>取消</button>
-              <button className="btn btn-error" onClick={confirmDeleteHandler}>删除</button>
+              <button className="btn btn-ghost" onClick={() => setDeleteTarget(null)}>取消</button>
+              <button className="btn btn-error" onClick={() => void confirmDeleteTarget()}>删除</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {promptState && (
+        <div className="modal modal-open z-[130]">
+          <div className="modal-box max-w-md">
+            <h3 className="font-bold text-lg">{promptState.title}</h3>
+            <div className="form-control w-full mt-3">
+              <span className="label-text text-xs">{promptState.label}</span>
+              <input
+                className="input input-bordered input-sm mt-1 font-mono"
+                value={promptValue}
+                onChange={(event) => setPromptValue(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') void submitPrompt();
+                  if (event.key === 'Escape') setPromptState(null);
+                }}
+                autoFocus
+              />
+            </div>
+            <div className="modal-action">
+              <button className="btn btn-ghost btn-sm" onClick={() => setPromptState(null)}>取消</button>
+              <button className="btn btn-primary btn-sm" onClick={() => void submitPrompt()}>保存</button>
             </div>
           </div>
         </div>
@@ -728,6 +1049,7 @@ export function LibraryBrowser({
           onClose={() => setViewerImageId(null)}
           onNavigate={(id) => setViewerImageId(id)}
           onSwitchSibling={handleViewerSwitchSibling}
+          onImageContextMenu={(event, image) => openContextMenu(event, buildImageMenu(image))}
         />
       ) : (
         <div className="toast toast-end">
@@ -740,6 +1062,8 @@ export function LibraryBrowser({
           )}
         </div>
       )}
+
+      <ContextMenu menu={contextMenu} onClose={() => setContextMenu(null)} />
     </div>
   );
 }
@@ -751,6 +1075,7 @@ function FolderTree({
   onSelect,
   expandedFolders,
   onToggleFolder,
+  onFolderContextMenu,
   depth,
 }: {
   snapshot: LibrarySnapshot;
@@ -759,6 +1084,7 @@ function FolderTree({
   onSelect: (folder: FolderNode) => void;
   expandedFolders: ReadonlySet<string>;
   onToggleFolder: (id: string) => void;
+  onFolderContextMenu: (event: ReactMouseEvent, folder: FolderNode) => void;
   depth: number;
 }) {
   const children = childrenOf(snapshot, folderId).sort((a, b) => a.name.localeCompare(b.name));
@@ -772,7 +1098,10 @@ function FolderTree({
         const active = folder.id === selectedFolderId;
         return (
           <li key={folder.id}>
-            <div className={`flex items-center rounded-lg ${active ? 'bg-primary/15 text-primary' : 'hover:bg-base-300/60'}`}>
+            <div
+              className={`flex items-center rounded-lg ${active ? 'bg-primary/15 text-primary' : 'hover:bg-base-300/60'}`}
+              onContextMenu={(event) => onFolderContextMenu(event, folder)}
+            >
               <button
                 className={`chevron-btn ${hasChildren ? '' : 'invisible'} ${expanded ? 'expanded' : ''}`}
                 disabled={!hasChildren}
@@ -799,6 +1128,7 @@ function FolderTree({
                 onSelect={onSelect}
                 expandedFolders={expandedFolders}
                 onToggleFolder={onToggleFolder}
+                onFolderContextMenu={onFolderContextMenu}
                 depth={depth + 1}
               />
             )}
@@ -889,6 +1219,7 @@ function Viewer({
   onClose,
   onNavigate,
   onSwitchSibling,
+  onImageContextMenu,
 }: {
   images: ImageEntry[];
   index: number;
@@ -896,6 +1227,7 @@ function Viewer({
   onClose: () => void;
   onNavigate: (id: string) => void;
   onSwitchSibling: (dir: number) => void;
+  onImageContextMenu: (event: ReactMouseEvent, image: ImageEntry) => void;
 }) {
   const image = images[index];
   const [viewerUrl, setViewerUrl] = useState<string | null>(null);
@@ -1056,6 +1388,7 @@ function Viewer({
       <div
         className="flex-1 flex items-center justify-center overflow-hidden cursor-grab active:cursor-grabbing"
         ref={containerRef}
+        onContextMenu={(event) => onImageContextMenu(event, image)}
         onWheel={(e) => {
           e.preventDefault();
           zoomBy(e.deltaY > 0 ? 0.8 : 1.25);

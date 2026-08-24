@@ -2,8 +2,51 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { MemoryLibraryStore } from '../../fs-adapter/src/memory';
 import { scanLibrary, imagesOf } from '../src/scan';
-import { organizeByFolder } from '../../organizer/src/organizer';
+import { applyCustomRule, organizeByFolder, parseImageName } from '../../organizer/src/organizer';
 import { applyOrganize, undoOrganize, type OrganizeManifest } from '../src/organize';
+
+describe('organizer naming rules', () => {
+  test('groups pixiv-style ids by work id', () => {
+    const paged = parseImageName('001_131950002_p0.jpg');
+    assert.equal(paged.virtualPath, '131950002/001_131950002_p0.jpg');
+    assert.equal(paged.confidence, 0.9);
+
+    const plain = parseImageName('012_131879670.gif');
+    assert.equal(plain.virtualPath, '131879670/012_131879670.gif');
+    assert.equal(plain.confidence, 0.85);
+  });
+
+  test('custom rules run before built-ins and group by capture group', () => {
+    const rule = {
+      id: 'test-prefix',
+      name: '三位前缀分组',
+      pattern: '^(\\d{3})_',
+      target: '$1',
+      confidence: 0.88,
+      enabled: true,
+    };
+
+    const direct = applyCustomRule('042_123456789_p0.jpg', rule);
+    assert.equal(direct?.virtualPath, '042/042_123456789_p0.jpg');
+    assert.equal(direct?.confidence, 0.88);
+
+    const viaParser = parseImageName('042_123456789_p0.jpg', [rule]);
+    assert.equal(viaParser.virtualPath, '042/042_123456789_p0.jpg');
+    assert.equal(viaParser.rule, '三位前缀分组');
+  });
+
+  test('invalid custom regex is ignored', () => {
+    const rule = {
+      id: 'bad',
+      name: '坏规则',
+      pattern: '(',
+      target: '$1',
+      confidence: 0.9,
+      enabled: true,
+    };
+    assert.equal(applyCustomRule('001_131950002_p0.jpg', rule), null);
+  });
+});
 
 async function seedStore(): Promise<MemoryLibraryStore> {
   const store = new MemoryLibraryStore();

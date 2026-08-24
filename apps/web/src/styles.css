@@ -57,6 +57,9 @@ body {
 .app-shell > .drawer .drawer-content {
   height: 100%;
 }
+.app-shell > .drawer .drawer-side {
+  height: 100%;
+}
 
 /* The app shell must fill the viewport exactly, so the ONLY scroll region
    is the main content area. Sidebar gets its own thin scrollbar only when needed. */
@@ -258,4 +261,65 @@ body {
 }
 .chevron-btn.expanded .chevron-icon {
   transform: rotate(90deg);
+}
+
+/* Right-click context menu. */
+.context-menu {
+  position: fixed;
+  z-index: 200;
+  min-width: 190px;
+  max-width: min(280px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  padding: 6px;
+  border-radius: 12px;
+  border: 1px solid var(--color-base-300, rgba(128, 128, 128, 0.35));
+  background: var(--color-base-100, #ffffff);
+  color: var(--color-base-content, #1f2937);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.22);
+  user-select: none;
+}
+.context-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 9px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.context-menu-item:hover:not(:disabled),
+.context-menu-item:focus-visible {
+  background: color-mix(in srgb, var(--color-primary, #4f8cff) 14%, transparent);
+}
+.context-menu-item:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.context-menu-item-danger {
+  color: var(--color-error, #ef4444);
+}
+.context-menu-icon {
+  width: 16px;
+  flex-shrink: 0;
+  display: inline-flex;
+  justify-content: center;
+  font-size: 14px;
+  opacity: 0.9;
+}
+.context-menu-label {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.context-menu-separator {
+  height: 1px;
+  margin: 5px 6px;
+  background: var(--color-base-300, rgba(128, 128, 128, 0.28));
 }
