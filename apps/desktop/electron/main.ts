@@ -7,6 +7,8 @@ import archiver from 'archiver';
 
 const IMAGE_EXT = new Set(['jpg', 'jpeg', 'png', 'webp', 'avif', 'bmp', 'gif']);
 
+let mainWindow: BrowserWindow | null = null;
+
 interface FsFileMeta {
   relPath: string;
   size: number;
@@ -326,15 +328,38 @@ function registerViewerProtocol(): void {
   });
 }
 
+function registerWindowControlIpc(): void {
+  ipcMain.handle('window:minimize', () => mainWindow?.minimize());
+  ipcMain.handle('window:maximize-toggle', () => {
+    if (!mainWindow) return false;
+    if (mainWindow.isMaximized()) mainWindow.unmaximize();
+    else mainWindow.maximize();
+    return mainWindow.isMaximized();
+  });
+  ipcMain.handle('window:is-maximized', () => mainWindow?.isMaximized() ?? false);
+  ipcMain.handle('window:close', () => mainWindow?.close());
+}
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1280,
     height: 800,
+    minWidth: 800,
+    minHeight: 560,
+    frame: false,
+    title: '全能看图王',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
     },
+  });
+
+  mainWindow = win;
+  win.on('maximize', () => win.webContents.send('window:maximized-changed', true));
+  win.on('unmaximize', () => win.webContents.send('window:maximized-changed', false));
+  win.on('closed', () => {
+    if (mainWindow === win) mainWindow = null;
   });
 
   // Avoid stale renderer bundles during development.
@@ -353,6 +378,7 @@ function createWindow() {
 void app.whenReady().then(() => {
   registerIpc();
   registerViewerProtocol();
+  registerWindowControlIpc();
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

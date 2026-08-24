@@ -30,6 +30,11 @@ export interface KanituDesktopBridge {
     totalImages?: number;
     exportedCount?: number;
   }>;
+  minimizeWindow(): Promise<void>;
+  maximizeWindowToggle(): Promise<boolean>;
+  closeWindow(): Promise<void>;
+  isWindowMaximized(): Promise<boolean>;
+  onWindowMaximizedChanged(callback: (maximized: boolean) => void): () => void;
 }
 
 declare global {

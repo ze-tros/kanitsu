@@ -24,6 +24,33 @@ body {
   color: var(--color-base-content);
 }
 
+/* Custom frameless title bar (Electron). The bar is a drag region; buttons
+   must opt out with no-drag so they stay clickable. */
+.app-titlebar {
+  -webkit-user-select: none;
+  user-select: none;
+}
+.titlebar-drag {
+  -webkit-app-region: drag;
+}
+.titlebar-no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/* When the app shell wraps the drawer (custom title bar), the drawer and its
+   content must fill only the space below the title bar instead of 100vh. */
+.app-shell {
+  height: 100%;
+}
+.app-shell > .drawer {
+  height: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.app-shell > .drawer .drawer-content {
+  height: 100%;
+}
+
 /* The app shell must fill the viewport exactly, so the ONLY scroll region
    is the main content area. Sidebar gets its own thin scrollbar only when needed. */
 .drawer {

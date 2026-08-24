@@ -38,6 +38,16 @@ const bridge = {
     totalImages?: number;
     exportedCount?: number;
   }> => ipcRenderer.invoke('library:exportZip', targetRelPath),
+
+  minimizeWindow: (): Promise<void> => ipcRenderer.invoke('window:minimize'),
+  maximizeWindowToggle: (): Promise<boolean> => ipcRenderer.invoke('window:maximize-toggle'),
+  closeWindow: (): Promise<void> => ipcRenderer.invoke('window:close'),
+  isWindowMaximized: (): Promise<boolean> => ipcRenderer.invoke('window:is-maximized'),
+  onWindowMaximizedChanged: (callback: (maximized: boolean) => void): (() => void) => {
+    const listener = (_event: unknown, maximized: boolean) => callback(maximized);
+    ipcRenderer.on('window:maximized-changed', listener);
+    return () => ipcRenderer.removeListener('window:maximized-changed', listener);
+  },
 };
 
 contextBridge.exposeInMainWorld('kanituDesktop', bridge);

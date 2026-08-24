@@ -20,6 +20,7 @@ import {
   type PersistentIndex,
 } from '../../core/src/index';
 import type { ImportSourcePicker, LibraryStore } from '../../fs-adapter/src/types';
+import type { KanituDesktopBridge } from '../../fs-adapter/src/electron';
 import { organizeByFolder } from '../../organizer/src/index';
 import { pickCover } from '../../cover-picker/src/index';
 import { BlobImage } from './BlobImage';
@@ -102,6 +103,7 @@ export function LibraryBrowser({
   const [expandedFolders, setExpandedFolders] = useState<ReadonlySet<string>>(new Set());
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [blurredPaths, setBlurredPaths] = useState<ReadonlySet<string>>(() => loadBlurredPaths());
+  const [searchQuery, setSearchQuery] = useState('');
 
   const applySnapshot = useCallback((next: LibrarySnapshot) => {
     setSnapshot(next);
@@ -135,17 +137,20 @@ export function LibraryBrowser({
     return () => clearTimeout(t);
   }, [message]);
 
+  const searchTerm = searchQuery.trim().toLowerCase();
   const folderImages = useMemo(() => {
     if (!snapshot) return [];
     const id = selectedFolderId || snapshot.rootId;
-    return directImagesOf(snapshot, id);
-  }, [snapshot, selectedFolderId]);
+    const images = directImagesOf(snapshot, id);
+    return searchTerm ? images.filter((img) => img.name.toLowerCase().includes(searchTerm)) : images;
+  }, [snapshot, selectedFolderId, searchTerm]);
 
   const childFolders = useMemo(() => {
     if (!snapshot) return [];
     const id = selectedFolderId || snapshot.rootId;
-    return childrenOf(snapshot, id).sort((a, b) => a.name.localeCompare(b.name));
-  }, [snapshot, selectedFolderId]);
+    const folders = childrenOf(snapshot, id).sort((a, b) => a.name.localeCompare(b.name));
+    return searchTerm ? folders.filter((f) => f.name.toLowerCase().includes(searchTerm)) : folders;
+  }, [snapshot, selectedFolderId, searchTerm]);
 
   const childFolderCards = useMemo(() => {
     if (!snapshot) return [];
@@ -378,10 +383,12 @@ export function LibraryBrowser({
   const viewerIndex = viewerImages.findIndex((img) => img.id === viewerImageId);
 
   return (
-    <div className="drawer lg:drawer-open">
-      <input id="app-drawer" type="checkbox" className="drawer-toggle" />
+    <div className="app-shell flex h-screen flex-col">
+      <TitleBar />
+      <div className="drawer lg:drawer-open flex-1 min-h-0">
+        <input id="app-drawer" type="checkbox" className="drawer-toggle" />
 
-      <div className="drawer-content flex flex-col min-h-screen">
+      <div className="drawer-content flex flex-col min-h-0">
         <div className="navbar bg-base-200 border-b border-base-300 px-4 gap-2 sticky top-0 z-10">
           <div className="flex-none lg:hidden">
             <label htmlFor="app-drawer" className="btn btn-square btn-ghost" aria-label="打开侧边栏">☰</label>
@@ -507,10 +514,10 @@ export function LibraryBrowser({
 
           {childFolderCards.length === 0 && folderImages.length === 0 && (
             <div className="border-2 border-dashed border-base-300 rounded-2xl p-12 text-center">
-              <p className="text-4xl mb-3">◻</p>
-              <div className="text-lg font-medium mb-1">该目录暂无图片</div>
-              <p className="text-sm opacity-70 mb-4">导入照片，开始整理你的图库</p>
-              <button className="btn btn-primary" disabled={busy} onClick={handleAdd}>导入图片</button>
+              <p className="text-4xl mb-3">{searchTerm ? '⍰' : '◻'}</p>
+              <div className="text-lg font-medium mb-1">{searchTerm ? '未找到匹配结果' : '该目录暂无图片'}</div>
+              <p className="text-sm opacity-70 mb-4">{searchTerm ? `没有与“${searchQuery}”匹配的相册或图片` : '导入照片，开始整理你的图库'}</p>
+              {!searchTerm && <button className="btn btn-primary" disabled={busy} onClick={handleAdd}>导入图片</button>}
             </div>
           )}
         </main>
@@ -540,9 +547,20 @@ export function LibraryBrowser({
       <div className="drawer-side">
         <label htmlFor="app-drawer" className="drawer-overlay"></label>
         <aside className="bg-base-200 h-full w-72 p-4 flex flex-col gap-4 overflow-y-auto">
-          <div className="flex items-center gap-3 px-1">
-            <div className="bg-gradient-to-br from-sky-500 to-violet-500 rounded-xl w-10 h-10 flex items-center justify-center text-white text-xl">◉</div>
-            <span className="text-lg font-bold">全能看图王</span>
+          <div className="px-1">
+            <label className="input input-sm w-full flex items-center gap-2 bg-base-100 border-base-300">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 opacity-60"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+              <input
+                type="text"
+                className="grow"
+                placeholder="搜索相册 / 图片…"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+              {searchQuery && (
+                <button className="btn btn-ghost btn-xs btn-square" title="清除搜索" onClick={() => setSearchQuery('')}>✕</button>
+              )}
+            </label>
           </div>
 
           {rootFolder && (
@@ -691,6 +709,7 @@ export function LibraryBrowser({
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }
@@ -757,6 +776,60 @@ function FolderTree({
         );
       })}
     </ul>
+  );
+}
+
+function TitleBar() {
+  const bridge = (window as { kanituDesktop?: KanituDesktopBridge }).kanituDesktop;
+  const isElectron = bridge?.platform === 'electron';
+  const [maximized, setMaximized] = useState(false);
+
+  useEffect(() => {
+    if (!isElectron) return;
+    let alive = true;
+    void bridge?.isWindowMaximized?.().then((m) => {
+      if (alive) setMaximized(m);
+    });
+    const off = bridge?.onWindowMaximizedChanged?.((m) => setMaximized(m));
+    return () => {
+      alive = false;
+      off?.();
+    };
+  }, [isElectron, bridge]);
+
+  const toggleMaximize = () => {
+    if (!isElectron) return;
+    void bridge?.maximizeWindowToggle?.().then((m) => setMaximized(m));
+  };
+
+  if (!isElectron) return null;
+
+  return (
+    <div
+      className={`app-titlebar flex items-center justify-between h-12 px-3 shrink-0 select-none bg-base-200 border-b border-base-300 ${isElectron ? 'titlebar-drag' : ''}`}
+    >
+      <div className="flex items-center gap-2.5 min-w-0 pl-1">
+        <span className="w-7 h-7 rounded-lg bg-gradient-to-br from-sky-500 to-violet-500 flex items-center justify-center text-white text-base">◉</span>
+        <span className="text-base font-semibold truncate">全能看图王</span>
+      </div>
+      {isElectron && (
+        <div className="titlebar-no-drag flex items-center gap-0.5">
+          <button className="btn btn-ghost btn-square btn-sm" title="最小化" onClick={() => void bridge?.minimizeWindow?.()}>
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10" className="w-3.5 h-3.5" fill="currentColor"><rect x="1" y="4.5" width="8" height="1"/></svg>
+          </button>
+          <button className="btn btn-ghost btn-square btn-sm" title={maximized ? '还原' : '最大化'} onClick={toggleMaximize}>
+            {maximized ? (
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.2"><rect x="1.5" y="3" width="5.5" height="5.5"/><path d="M3 1.5h5.5V7"/></svg>
+            ) : (
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.2"><rect x="1.5" y="1.5" width="7" height="7"/></svg>
+            )}
+          </button>
+          <button className="btn btn-ghost btn-square btn-sm hover:bg-red-500 hover:text-white" title="关闭" onClick={() => void bridge?.closeWindow?.()}>
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.2"><path d="M1.5 1.5l7 7M8.5 1.5l-7 7"/></svg>
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 
