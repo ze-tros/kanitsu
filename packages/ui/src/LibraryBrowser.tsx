@@ -962,6 +962,15 @@ function Viewer({
     return { w, h };
   }, [natural, baseFit, zoom]);
 
+  // The transform below uses scale(zoom). Keep the img's layout box at the
+  // fit-to-window size so the browser's max-width:100% (Tailwind preflight)
+  // does NOT shrink it a second time on top of the transform scale.
+  const fitSize = useMemo(() => {
+    const w = (natural?.w ?? 1) * baseFit;
+    const h = (natural?.h ?? 1) * baseFit;
+    return { w, h };
+  }, [natural, baseFit]);
+
   const clamp = (v: number, m: number) => Math.max(-m, Math.min(m, v));
   const maxX = Math.max(0, (displayed.w - containerSize.w) / 2);
   const maxY = Math.max(0, (displayed.h - containerSize.h) / 2);
@@ -1060,7 +1069,11 @@ function Viewer({
               const el = e.currentTarget;
               setNatural({ w: el.naturalWidth, h: el.naturalHeight });
             }}
-            style={{ transform: `translate(${panX}px, ${panY}px) rotate(${rotate}deg) scale(${baseFit * zoom})` }}
+            style={{
+              width: fitSize.w,
+              height: fitSize.h,
+              transform: `translate(${panX}px, ${panY}px) rotate(${rotate}deg) scale(${zoom})`,
+            }}
           />
         )}
       </div>
@@ -1072,7 +1085,7 @@ function Viewer({
         ))}
       </div>
       <div className="absolute bottom-20 right-5 text-xs text-white/80 bg-black/50 rounded-lg px-3 py-2">
-        {image.name} · {natural ? `${natural.w}×${natural.h}` : '—'} · {Math.round(zoom * 100)}%
+        {image.name} · {natural ? `${natural.w}×${natural.h}` : '—'} · {Math.round(baseFit * zoom * 100)}%
       </div>
     </div>
   );
