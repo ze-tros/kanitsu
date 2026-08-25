@@ -2,6 +2,7 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, net, protocol } from 'electron';
 import { promises as fs, createWriteStream } from 'node:fs';
 import path from 'node:path';
+import { Worker } from 'node:worker_threads';
 import { pathToFileURL } from 'node:url';
 import archiver from 'archiver';
 import { imageSize } from 'image-size';
@@ -194,6 +195,190 @@ async function createTopFolder(name: string): Promise<DesktopFsEntry> {
   }
 }
 
+/**
+ * 通用字节级 LRU 缓存（Map 迭代序即插入序 = 最近最少使用在前向淘汰）。
+ * 用于缩略图与查看器预览：同一文件在同一会话内被反复请求时复用已生成的
+ * JPEG 字节，避免每次都磁盘解码 + 缩放 + 重新编码（大图解码很慢）。
+ * 键由调用方拼入文件 mtime/size：文件被覆盖或移动后键自动变化，无需手动失效。
+ */
+function createByteLruCache(maxEntries: number, maxBytes: number): {
+  get(key: string): Uint8Array | undefined;
+  put(key: string, data: Uint8Array): void;
+} {
+  const map = new Map<string, Uint8Array>();
+  let bytes = 0;
+  return {
+    get(key: string): Uint8Array | undefined {
+      const hit = map.get(key);
+      if (hit) {
+        // 删除后重插，把命中的条目挪到最新位置。
+        map.delete(key);
+        map.set(key, hit);
+      }
+      return hit;
+    },
+    put(key: string, data: Uint8Array): void {
+      const existing = map.get(key);
+      if (existing) {
+        bytes -= existing.byteLength;
+        map.delete(key);
+      }
+      map.set(key, data);
+      bytes += data.byteLength;
+      while ((map.size > maxEntries || bytes > maxBytes) && map.size > 0) {
+        const oldestKey = map.keys().next().value;
+        if (oldestKey === undefined) break;
+        const oldest = map.get(oldestKey);
+        map.delete(oldestKey);
+        if (oldest) bytes -= oldest.byteLength;
+      }
+    },
+  };
+}
+
+/** 网格缩略图缓存（≤1024px JPEG）。 */
+const thumbCache = createByteLruCache(2000, 128 * 1024 * 1024);
+
+function thumbCacheKey(file: DesktopFsEntry, targetSize: number): string {
+  return `${file.id}\u0000${file.mtime ?? 0}\u0000${file.size ?? 0}\u0000${targetSize}`;
+}
+
+// —— 缩略图 worker 池 ——
+// nativeImage 只能在主进程使用，解码大图会长时间阻塞事件循环（UI/IPC 全被拖
+// 慢）。缩略图生成交给 worker 线程（主路径 sharp/libvips，兜底纯 JS），主进程
+// 只做缓存与调度：worker 忙时请求排队，主线程不被占用。
+const THUMB_WORKER_FORMATS = new Set(['jpg', 'jpeg', 'png', 'webp', 'avif', 'bmp']);
+const THUMB_WORKER_COUNT = 4;
+const THUMB_JOB_TIMEOUT_MS = 8000;
+
+interface ThumbnailRequest {
+  file: DesktopFsEntry;
+  targetSize: number;
+  low: boolean;
+  resolve: (data: Uint8Array) => void;
+  reject: (err: Error) => void;
+}
+
+const thumbnailQueue: ThumbnailRequest[] = [];
+const workerPool: (Worker | null)[] = [];
+const busyWorkers = new Set<Worker>();
+const inFlightJobs = new Map<
+  number,
+  { worker: Worker; resolve: (data: Uint8Array) => void; reject: (err: Error) => void; timer: NodeJS.Timeout }
+>();
+let thumbnailRequestSeq = 0;
+/** worker 处理失败/超时的文件路径黑名单：再次请求时直接走主进程回退，避免反复卡 worker。 */
+const failedWorkerPaths = new Set<string>();
+
+function markWorkerFailed(filePath: string): void {
+  failedWorkerPaths.add(filePath);
+  if (failedWorkerPaths.size > 4000) failedWorkerPaths.clear(); // 简单防涨
+}
+
+function pumpThumbnailQueue(): void {
+  for (let i = 0; i < THUMB_WORKER_COUNT; i++) {
+    if (thumbnailQueue.length === 0) return;
+    ensureThumbnailWorker(i);
+    const worker = workerPool[i];
+    if (!worker || busyWorkers.has(worker)) continue;
+    const request = thumbnailQueue.shift()!;
+    const requestId = ++thumbnailRequestSeq;
+    busyWorkers.add(worker);
+    const timer = setTimeout(() => {
+      const job = inFlightJobs.get(requestId);
+      if (!job) return;
+      inFlightJobs.delete(requestId);
+      const idx = workerPool.indexOf(job.worker);
+      if (idx >= 0) {
+        // 解码卡死（巨型图等）：杀掉该 worker 释放槽位，避免堵住后续任务。
+        terminateWorkerAt(idx);
+      } else {
+        busyWorkers.delete(job.worker);
+      }
+      markWorkerFailed(request.file.id);
+      job.reject(new Error('缩略图生成超时'));
+      pumpThumbnailQueue();
+    }, THUMB_JOB_TIMEOUT_MS);
+    inFlightJobs.set(requestId, { worker, resolve: request.resolve, reject: request.reject, timer });
+    worker.postMessage({ requestId, filePath: request.file.id, targetSize: request.targetSize });
+  }
+}
+
+function failWorkerJobs(worker: Worker, err: Error): void {
+  for (const [id, job] of inFlightJobs) {
+    if (job.worker === worker) {
+      inFlightJobs.delete(id);
+      clearTimeout(job.timer);
+      job.reject(err);
+    }
+  }
+  busyWorkers.delete(worker);
+}
+
+function ensureThumbnailWorker(index: number): void {
+  if (workerPool[index]) return;
+  const worker = new Worker(path.join(__dirname, 'thumbnailWorker.js'));
+  workerPool[index] = worker;
+  worker.on('message', (msg: { requestId: number; ok: boolean; data?: Uint8Array; error?: string }) => {
+    const job = inFlightJobs.get(msg.requestId);
+    if (!job) return; // 超时后迟到的响应
+    inFlightJobs.delete(msg.requestId);
+    clearTimeout(job.timer);
+    busyWorkers.delete(job.worker);
+    if (msg.ok && msg.data) job.resolve(msg.data);
+    else job.reject(new Error(msg.error ?? '缩略图生成失败'));
+    pumpThumbnailQueue();
+  });
+  worker.on('error', (err: unknown) => {
+    failWorkerJobs(worker, err instanceof Error ? err : new Error(String(err)));
+    terminateWorkerAt(index);
+    pumpThumbnailQueue();
+  });
+  worker.on('exit', (code) => {
+    if (code !== 0) failWorkerJobs(worker, new Error(`缩略图 worker 异常退出：${code}`));
+    if (workerPool[index] === worker) terminateWorkerAt(index);
+    pumpThumbnailQueue();
+  });
+}
+
+function terminateWorkerAt(index: number): void {
+  const worker = workerPool[index];
+  workerPool[index] = null;
+  if (worker) {
+    busyWorkers.delete(worker);
+    void worker.terminate().catch(() => {});
+  }
+}
+
+function enqueueThumbnail(file: DesktopFsEntry, targetSize: number, low: boolean): Promise<Uint8Array> {
+  const cacheKey = thumbCacheKey(file, targetSize);
+  const cached = thumbCache.get(cacheKey);
+  if (cached) return Promise.resolve(cached);
+  return new Promise<Uint8Array>((resolve, reject) => {
+    const request: ThumbnailRequest = { file, targetSize, low, resolve, reject };
+    // 高优先级（可见图片）插队到最前；低优先级（预加载）排到队尾，
+    // 保证用户正在看的缩略图不被预加载洪峰拖慢。
+    if (low) thumbnailQueue.push(request);
+    else thumbnailQueue.unshift(request);
+    for (let i = 0; i < THUMB_WORKER_COUNT; i++) ensureThumbnailWorker(i);
+    pumpThumbnailQueue();
+  });
+}
+
+/** 主进程 nativeImage 同步回退路径（webp/avif/未知格式或 worker 失败时）。 */
+function generateThumbnailBytesNative(file: DesktopFsEntry, targetSize: number): Uint8Array {
+  const image = nativeImage.createFromPath(file.id);
+  if (image.isEmpty()) {
+    throw new Error(`无法解码图片：${file.id}`);
+  }
+  const size = image.getSize();
+  const scale = Math.min(1, targetSize / Math.max(size.width, size.height));
+  const width = Math.max(1, Math.round(size.width * scale));
+  const height = Math.max(1, Math.round(size.height * scale));
+  const resized = image.resize({ width, height, quality: 'good' });
+  return new Uint8Array(resized.toJPEG(80));
+}
+
 function registerIpc(): void {
   // Source picker (import only)
   ipcMain.handle('import:pickFolder', async (): Promise<DesktopFsEntry | null> => {
@@ -285,24 +470,41 @@ function registerIpc(): void {
     return ext === '.png' ? resized.toPNG() : resized.toJPEG(85);
   });
 
-  ipcMain.handle('library:readThumbnail', async (_event, file: DesktopFsEntry, maxSize: number): Promise<Uint8Array> => {
+  ipcMain.handle('library:readThumbnail', async (_event, file: DesktopFsEntry, maxSize: number, low: boolean): Promise<Uint8Array> => {
     assertInsideLibrary(file.id);
-    // Electron's nativeImage cannot decode animated GIFs on Windows. Return the
-    // original GIF bytes for thumbnails instead of failing; GIFs are usually small.
-    if (path.extname(file.id).toLowerCase() === '.gif') {
-      return await fs.readFile(file.id);
-    }
-    const image = nativeImage.createFromPath(file.id);
-    if (image.isEmpty()) {
-      throw new Error(`无法解码图片：${file.id}`);
-    }
     const targetSize = Math.max(64, Math.min(maxSize || 512, 1024));
-    const size = image.getSize();
-    const scale = Math.min(1, targetSize / Math.max(size.width, size.height));
-    const width = Math.max(1, Math.round(size.width * scale));
-    const height = Math.max(1, Math.round(size.height * scale));
-    const resized = image.resize({ width, height, quality: 'good' });
-    return resized.toJPEG(80);
+    const cacheKey = thumbCacheKey(file, targetSize);
+    const cached = thumbCache.get(cacheKey);
+    if (cached) return cached;
+
+    const ext = path.extname(file.id).toLowerCase().slice(1);
+    // Electron's nativeImage cannot decode animated GIFs on Windows. Return the
+    // original GIF bytes instead; GIFs are usually small.
+    if (ext === 'gif') {
+      const data = new Uint8Array(await fs.readFile(file.id));
+      thumbCache.put(cacheKey, data);
+      return data;
+    }
+
+    // 优先走 worker 线程生成（不阻塞主进程，sharp 解码大图也快）。可见图片
+    // 高优先级插队在前；黑名单文件直接跳过 worker。
+    if (THUMB_WORKER_FORMATS.has(ext) && !failedWorkerPaths.has(file.id)) {
+      try {
+        const data = await enqueueThumbnail(file, targetSize, low === true);
+        thumbCache.put(cacheKey, data);
+        return data;
+      } catch (err) {
+        markWorkerFailed(file.id);
+        console.warn(`缩略图 worker 失败，回退主进程解码：${file.id} (${String(err)})`);
+        if (low) throw err; // 预加载不为失败文件触发主进程大图解码
+      }
+    }
+    if (low) throw new Error('低优先级跳过：worker 不可用，留给可见请求处理');
+    // 让出事件循环：连续多个大图回退解码之间，窗口控制等 IPC 有机会执行。
+    await new Promise<void>((r) => setImmediate(() => r()));
+    const data = generateThumbnailBytesNative(file, targetSize);
+    thumbCache.put(cacheKey, data);
+    return data;
   });
 
   ipcMain.handle('library:move', async (_event, entry: DesktopFsEntry, toFolder: DesktopFsEntry, newName?: string): Promise<DesktopFsEntry> => {
@@ -370,8 +572,8 @@ function registerIpc(): void {
 
 /**
  * Registers a guarded `kanitu-file://` protocol so the renderer can display the
- * ORIGINAL image (no 2560px cap, no giant IPC buffer): Chromium streams and decodes
- * the file natively. Only files inside the library are served.
+ * ORIGINAL file: Chromium streams and decodes it in the renderer (no cap, no giant
+ * IPC buffer). Only files inside the library are served.
  */
 function registerViewerProtocol(): void {
   protocol.handle('kanitu-file', async (request) => {
@@ -382,6 +584,7 @@ function registerViewerProtocol(): void {
     } catch {
       return new Response('禁止访问', { status: 403 });
     }
+
     try {
       return await net.fetch(pathToFileURL(filePath).toString());
     } catch {
@@ -422,6 +625,14 @@ function createWindow() {
   win.on('unmaximize', () => win.webContents.send('window:maximized-changed', false));
   win.on('closed', () => {
     if (mainWindow === win) mainWindow = null;
+  });
+
+  // 鼠标侧键（前进/后退）在 Chromium/Electron 里默认触发 WebContents 的历史
+  // 导航（history.back/forward），会把本应交给应用的导航变成整页刷新/重载——
+  // 侧键因此显得“响应慢”。这里阻止一切页内导航（本应用是单页，无内部跳转，
+  // 程序化 loadURL 不受 will-navigate 影响），侧键导航由渲染进程自行处理。
+  win.webContents.on('will-navigate', (event) => {
+    event.preventDefault();
   });
 
   // Avoid stale renderer bundles during development.

@@ -24,7 +24,7 @@ export interface KanituDesktopBridge {
   writeLibraryBlob(folder: DesktopFsEntry, name: string, data: Uint8Array): Promise<DesktopFsEntry>;
   listLibraryChildren(folder: DesktopFsEntry): Promise<DesktopFsEntry[]>;
   readLibraryBlob(file: DesktopFsEntry): Promise<Uint8Array>;
-  readLibraryThumbnail(file: DesktopFsEntry, maxSize: number): Promise<Uint8Array>;
+  readLibraryThumbnail(file: DesktopFsEntry, maxSize: number, low?: boolean): Promise<Uint8Array>;
   moveLibraryEntry(entry: DesktopFsEntry, toFolder: DesktopFsEntry, newName?: string): Promise<DesktopFsEntry>;
   removeLibraryEntry(entry: DesktopFsEntry): Promise<void>;
   exportZip(targetRelPath: string): Promise<{
@@ -134,8 +134,8 @@ export class ElectronLibraryStore implements LibraryStore {
     return new Blob([data as BlobPart]);
   }
 
-  async readThumbnail(file: FileRef, maxSize = 512): Promise<Blob> {
-    const data = await requireBridge().readLibraryThumbnail(toEntry(file), maxSize);
+  async readThumbnail(file: FileRef, maxSize = 512, options?: { low?: boolean }): Promise<Blob> {
+    const data = await requireBridge().readLibraryThumbnail(toEntry(file), maxSize, options?.low === true);
     return new Blob([data as BlobPart]);
   }
 
@@ -144,7 +144,9 @@ export class ElectronLibraryStore implements LibraryStore {
   }
 
   async getViewerUrl(file: FileRef): Promise<string> {
-    // The main process serves the ORIGINAL file through the guarded kanitu-file protocol.
+    // 查看器始终显示原始分辨率原图（保留全部像素，便于 100% 查看）。
+    // 主进程通过 kanitu-file 协议直接服务原始文件，渲染进程用解码缓存池
+    // 预解码相邻原图来缓解大图切换卡顿（见 LibraryBrowser 的 Viewer）。
     return `kanitu-file://file/?p=${encodeURIComponent(file.id)}`;
   }
 

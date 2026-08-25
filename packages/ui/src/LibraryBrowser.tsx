@@ -25,14 +25,28 @@ import {
   type PersistentIndex,
 } from '../../core/src/index';
 import type { ImportSourcePicker, LibraryStore } from '../../fs-adapter/src/types';
+import type { FileRef } from '../../fs-adapter/src/types';
 import type { KanituDesktopBridge } from '../../fs-adapter/src/electron';
 import { organizeByFolder, type CustomOrganizeRule } from '../../organizer/src/index';
 import { pickCover } from '../../cover-picker/src/index';
 import { BlobImage } from './BlobImage';
+import { getThumbnailBlob, preloadThumbnails } from './thumbnailCache';
+import {
+  backTarget,
+  canGoBack,
+  canGoForward,
+  createNavHistory,
+  forwardTarget,
+  moveBack,
+  moveForward,
+  recordNav,
+  type NavHistory,
+} from './navHistory';
 import { ContextMenu, type ContextMenuItem, type ContextMenuModel } from './ContextMenu';
+import { CoverPickerModal } from './CoverPickerModal';
 import { loadCustomRules, saveCustomRules } from './OrganizeRulesModal';
 import { OrganizePreview } from './OrganizePreview';
-import { FolderUpIcon, HomeIcon, NavButton, NavIconButton, PanelLeftIcon, SettingsIcon } from './NavButton';
+import { ArrowLeftIcon, ArrowRightIcon, FolderUpIcon, HomeIcon, NavButton, NavIconButton, PanelLeftIcon, SettingsIcon } from './NavButton';
 import { SidebarResizeHandle } from './SidebarResizeHandle';
 import { SettingsPage } from './SettingsPage';
 
@@ -71,8 +85,13 @@ function downloadBlob(blob: Blob, fileName: string): void {
   URL.revokeObjectURL(url);
 }
 
-const BLUR_STORAGE_KEY = 'kanitu-blurred-albums';
+const BLUR_STORAGE_KEY = 'kanitu-blurred-images';
 const PINNED_COVERS_KEY = 'kanitu-pinned-covers';
+
+// 子文件夹预览图预加载参数：进入某文件夹时，为每个子文件夹的前若干张
+// 缩略图预热缓存（见下方 useEffect），点进子文件夹时网格立即可用。
+const PRELOAD_PER_FOLDER = 12;
+const PRELOAD_MAX_FOLDERS = 16;
 
 function loadPinnedCovers(): Record<string, string> {
   try {
@@ -91,8 +110,10 @@ function savePinnedCovers(covers: Record<string, string>): void {
   }
 }
 
-function loadBlurredPaths(): ReadonlySet<string> {
+function loadBlurredImages(): ReadonlySet<string> {
   try {
+    // 旧版按相册（文件夹）存储，现改为逐图标记，作废旧键。
+    localStorage.removeItem('kanitu-blurred-albums');
     const raw = localStorage.getItem(BLUR_STORAGE_KEY);
     return new Set<string>(raw ? (JSON.parse(raw) as string[]) : []);
   } catch {
@@ -100,7 +121,7 @@ function loadBlurredPaths(): ReadonlySet<string> {
   }
 }
 
-function saveBlurredPaths(paths: ReadonlySet<string>): void {
+function saveBlurredImages(paths: ReadonlySet<string>): void {
   try {
     localStorage.setItem(BLUR_STORAGE_KEY, JSON.stringify([...paths]));
   } catch {
@@ -108,16 +129,8 @@ function saveBlurredPaths(paths: ReadonlySet<string>): void {
   }
 }
 
-function isPathBlurred(relPath: string | undefined, blurred: ReadonlySet<string>): boolean {
-  if (!relPath) return false;
-  let p = relPath;
-  while (p) {
-    if (blurred.has(p)) return true;
-    const idx = p.lastIndexOf('/');
-    if (idx < 0) break;
-    p = p.slice(0, idx);
-  }
-  return false;
+function isImageBlurred(relPath: string | undefined, blurred: ReadonlySet<string>): boolean {
+  return !!relPath && blurred.has(relPath);
 }
 
 export function LibraryBrowser({
@@ -154,7 +167,7 @@ export function LibraryBrowser({
     folder?: FolderNode;
   } | null>(null);
   const [promptValue, setPromptValue] = useState('');
-  const [blurredPaths, setBlurredPaths] = useState<ReadonlySet<string>>(() => loadBlurredPaths());
+  const [blurredImages, setBlurredImages] = useState<ReadonlySet<string>>(() => loadBlurredImages());
   const [searchQuery, setSearchQuery] = useState('');
   const [sidebarHidden, setSidebarHidden] = useState(() => localStorage.getItem('kanitu-sidebar-hidden') === '1');
   const [sidebarWidth, setSidebarWidth] = useState(() => {
@@ -165,11 +178,25 @@ export function LibraryBrowser({
   const [showSettings, setShowSettings] = useState(false);
   const [contextMenu, setContextMenu] = useState<ContextMenuModel | null>(null);
   const [pinnedCovers, setPinnedCovers] = useState<Record<string, string>>(() => loadPinnedCovers());
+  const [coverPickerFolder, setCoverPickerFolder] = useState<FolderNode | null>(null);
+  // 前进/后退导航历史（浏览器/资源管理器风格）：栈 + 当前位置指针。
+  const [nav, setNav] = useState<NavHistory>(() => createNavHistory());
+  // 最近一次“已入栈”的目录 id：后退/前进自身触发的选中变化用它来抑制重复记录。
+  const lastRecordedFolderRef = useRef<string | null>(null);
 
   const applySnapshot = useCallback((next: LibrarySnapshot) => {
     setSnapshot(next);
     setSelectedFolderId((prev) => (prev && next.folders[prev] ? prev : next.rootId));
   }, []);
+
+  // 记录每一次有效的文件夹导航（除前进/后退自身外）：截断当前位置之后的历史，
+  // 把新的当前位置追加进栈（与浏览器/资源管理器行为一致）。
+  useEffect(() => {
+    const current = selectedFolderId || snapshot?.rootId || '';
+    if (!current || current === lastRecordedFolderRef.current) return;
+    lastRecordedFolderRef.current = current;
+    setNav((prev) => recordNav(prev, current));
+  }, [selectedFolderId, snapshot]);
 
   const notify = useCallback((text: string, kind?: 'info' | 'success' | 'error') => {
     const detected = kind ?? (/失败|错误/.test(text) ? 'error' : (/完成|成功|^已/.test(text) ? 'success' : 'info'));
@@ -238,6 +265,33 @@ export function LibraryBrowser({
     }));
   }, [snapshot, childFolders, pinnedCovers]);
 
+  // 预加载子文件夹的预览图：进入一个文件夹时，在空闲时间后台为每个子文件夹
+  // 前若干张缩略图预热缓存（限并发、可取消），点进子文件夹时网格立即有图。
+  // 已缓存的条目会立即命中，因此重复进入同一父目录几乎无成本。
+  useEffect(() => {
+    if (!snapshot) return;
+    const token = { cancelled: false };
+    const targets: FileRef[] = [];
+    for (const child of childFolders) {
+      if (targets.length >= PRELOAD_MAX_FOLDERS) break;
+      for (const img of directImagesOf(snapshot, child.id).slice(0, PRELOAD_PER_FOLDER)) {
+        targets.push({ id: img.fileRefId ?? img.id, name: img.name, kind: 'file', mtime: img.mtime, size: img.size });
+      }
+    }
+    if (targets.length === 0) return;
+    const schedule = (work: () => void): void => {
+      if (typeof requestIdleCallback === 'function') {
+        requestIdleCallback(work, { timeout: 1500 });
+      } else {
+        setTimeout(work, 0);
+      }
+    };
+    schedule(() => preloadThumbnails(store, targets, { shouldStop: () => token.cancelled }));
+    return () => {
+      token.cancelled = true;
+    };
+  }, [snapshot, childFolders, store]);
+
   const selectedFolder = snapshot?.folders[selectedFolderId || snapshot?.rootId || ''] ?? null;
   const rootFolder = snapshot?.folders[snapshot.rootId] ?? null;
   const selectedParentFolder = selectedFolder?.parentId ? snapshot?.folders[selectedFolder.parentId] ?? null : null;
@@ -246,9 +300,14 @@ export function LibraryBrowser({
       ? 'Electron 模式 v0.5 · daisyUI 5'
       : 'Web 模式 v0.5 · daisyUI 5';
   const isRootSelected = !selectedFolderId || selectedFolderId === snapshot?.rootId;
-  const effectiveBlur = useMemo(
-    () => (selectedFolder ? isPathBlurred(selectedFolder.relPath, blurredPaths) : false),
-    [selectedFolder, blurredPaths],
+  // 文件夹级模糊状态：统计当前相册（含所有子文件夹）里逐图标记的数量。
+  const folderAllImages = useMemo(
+    () => (snapshot && selectedFolder ? imagesOf(snapshot, selectedFolder.id) : []),
+    [snapshot, selectedFolder],
+  );
+  const blurredInFolderCount = useMemo(
+    () => folderAllImages.reduce((n, img) => n + (blurredImages.has(img.relPath) ? 1 : 0), 0),
+    [folderAllImages, blurredImages],
   );
 
   // Breadcrumb path from the library root to the selected folder.
@@ -265,7 +324,7 @@ export function LibraryBrowser({
 
   const cover = useMemo(() => {
     if (!selectedFolder || !snapshot) return null;
-    const images = directImagesOf(snapshot, selectedFolder.id);
+    const images = imagesOf(snapshot, selectedFolder.id);
     return pickCover(images, { preferredId: pinnedCovers[selectedFolder.id] });
   }, [snapshot, selectedFolder, pinnedCovers]);
 
@@ -281,20 +340,87 @@ export function LibraryBrowser({
     });
   }, []);
 
-  const handleSelectFolder = useCallback(
-    (folder: FolderNode) => {
-      setSelectedFolderId(folder.id);
-      if (folder.childCount > 0) {
-        setExpandedFolders((prev) => {
-          if (prev.has(folder.id)) return prev;
-          const next = new Set(prev);
-          next.add(folder.id);
-          return next;
-        });
+  // 仅切换选中目录（不含任何历史记录逻辑，供前进/后退与普通导航复用）。
+  const selectFolderRaw = useCallback(
+    (folderId: string) => {
+      setSelectedFolderId(folderId);
+      const folder = snapshot?.folders[folderId];
+      if (folder && folder.childCount > 0) {
+        setExpandedFolders((prev) => (prev.has(folderId) ? prev : new Set(prev).add(folderId)));
       }
     },
-    [],
+    [snapshot],
   );
+
+  const handleSelectFolder = useCallback(
+    (folder: FolderNode) => {
+      selectFolderRaw(folder.id);
+    },
+    [selectFolderRaw],
+  );
+
+  const handleNavBack = useCallback(() => {
+    const target = backTarget(nav);
+    if (target && snapshot?.folders[target]) {
+      // 同步“已入栈”标记，让记录 effect 跳过这一次自身触发的选中变化。
+      lastRecordedFolderRef.current = target;
+      selectFolderRaw(target);
+    }
+    setNav((prev) => moveBack(prev));
+  }, [nav, snapshot, selectFolderRaw]);
+
+  const handleNavForward = useCallback(() => {
+    const target = forwardTarget(nav);
+    if (target && snapshot?.folders[target]) {
+      lastRecordedFolderRef.current = target;
+      selectFolderRaw(target);
+    }
+    setNav((prev) => moveForward(prev));
+  }, [nav, snapshot, selectFolderRaw]);
+
+  // 鼠标前进/后退键（XButton1=button 3 / XButton2=button 4）触发导航：
+  // 浏览模式 → 文件夹后退/前进；查看器打开 → 上一张/下一张图片；
+  // 输入框聚焦时不触发。在 mouseup 上立即执行（比 auxclick 更早），并在
+  // mousedown/mouseup/auxclick 上 preventDefault，拦掉 Chromium 默认把侧键
+  // 当作页面历史导航的行为（主进程 will-navigate 也会兜底阻止整页刷新）。
+  useEffect(() => {
+    const navigateByMouseButton = (button: number) => {
+      const active = document.activeElement;
+      if (
+        active &&
+        (active.tagName === 'INPUT' ||
+          active.tagName === 'TEXTAREA' ||
+          active.tagName === 'SELECT' ||
+          (active as HTMLElement).isContentEditable)
+      ) {
+        return;
+      }
+      if (viewerImageId) {
+        const dir = button === 3 ? -1 : 1;
+        const idx = folderImages.findIndex((img) => img.id === viewerImageId);
+        if (idx >= 0 && folderImages.length > 0) {
+          const next = folderImages[(idx + dir + folderImages.length) % folderImages.length]!;
+          if (next.id !== viewerImageId) setViewerImageId(next.id);
+        }
+        return;
+      }
+      if (button === 3) handleNavBack();
+      else handleNavForward();
+    };
+    const onSideButton = (event: MouseEvent) => {
+      if (event.button !== 3 && event.button !== 4) return;
+      event.preventDefault();
+      if (event.type === 'mouseup') navigateByMouseButton(event.button);
+    };
+    window.addEventListener('mousedown', onSideButton);
+    window.addEventListener('mouseup', onSideButton);
+    window.addEventListener('auxclick', onSideButton);
+    return () => {
+      window.removeEventListener('mousedown', onSideButton);
+      window.removeEventListener('mouseup', onSideButton);
+      window.removeEventListener('auxclick', onSideButton);
+    };
+  }, [viewerImageId, folderImages, handleNavBack, handleNavForward]);
 
   const handleGoUp = useCallback(() => {
     if (!snapshot || !selectedFolder?.parentId) return;
@@ -475,17 +601,38 @@ export function LibraryBrowser({
   const requestDeleteImage = (image: ImageEntry) => setDeleteTarget({ kind: 'image', image });
   const requestDeleteFolder = (folder: FolderNode) => setDeleteTarget({ kind: 'folder', folder });
 
-  const toggleBlur = useCallback(() => {
-    if (!selectedFolder || !selectedFolder.relPath) return;
-    const path = selectedFolder.relPath;
-    setBlurredPaths((prev) => {
+  /** 一键开启/取消某相册及其全部子文件夹里每一张图片的隐私预览（逐图标记）。 */
+  const toggleFolderBlur = useCallback((folder: FolderNode) => {
+    if (!snapshot || !folder) return;
+    const images = imagesOf(snapshot, folder.id);
+    if (images.length === 0) return;
+    const allBlurred = images.every((img) => blurredImages.has(img.relPath));
+    setBlurredImages((prev) => {
       const next = new Set(prev);
-      if (next.has(path)) next.delete(path);
-      else next.add(path);
-      saveBlurredPaths(next);
+      for (const img of images) {
+        if (allBlurred) next.delete(img.relPath);
+        else next.add(img.relPath);
+      }
+      saveBlurredImages(next);
       return next;
     });
-  }, [selectedFolder]);
+    notify(
+      allBlurred
+        ? `已取消“${folder.name}”及子文件夹的隐私预览。`
+        : `已为“${folder.name}”及全部子文件夹开启隐私预览。`,
+    );
+  }, [snapshot, blurredImages, notify]);
+
+  /** 仅切换某一张图片的隐私预览。 */
+  const toggleImageBlur = useCallback((image: ImageEntry) => {
+    setBlurredImages((prev) => {
+      const next = new Set(prev);
+      if (next.has(image.relPath)) next.delete(image.relPath);
+      else next.add(image.relPath);
+      saveBlurredImages(next);
+      return next;
+    });
+  }, []);
 
   const copyPath = useCallback(async (text: string, label = '路径') => {
     try {
@@ -496,7 +643,7 @@ export function LibraryBrowser({
     }
   }, [notify]);
 
-  const pinCover = useCallback((folderId: string, imageId: string | null) => {
+  const pinCover = useCallback((folderId: string, imageId: string | null, imageName?: string) => {
     setPinnedCovers((prev) => {
       const next = { ...prev };
       if (imageId) next[folderId] = imageId;
@@ -504,7 +651,7 @@ export function LibraryBrowser({
       savePinnedCovers(next);
       return next;
     });
-    notify(imageId ? '已设为相册封面。' : '已取消固定封面。');
+    notify(imageId ? `已将“${imageName ?? '该图片'}”设为相册封面。` : '已取消固定封面。');
   }, [notify]);
 
   const handleRenameImage = (image: ImageEntry) => {
@@ -623,17 +770,25 @@ export function LibraryBrowser({
     setContextMenu({ x: event.clientX, y: event.clientY, items });
   }, []);
 
-  const buildImageMenu = (image: ImageEntry): ContextMenuItem[] => [
-    { label: '查看图片', icon: '🔍', onSelect: () => setViewerImageId(image.id) },
-    {
-      label: pinnedCovers[image.folderId] === image.id ? '取消固定封面' : '设为封面',
-      icon: '⭐',
-      onSelect: () => pinCover(image.folderId, pinnedCovers[image.folderId] === image.id ? null : image.id),
-    },
-    { label: '重命名…', icon: '✏️', onSelect: () => void handleRenameImage(image) },
-    { label: '复制路径', icon: '📋', onSelect: () => void copyPath(image.relPath) },
-    { label: '删除', icon: '🗑️', danger: true, separator: true, onSelect: () => requestDeleteImage(image) },
-  ];
+  const buildImageMenu = (image: ImageEntry): ContextMenuItem[] => {
+    const imageBlurred = blurredImages.has(image.relPath);
+    return [
+      { label: '查看图片', icon: '🔍', onSelect: () => setViewerImageId(image.id) },
+      {
+        label: imageBlurred ? '取消隐私预览' : '设为隐私预览',
+        icon: imageBlurred ? '🔓' : '🔒',
+        onSelect: () => toggleImageBlur(image),
+      },
+      {
+        label: pinnedCovers[image.folderId] === image.id ? '取消固定封面' : '设为封面',
+        icon: '⭐',
+        onSelect: () => pinCover(image.folderId, pinnedCovers[image.folderId] === image.id ? null : image.id, image.name),
+      },
+      { label: '重命名…', icon: '✏️', onSelect: () => void handleRenameImage(image) },
+      { label: '复制路径', icon: '📋', onSelect: () => void copyPath(image.relPath) },
+      { label: '删除', icon: '🗑️', danger: true, separator: true, onSelect: () => requestDeleteImage(image) },
+    ];
+  };
 
   const buildFolderMenu = (folder: FolderNode): ContextMenuItem[] => {
     const items: ContextMenuItem[] = [
@@ -650,6 +805,21 @@ export function LibraryBrowser({
     if (folder.relPath) {
       items.push({ label: '重命名…', icon: '✏️', onSelect: () => void handleRenameFolder(folder) });
     }
+    const folderImagesList = snapshot ? imagesOf(snapshot, folder.id) : [];
+    const folderAllBlurred =
+      folderImagesList.length > 0 && folderImagesList.every((img) => blurredImages.has(img.relPath));
+    items.push({
+      label: folderAllBlurred ? '取消隐私预览（含子文件夹）' : '设为隐私预览（含子文件夹）',
+      icon: folderAllBlurred ? '🔓' : '🔒',
+      disabled: folderImagesList.length === 0,
+      onSelect: () => toggleFolderBlur(folder),
+    });
+    items.push({
+      label: '设置封面…',
+      icon: '🖼️',
+      disabled: folderImagesList.length === 0,
+      onSelect: () => setCoverPickerFolder(folder),
+    });
     items.push(
       { label: '整理…', icon: '🧹', onSelect: () => openOrganizePreviewFor(folder) },
       { label: '导出 ZIP…', icon: '📦', onSelect: () => void exportFolder(folder) },
@@ -682,6 +852,12 @@ export function LibraryBrowser({
               title={sidebarHidden ? '显示侧边栏' : '隐藏侧边栏'}
             >
               <PanelLeftIcon />
+            </NavIconButton>
+            <NavIconButton onClick={handleNavBack} disabled={!canGoBack(nav)} title="后退">
+              <ArrowLeftIcon />
+            </NavIconButton>
+            <NavIconButton onClick={handleNavForward} disabled={!canGoForward(nav)} title="前进">
+              <ArrowRightIcon />
             </NavIconButton>
             <NavIconButton onClick={handleGoUp} disabled={!selectedParentFolder} title="上一级目录">
               <FolderUpIcon />
@@ -719,8 +895,14 @@ export function LibraryBrowser({
                   {selectedFolder && (
                     <span>{selectedFolder.imageCount} 图片 / {selectedFolder.childCount} 子目录</span>
                   )}
+                  {blurredInFolderCount > 0 && (
+                    <span>隐私预览 {blurredInFolderCount} 张</span>
+                  )}
                   {cover && (
-                    <span>封面：{snapshot?.images[cover.imageId]?.name ?? cover.imageId}</span>
+                    <span>
+                      封面：{snapshot?.images[cover.imageId]?.name ?? cover.imageId}
+                      {selectedFolder && pinnedCovers[selectedFolder.id] != null && '（已固定）'}
+                    </span>
                   )}
                 </div>
               )}
@@ -733,14 +915,6 @@ export function LibraryBrowser({
             <button className="btn btn-ghost btn-sm" disabled={!lastManifest || busy} onClick={handleUndoOrganize}>撤销</button>
             <button className="btn btn-ghost btn-sm" disabled={!selectedFolder || busy || exporting} onClick={handleExport}>
               {exporting ? '导出中…' : '导出 ZIP'}
-            </button>
-            <button
-              className={`btn btn-sm ${effectiveBlur ? 'btn-active' : 'btn-ghost'}`}
-              disabled={!selectedFolder || !selectedFolder.relPath}
-              onClick={toggleBlur}
-              title={effectiveBlur ? '关闭模糊预览（当前相册及子文件夹）' : '开启模糊预览（当前相册及子文件夹）'}
-            >
-              {effectiveBlur ? '已模糊' : '模糊预览'}
             </button>
             <button className="btn btn-error btn-sm btn-outline" disabled={!selectedFolder || !selectedFolder.relPath || busy || exporting} onClick={requestDelete}>删除</button>
             {importReport && <button className="btn btn-ghost btn-sm" onClick={() => setImportReport(importReport)}>报告</button>}
@@ -767,15 +941,20 @@ export function LibraryBrowser({
                             id: snapshot?.images[cover.imageId]?.fileRefId ?? cover.imageId,
                             name: snapshot?.images[cover.imageId]?.name ?? '',
                             kind: 'file',
+                            mtime: snapshot?.images[cover.imageId]?.mtime,
+                            size: snapshot?.images[cover.imageId]?.size,
                           }}
                           alt={folder.name}
                           className="w-full h-full object-cover"
                           thumbnail
                           lazy
-                          blur={isPathBlurred(folder.relPath, blurredPaths)}
+                          blur={isImageBlurred(snapshot?.images[cover.imageId]?.relPath, blurredImages)}
                         />
                       ) : (
                         <div className="w-full h-full flex items-center justify-center opacity-60 text-sm">无图片</div>
+                      )}
+                      {pinnedCovers[folder.id] != null && (
+                        <span className="absolute top-2 left-2 z-10 badge badge-primary badge-sm shadow">⭐ 已固定</span>
                       )}
                     </figure>
                     <figcaption className="p-3 flex items-center justify-between gap-2">
@@ -802,12 +981,12 @@ export function LibraryBrowser({
                     <figure className="aspect-[4/3] overflow-hidden relative">
                       <BlobImage
                         store={store}
-                        fileRef={{ id: image.fileRefId ?? image.id, name: image.name, kind: 'file' }}
+                        fileRef={{ id: image.fileRefId ?? image.id, name: image.name, kind: 'file', mtime: image.mtime, size: image.size }}
                         alt={image.name}
                         className="w-full h-full object-cover"
                         thumbnail
                         lazy
-                        blur={effectiveBlur}
+                        blur={blurredImages.has(image.relPath)}
                       />
                     </figure>
                     <figcaption className="p-3">
@@ -919,95 +1098,117 @@ export function LibraryBrowser({
         />
       )}
 
+      {coverPickerFolder && snapshot && (
+        <CoverPickerModal
+          folderId={coverPickerFolder.id}
+          snapshot={snapshot}
+          store={store}
+          pinnedCovers={pinnedCovers}
+          currentCoverId={pinnedCovers[coverPickerFolder.id] ?? null}
+          onPick={(imageId) => {
+            const pinnedName = imageId ? snapshot.images[imageId]?.name : undefined;
+            pinCover(coverPickerFolder.id, imageId, pinnedName);
+            setCoverPickerFolder(null);
+          }}
+          onCancel={() => setCoverPickerFolder(null)}
+        />
+      )}
+
       {organizeResult && (
         <div className="modal modal-open">
-          <div className="modal-box max-w-3xl">
-            <h3 className="font-bold text-lg">整理结果</h3>
-            <div className="flex flex-wrap gap-4 text-sm mb-3">
+          <div className="modal-box max-w-3xl flex flex-col max-h-[80vh]">
+            <h3 className="font-bold text-lg shrink-0">整理结果</h3>
+            <div className="flex flex-wrap gap-4 text-sm mb-3 shrink-0">
               <span>已应用：{organizeResult.appliedCount}</span>
               <span>低置信跳过：{organizeResult.skippedLowConfidenceCount}</span>
               <span>冲突：{organizeResult.conflicts.length}</span>
             </div>
-            {organizeResult.conflicts.length > 0 && (
-              <div className="overflow-x-auto">
-                <table className="table table-sm">
-                  <thead>
-                    <tr><th>文件</th><th>目标</th><th>原因</th></tr>
-                  </thead>
-                  <tbody>
-                    {organizeResult.conflicts.map((c, i) => (
-                      <tr key={`${c.imageId}-${i}`}>
-                        <td>{c.name}</td>
-                        <td>{c.targetRelPath}</td>
-                        <td>{conflictReasonLabel(c.reason)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-            <div className="modal-action"><button className="btn btn-ghost" onClick={() => setOrganizeResult(null)}>关闭</button></div>
+            <div className="overflow-y-auto flex-1 min-h-0">
+              {organizeResult.conflicts.length > 0 && (
+                <div className="overflow-x-auto">
+                  <table className="table table-sm">
+                    <thead>
+                      <tr><th>文件</th><th>目标</th><th>原因</th></tr>
+                    </thead>
+                    <tbody>
+                      {organizeResult.conflicts.map((c, i) => (
+                        <tr key={`${c.imageId}-${i}`}>
+                          <td>{c.name}</td>
+                          <td>{c.targetRelPath}</td>
+                          <td>{conflictReasonLabel(c.reason)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+            <div className="modal-action shrink-0"><button className="btn btn-ghost" onClick={() => setOrganizeResult(null)}>关闭</button></div>
           </div>
         </div>
       )}
 
       {importReport && (
         <div className="modal modal-open">
-          <div className="modal-box max-w-3xl">
-            <h3 className="font-bold text-lg">导入报告</h3>
-            <div className="flex flex-wrap gap-4 text-sm mb-3">
+          <div className="modal-box max-w-3xl flex flex-col max-h-[80vh]">
+            <h3 className="font-bold text-lg shrink-0">导入报告</h3>
+            <div className="flex flex-wrap gap-4 text-sm mb-3 shrink-0">
               <span>来源：{importReport.sourceFolderName}</span>
               <span>扫描：{importReport.scannedFileCount}</span>
               <span>复制：{importReport.copiedImageCount}</span>
               <span>跳过：{importReport.skippedCount}</span>
             </div>
-            {importReport.skippedFiles.length > 0 && (
-              <div className="overflow-x-auto">
-                <table className="table table-sm">
-                  <thead><tr><th>跳过的文件</th><th>原因</th></tr></thead>
-                  <tbody>
-                    {importReport.skippedFiles.map((item, idx) => (
-                      <tr key={`${item.path}-${idx}`}>
-                        <td className="font-mono text-xs">{item.path}</td>
-                        <td>{skippedReasonLabel(item.reason)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-            {importReport.errors.length > 0 && (
-              <div className="mt-4">
-                <h4 className="text-sm font-semibold mb-2">失败项</h4>
+            <div className="overflow-y-auto flex-1 min-h-0">
+              {importReport.skippedFiles.length > 0 && (
                 <div className="overflow-x-auto">
                   <table className="table table-sm">
-                    <thead><tr><th>错误</th></tr></thead>
+                    <thead><tr><th>跳过的文件</th><th>原因</th></tr></thead>
                     <tbody>
-                      {importReport.errors.map((error, idx) => (
-                        <tr key={`error-${idx}`}>
-                          <td className="font-mono text-xs text-error">{error}</td>
+                      {importReport.skippedFiles.map((item, idx) => (
+                        <tr key={`${item.path}-${idx}`}>
+                          <td className="font-mono text-xs">{item.path}</td>
+                          <td>{skippedReasonLabel(item.reason)}</td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
-              </div>
-            )}
-            <div className="modal-action"><button className="btn btn-ghost" onClick={() => setImportReport(null)}>关闭</button></div>
+              )}
+              {importReport.errors.length > 0 && (
+                <div className="mt-4">
+                  <h4 className="text-sm font-semibold mb-2">失败项</h4>
+                  <div className="overflow-x-auto">
+                    <table className="table table-sm">
+                      <thead><tr><th>错误</th></tr></thead>
+                      <tbody>
+                        {importReport.errors.map((error, idx) => (
+                          <tr key={`error-${idx}`}>
+                            <td className="font-mono text-xs text-error">{error}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="modal-action shrink-0"><button className="btn btn-ghost" onClick={() => setImportReport(null)}>关闭</button></div>
           </div>
         </div>
       )}
 
       {deleteTarget && (
         <div className="modal modal-open">
-          <div className="modal-box">
-            <h3 className="font-bold text-lg">确认删除</h3>
-            <p className="py-4 text-sm opacity-80">
-              {deleteTarget.kind === 'image'
-                ? `确定要删除图片“${deleteTarget.image.name}”吗？此操作不可撤销。`
-                : `确定要删除图包“${deleteTarget.folder.name}”及其全部子目录吗？此操作不可撤销。`}
-            </p>
-            <div className="modal-action">
+          <div className="modal-box flex flex-col max-h-[80vh]">
+            <h3 className="font-bold text-lg shrink-0">确认删除</h3>
+            <div className="overflow-y-auto flex-1 min-h-0">
+              <p className="py-4 text-sm opacity-80">
+                {deleteTarget.kind === 'image'
+                  ? `确定要删除图片“${deleteTarget.image.name}”吗？此操作不可撤销。`
+                  : `确定要删除图包“${deleteTarget.folder.name}”及其全部子目录吗？此操作不可撤销。`}
+              </p>
+            </div>
+            <div className="modal-action shrink-0">
               <button className="btn btn-ghost" onClick={() => setDeleteTarget(null)}>取消</button>
               <button className="btn btn-error" onClick={() => void confirmDeleteTarget()}>删除</button>
             </div>
@@ -1017,22 +1218,24 @@ export function LibraryBrowser({
 
       {promptState && (
         <div className="modal modal-open z-[130]">
-          <div className="modal-box max-w-md">
-            <h3 className="font-bold text-lg">{promptState.title}</h3>
-            <div className="form-control w-full mt-3">
-              <span className="label-text text-xs">{promptState.label}</span>
-              <input
-                className="input input-bordered input-sm mt-1 font-mono"
-                value={promptValue}
-                onChange={(event) => setPromptValue(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') void submitPrompt();
-                  if (event.key === 'Escape') setPromptState(null);
-                }}
-                autoFocus
-              />
+          <div className="modal-box max-w-md flex flex-col max-h-[80vh]">
+            <h3 className="font-bold text-lg shrink-0">{promptState.title}</h3>
+            <div className="overflow-y-auto flex-1 min-h-0">
+              <div className="form-control w-full mt-3">
+                <span className="label-text text-xs">{promptState.label}</span>
+                <input
+                  className="input input-bordered input-sm mt-1 font-mono"
+                  value={promptValue}
+                  onChange={(event) => setPromptValue(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') void submitPrompt();
+                    if (event.key === 'Escape') setPromptState(null);
+                  }}
+                  autoFocus
+                />
+              </div>
             </div>
-            <div className="modal-action">
+            <div className="modal-action shrink-0">
               <button className="btn btn-ghost btn-sm" onClick={() => setPromptState(null)}>取消</button>
               <button className="btn btn-primary btn-sm" onClick={() => void submitPrompt()}>保存</button>
             </div>
@@ -1212,6 +1415,78 @@ function ThemeToggle() {
   );
 }
 
+// ---- 查看器：已解码原图缓存池（LRU，按估算字节限流）----
+// 查看器始终显示原始分辨率原图，大图解码是切换卡顿的主因。这里预解码相邻
+// 原图并把位图留在内存里（LRU），来回切换时 Chromium 直接复用已解码像素，
+// 而不是每次现场解码。只用游离的 Image 对象，绝不触碰 React 渲染的元素。
+const ORIGINAL_POOL_MAX_ENTRIES = 16;
+const ORIGINAL_POOL_MAX_BYTES = 384 * 1024 * 1024; // RGBA 估算上限（约合几张千万像素图）
+const ORIGINAL_POOL = new Map<string, HTMLImageElement>(); // 迭代序 = 插入序（LRU）
+let ORIGINAL_POOL_BYTES = 0;
+
+function estimatedImageBytes(width: number | undefined, height: number | undefined): number {
+  return width && height && width > 0 && height > 0 ? width * height * 4 : 0;
+}
+
+function originalPoolTouch(url: string): void {
+  const img = ORIGINAL_POOL.get(url);
+  if (!img) return;
+  ORIGINAL_POOL.delete(url);
+  ORIGINAL_POOL.set(url, img);
+}
+
+/** 释放不再保留的 URL（web/memory 实现生成 blob: URL 需要 revoke；协议 URL 是 no-op）。 */
+function releasePooledUrl(url: string): void {
+  if (url.startsWith('blob:')) URL.revokeObjectURL(url);
+}
+
+function originalPoolEvict(): void {
+  while (
+    (ORIGINAL_POOL.size > ORIGINAL_POOL_MAX_ENTRIES || ORIGINAL_POOL_BYTES > ORIGINAL_POOL_MAX_BYTES) &&
+    ORIGINAL_POOL.size > 0
+  ) {
+    const oldestUrl = ORIGINAL_POOL.keys().next().value;
+    if (oldestUrl === undefined) break;
+    const img = ORIGINAL_POOL.get(oldestUrl);
+    ORIGINAL_POOL.delete(oldestUrl);
+    if (img) {
+      ORIGINAL_POOL_BYTES -= estimatedImageBytes(img.naturalWidth, img.naturalHeight);
+      img.removeAttribute('src'); // 释放解码位图引用
+      releasePooledUrl(oldestUrl);
+    }
+  }
+}
+
+function originalPoolPut(url: string, img: HTMLImageElement): void {
+  const bytes = estimatedImageBytes(img.naturalWidth, img.naturalHeight);
+  const existing = ORIGINAL_POOL.get(url);
+  if (existing) {
+    ORIGINAL_POOL.delete(url);
+    ORIGINAL_POOL_BYTES -= estimatedImageBytes(existing.naturalWidth, existing.naturalHeight);
+  }
+  ORIGINAL_POOL.set(url, img);
+  ORIGINAL_POOL_BYTES += bytes;
+  originalPoolEvict();
+}
+
+/** 预解码一张原图并把位图放入缓存池。 */
+function prefetchOriginal(url: string, estWidth?: number, estHeight?: number): void {
+  if (ORIGINAL_POOL.has(url)) {
+    originalPoolTouch(url);
+    return;
+  }
+  // 预估内存超限则不预解码，避免压垮内存。
+  if (ORIGINAL_POOL_BYTES + estimatedImageBytes(estWidth, estHeight) > ORIGINAL_POOL_MAX_BYTES * 2) return;
+  const img = new Image();
+  img.decoding = 'async';
+  img.onload = () => originalPoolPut(url, img);
+  img.onerror = () => {
+    ORIGINAL_POOL.delete(url);
+    releasePooledUrl(url);
+  };
+  img.src = url;
+}
+
 function Viewer({
   images,
   index,
@@ -1230,18 +1505,32 @@ function Viewer({
   onImageContextMenu: (event: ReactMouseEvent, image: ImageEntry) => void;
 }) {
   const image = images[index];
-  const [viewerUrl, setViewerUrl] = useState<string | null>(null);
+  // displayUrl：当前正在显示的图（只在确已解码完成后换入，切换期间旧图保持可见，
+  // 不会黑屏）；pendingUrl：下一张正在后台解码的隐式加载器；thumbUrl：缩略图占位。
+  const [displayUrl, setDisplayUrl] = useState<string | null>(null);
+  const [pendingUrl, setPendingUrl] = useState<string | null>(null);
+  const [thumbUrl, setThumbUrl] = useState<string | null>(null);
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
+  const [originalFailed, setOriginalFailed] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [rotate, setRotate] = useState(0);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [containerSize, setContainerSize] = useState({ w: 0, h: 0 });
 
   const containerRef = useRef<HTMLDivElement>(null);
-  const viewerUrlRef = useRef<string | null>(null);
+  const displayUrlRef = useRef<string | null>(null);
+  const pendingUrlRef = useRef<string | null>(null);
   const dragRef = useRef<{ startX: number; startY: number; startPan: { x: number; y: number } } | null>(null);
 
-  const fileRefFor = (img: ImageEntry) => ({ id: img.fileRefId ?? img.id, name: img.name, kind: 'file' as const });
+  const fileRefFor = (img: ImageEntry) => ({
+    id: img.fileRefId ?? img.id,
+    name: img.name,
+    kind: 'file' as const,
+    mtime: img.mtime,
+    size: img.size,
+    width: img.width,
+    height: img.height,
+  });
 
   useEffect(() => {
     const el = containerRef.current;
@@ -1253,6 +1542,23 @@ function Viewer({
     return () => ro.disconnect();
   }, []);
 
+  // 原图解码完成后换入显示（旧图在换入前始终保持可见，切换不黑屏）。
+  const swapIn = useCallback(
+    (url: string, w: number, h: number) => {
+      if (displayUrlRef.current && displayUrlRef.current !== url) {
+        store.releaseViewerUrl(displayUrlRef.current);
+      }
+      displayUrlRef.current = url;
+      pendingUrlRef.current = null;
+      setPendingUrl(null);
+      setOriginalFailed(false);
+      setDisplayUrl(url);
+      setNatural({ w, h });
+    },
+    [store],
+  );
+
+  // 下一张图：取原始文件 URL，放入后台隐式解码的加载器（不立即换入显示）。
   useEffect(() => {
     if (!image) return;
     let cancelled = false;
@@ -1261,41 +1567,91 @@ function Viewer({
         store.releaseViewerUrl(url);
         return;
       }
-      if (viewerUrlRef.current) store.releaseViewerUrl(viewerUrlRef.current);
-      viewerUrlRef.current = url;
-      setViewerUrl(url);
+      pendingUrlRef.current = url;
+      setPendingUrl(url);
     });
     return () => {
       cancelled = true;
+      if (pendingUrlRef.current) {
+        store.releaseViewerUrl(pendingUrlRef.current);
+        pendingUrlRef.current = null;
+      }
     };
   }, [image, store]);
 
   useEffect(() => {
     return () => {
-      if (viewerUrlRef.current) store.releaseViewerUrl(viewerUrlRef.current);
+      if (pendingUrlRef.current) store.releaseViewerUrl(pendingUrlRef.current);
+      if (displayUrlRef.current) store.releaseViewerUrl(displayUrlRef.current);
     };
   }, [store]);
 
+  // 切换图片时先加载缩略图占位（走缩略图缓存，已看过的图瞬时可用），
+  // 覆盖在仍在显示的旧图之上；原图在加载器里解码完成后换入。
   useEffect(() => {
+    if (!image) return;
+    let cancelled = false;
+    let thumbObjectUrl: string | null = null;
+    setThumbUrl(null);
+    getThumbnailBlob(store, fileRefFor(image), 512)
+      .then((blob) => {
+        if (cancelled) return;
+        thumbObjectUrl = URL.createObjectURL(blob);
+        setThumbUrl(thumbObjectUrl);
+      })
+      .catch(() => {
+        // 缩略图失败时静默；原图会照常加载。
+      });
+    return () => {
+      cancelled = true;
+      if (thumbObjectUrl) URL.revokeObjectURL(thumbObjectUrl);
+    };
+  }, [image, store]);
+
+  useEffect(() => {
+    // natural 跟随当前显示的图，切换期间旧图仍显示，因此不重置 natural。
     setZoom(1);
     setRotate(0);
     setPan({ x: 0, y: 0 });
-    setNatural(null);
+    setOriginalFailed(false);
   }, [image?.id]);
 
+  // 预解码相邻原图（先 ±1、再 ±2，错峰执行）：位图保留在 ORIGINAL_POOL 里，
+  // ←/→ 切换时直接复用已解码像素，不再等 Chromium 现场解码大图。
   useEffect(() => {
     if (!images.length) return;
-    for (const offset of [-1, 1]) {
+    let cancelled = false;
+    const jobs: (() => void)[] = [];
+    for (const offset of [1, -1, 2, -2]) {
       const i = index + offset;
       if (i < 0 || i >= images.length) continue;
-      const img = images[i]!;
-      store.getViewerUrl(fileRefFor(img)).then((url) => {
-        const pre = new Image();
-        pre.onload = () => store.releaseViewerUrl(url);
-        pre.onerror = () => store.releaseViewerUrl(url);
-        pre.src = url;
+      const neighbor = images[i]!;
+      jobs.push(() => {
+        store
+          .getViewerUrl(fileRefFor(neighbor))
+          .then((url) => {
+            if (!cancelled) prefetchOriginal(url, neighbor.width, neighbor.height);
+          })
+          .catch(() => {
+            // 预解码失败静默；真显示时由主 <img> 自行加载。
+          });
       });
     }
+    if (jobs.length === 0) return;
+    const step = (): void => {
+      if (cancelled || jobs.length === 0) return;
+      jobs.shift()!();
+      // 每步隔一个宏任务，解码错峰，避免瞬时并发解码多张大图。
+      setTimeout(step, 60);
+    };
+    if (typeof requestIdleCallback === 'function') {
+      requestIdleCallback(step, { timeout: 800 });
+    } else {
+      setTimeout(step, 0);
+    }
+    return () => {
+      cancelled = true;
+    };
   }, [image?.id, images, index, store]);
 
   const baseFit = useMemo(() => {
@@ -1370,6 +1726,10 @@ function Viewer({
 
   if (!image) return null;
 
+  // 缩略图“替换”显示层的条件：新图正在加载（pendingUrl 非空）、或尚无显示图、
+  // 或原图加载失败——此时只显示缩略图，与旧图互斥，不叠放。
+  const showThumbReplace = thumbUrl != null && (pendingUrl != null || displayUrl == null || originalFailed);
+
   return (
     <div className="viewer-overlay fixed inset-0 z-[100] bg-black flex flex-col">
       <div className="flex items-center justify-between gap-3 p-4 text-white">
@@ -1386,7 +1746,7 @@ function Viewer({
         </div>
       </div>
       <div
-        className="flex-1 flex items-center justify-center overflow-hidden cursor-grab active:cursor-grabbing"
+        className="flex-1 flex items-center justify-center overflow-hidden cursor-grab active:cursor-grabbing relative"
         ref={containerRef}
         onContextMenu={(event) => onImageContextMenu(event, image)}
         onWheel={(e) => {
@@ -1408,22 +1768,56 @@ function Viewer({
           dragRef.current = null;
         }}
       >
-        {viewerUrl && (
+        {/* 缩略图就绪后“替换”旧图（不是叠放）：显示层与缩略图层互斥，避免快速
+        切换时新缩略图叠在旧图上。旧图在缩略图就绪前保持显示，保证不黑屏。 */}
+        {(displayUrl && !showThumbReplace) && (
           <img
             className="select-none pointer-events-none"
-            src={viewerUrl}
+            src={displayUrl}
             alt={image.name}
             draggable={false}
-            onLoad={(e) => {
-              const el = e.currentTarget;
-              setNatural({ w: el.naturalWidth, h: el.naturalHeight });
-            }}
             style={{
               width: fitSize.w,
               height: fitSize.h,
               transform: `translate(${panX}px, ${panY}px) rotate(${rotate}deg) scale(${zoom})`,
             }}
           />
+        )}
+        {/* 下一张图的后台隐式加载器：透明挂载，解码完成才换入 displayUrl。 */}
+        {pendingUrl && (
+          <img
+            className="absolute inset-0 opacity-0 pointer-events-none select-none"
+            src={pendingUrl}
+            alt=""
+            aria-hidden="true"
+            decoding="async"
+            onLoad={(e) => {
+              const el = e.currentTarget;
+              if (pendingUrlRef.current !== pendingUrl) return;
+              swapIn(pendingUrl, el.naturalWidth, el.naturalHeight);
+            }}
+            onError={() => {
+              if (pendingUrlRef.current !== pendingUrl) return;
+              pendingUrlRef.current = null;
+              setPendingUrl(null);
+              setOriginalFailed(true);
+            }}
+          />
+        )}
+        {/* 新图缩略图占位：取代显示层，等待原图解码完成。 */}
+        {showThumbReplace && (
+          <img
+            className="absolute inset-0 w-full h-full object-contain select-none pointer-events-none"
+            src={thumbUrl}
+            alt=""
+            aria-hidden="true"
+          />
+        )}
+        {/* 初始打开、显示层与缩略图都未就绪时的加载指示。 */}
+        {!displayUrl && !thumbUrl && (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <span className="loading loading-spinner loading-lg text-white/70" />
+          </div>
         )}
       </div>
       <div className="flex gap-2 px-4 pb-4 pt-2 bg-black/40 overflow-x-auto flex-shrink-0">

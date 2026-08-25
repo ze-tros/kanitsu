@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { FileRef, LibraryStore } from '../../fs-adapter/src/types';
+import { getThumbnailBlob } from './thumbnailCache';
 
 export function BlobImage({
   store,
@@ -47,7 +48,10 @@ export function BlobImage({
     let cancelled = false;
     setUrl(null);
     setFailed(false);
-    (thumbnail ? store.readThumbnail(fileRef, 512) : store.readBlob(fileRef))
+    // 缩略图走内存缓存：同一文件切走再切回时直接复用已生成的 Blob，
+    // 不再触发 IPC / 磁盘解码 / 重新编码（见 thumbnailCache.ts）。
+    const load = thumbnail ? getThumbnailBlob(store, fileRef, 512) : Promise.resolve(store.readBlob(fileRef));
+    load
       .then((blob) => {
         if (cancelled) return;
         objectUrl = URL.createObjectURL(blob);
@@ -60,7 +64,7 @@ export function BlobImage({
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [store, fileRef.id, visible, thumbnail]);
+  }, [store, fileRef.id, fileRef.mtime, fileRef.size, visible, thumbnail]);
 
   if (failed) {
     return (
@@ -77,5 +81,8 @@ export function BlobImage({
       </div>
     );
   }
-  return <img src={url} alt={alt ?? fileRef.name} className={`${className ?? ''}${blur ? ' blur-preview' : ''}`} loading="lazy" />;
+  // 缩略图优先显示图像靠上的部分（object-cover 裁剪默认居中，会裁掉主体所在的
+  // 上半部）；原图查看不受影响。
+  const coverClass = thumbnail ? ' object-top' : '';
+  return <img src={url} alt={alt ?? fileRef.name} className={`${className ?? ''}${blur ? ' blur-preview' : ''}${coverClass}`} loading="lazy" />;
 }

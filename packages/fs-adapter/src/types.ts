@@ -48,7 +48,7 @@ export interface LibraryStore {
   listChildren(folder: FolderRef): AsyncGenerator<FsEntry, void, void>;
   readBlob(file: FileRef): Promise<Blob>;
   /** Small thumbnail for grids/folder covers. Implementations should avoid loading the full image. */
-  readThumbnail(file: FileRef, maxSize?: number): Promise<Blob>;
+  readThumbnail(file: FileRef, maxSize?: number, options?: { low?: boolean }): Promise<Blob>;
   /** Original-resolution viewable URL for an `<img>` (streamed for Electron). */
   getViewerUrl(file: FileRef): Promise<string>;
   /** Releases resources held by a viewer URL (no-op for protocol-backed URLs). */

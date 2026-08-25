@@ -30,8 +30,8 @@ const bridge = {
   listLibraryChildren: (folder: DesktopEntry): Promise<DesktopEntry[]> =>
     ipcRenderer.invoke('library:listChildren', folder),
   readLibraryBlob: (file: DesktopEntry): Promise<Uint8Array> => ipcRenderer.invoke('library:readBlob', file),
-  readLibraryThumbnail: (file: DesktopEntry, maxSize: number): Promise<Uint8Array> =>
-    ipcRenderer.invoke('library:readThumbnail', file, maxSize),
+  readLibraryThumbnail: (file: DesktopEntry, maxSize: number, low?: boolean): Promise<Uint8Array> =>
+    ipcRenderer.invoke('library:readThumbnail', file, maxSize, low ?? false),
   moveLibraryEntry: (entry: DesktopEntry, toFolder: DesktopEntry, newName?: string): Promise<DesktopEntry> =>
     ipcRenderer.invoke('library:move', entry, toFolder, newName),
   removeLibraryEntry: (entry: DesktopEntry): Promise<void> => ipcRenderer.invoke('library:remove', entry),
