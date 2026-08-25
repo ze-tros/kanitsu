@@ -292,18 +292,20 @@ export function OrganizePreview({
 
       {prompt && (
         <div className="modal modal-open z-[130]">
-          <div className="modal-box max-w-md">
-            <h3 className="font-bold text-lg">{prompt.title}</h3>
-            <div className="form-control w-full mt-3">
-              <span className="label-text text-xs">{prompt.label}</span>
-              <input
-                className="input input-bordered input-sm mt-1 font-mono"
-                value={promptValue}
-                onChange={(event) => setPromptValue(event.target.value)}
-                autoFocus
-              />
+          <div className="modal-box max-w-md flex flex-col max-h-[80vh]">
+            <h3 className="font-bold text-lg shrink-0">{prompt.title}</h3>
+            <div className="overflow-y-auto flex-1 min-h-0">
+              <div className="form-control w-full mt-3">
+                <span className="label-text text-xs">{prompt.label}</span>
+                <input
+                  className="input input-bordered input-sm mt-1 font-mono"
+                  value={promptValue}
+                  onChange={(event) => setPromptValue(event.target.value)}
+                  autoFocus
+                />
+              </div>
             </div>
-            <div className="modal-action">
+            <div className="modal-action shrink-0">
               <button className="btn btn-ghost btn-sm" onClick={() => setPrompt(null)}>取消</button>
               <button className="btn btn-primary btn-sm" onClick={submitPrompt}>保存</button>
             </div>
