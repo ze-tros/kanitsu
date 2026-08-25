@@ -144,7 +144,7 @@ export function recordScrollFrame(ms: number): void {
   if (scrollMs.length > MAX_SCROLL_SAMPLES) scrollMs.shift();
 }
 
-/** 记录一次 scrollTop 写入（smoothScroll 60Hz 节流内上报，验证封顶生效）。 */
+/** 记录一次 scrollTop 写入（smoothScroll 每帧写入时上报，观测写入频率）。 */
 export function recordScrollWrite(): void {
   scrollWriteTs.push(performance.now());
   while (scrollWriteTs.length > 0 && scrollWriteTs[0]! < performance.now() - WINDOW_MS) {

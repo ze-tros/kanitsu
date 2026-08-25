@@ -341,9 +341,9 @@ export function LibraryBrowser({
   const scrollSaveFrameRef = useRef<number | null>(null);
   const currentFolderId = selectedFolderId || snapshot?.rootId || '';
   const [scrollTop, setScrollTop] = useState(0);
-  // 滚轮平滑（类手机信息流）：接管 main 的 wheel 事件，rAF 指数缓动逼近目标。
-  // lerp 0.24（收敛更快）+ arriveEps 2px（到达即停）——避免渐近尾巴拖沓。
-  useWheelSmoothScroll(mainScrollRef, { lerp: 0.24, arriveEps: 2 });
+  // 滚轮平滑（类手机信息流）：输入活跃期快速跟手 + 松手短惯性收尾。
+  // 默认写帧率 = 显示刷新率（跟手优先）；如需压合成压力可设 writeIntervalMs: 16.7。
+  useWheelSmoothScroll(mainScrollRef, {});
   const [galleryMetrics, setGalleryMetrics] = useState<GalleryMetrics>({
     cols: 1,
     cardHeight: 0,
