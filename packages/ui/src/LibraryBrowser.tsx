@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { useWheelSmoothScroll } from './smoothScroll';
 import { CardMotion } from './CardMotion';
+import { recordScrollFrame } from './fpsMonitor';
 import {
   applyOrganize,
   childrenOf,
@@ -378,6 +379,7 @@ export function LibraryBrowser({
     if (scrollSaveFrameRef.current != null) return; // 已排队待写
     scrollSaveFrameRef.current = requestAnimationFrame(() => {
       scrollSaveFrameRef.current = null;
+      const t0 = performance.now();
       const node = mainScrollRef.current;
       if (!node) return;
       const st = node.scrollTop;
@@ -389,6 +391,8 @@ export function LibraryBrowser({
         lastWindowKeyRef.current = key;
         setScrollTop(st);
       }
+      // 上报滚动回调耗时（设置页“调试→帧率与滚动性能”面板）。
+      recordScrollFrame(performance.now() - t0);
     });
   }, [currentFolderId, childFolderCards.length, folderImages.length]);
 
