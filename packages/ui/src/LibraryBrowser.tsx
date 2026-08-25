@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { useWheelSmoothScroll } from './smoothScroll';
 import {
   applyOrganize,
   childrenOf,
@@ -131,6 +132,22 @@ function windowRowsFor(
   const first = Math.max(0, Math.floor(gs / m.rowHeight) - OVERSCAN_ROWS);
   const last = Math.min(totalRows, Math.ceil((gs + m.viewportH) / m.rowHeight) + OVERSCAN_ROWS);
   return { first, last };
+}
+
+/**
+ * 行窗口防抖：小步移动（滚动位置恰在行边界附近的抖动）限制为每帧 ±1 行，
+ * 大跳变（切目录 / 快速滚动跨多行）直接跟随。防止首尾行反复挂/卸载造成的
+ * “滚动一下跳动两次”。渲染期写 ref 为受控写法：仅用于跨帧记忆窗口。
+ */
+function clampWindow(
+  prev: { first: number; last: number },
+  next: { first: number; last: number },
+): { first: number; last: number } {
+  if (Math.abs(next.first - prev.first) > 2 || Math.abs(next.last - prev.last) > 2) return next;
+  return {
+    first: Math.min(Math.max(next.first, prev.first - 1), prev.first + 1),
+    last: Math.min(Math.max(next.last, prev.last - 1), prev.last + 1),
+  };
 }
 
 function loadPinnedCovers(): Record<string, string> {
@@ -322,6 +339,8 @@ export function LibraryBrowser({
   const scrollSaveFrameRef = useRef<number | null>(null);
   const currentFolderId = selectedFolderId || snapshot?.rootId || '';
   const [scrollTop, setScrollTop] = useState(0);
+  // 滚轮平滑（类手机信息流）：接管 main 的 wheel 事件，rAF 指数缓动逼近目标。
+  useWheelSmoothScroll(mainScrollRef, { lerp: 0.16 });
   const [galleryMetrics, setGalleryMetrics] = useState<GalleryMetrics>({
     cols: 1,
     cardHeight: 0,
@@ -343,6 +362,9 @@ export function LibraryBrowser({
   const folderMetricsRef = useRef<GalleryMetrics>(folderMetrics);
   const folderSectionRef = useRef<HTMLElement | null>(null);
   const folderProbeCardRef = useRef<HTMLDivElement | null>(null);
+  // 跨帧记忆两区的行窗口（配合 clampWindow 防抖）。
+  const folderWindowRef = useRef({ first: 0, last: 0 });
+  const galleryWindowRef = useRef({ first: 0, last: 0 });
   const [layoutTick, setLayoutTick] = useState(0);
 
   // 滚动时（rAF 节流）记录该目录的滚动位置；只在虚拟窗口（文件夹/图片两区）
@@ -1196,7 +1218,7 @@ export function LibraryBrowser({
           </div>
         </div>
 
-        <main className="flex-1 overflow-y-auto p-5 lg:p-8 scroll-smooth" ref={mainScrollRef} onScroll={onMainScroll}>
+        <main className="flex-1 overflow-y-auto p-5 lg:p-8 [overflow-anchor:none]" ref={mainScrollRef} onScroll={onMainScroll}>
           {childFolderCards.length > 0 && (
             <section className="mb-8" ref={folderSectionRef}>
               <h3 className="text-sm font-semibold opacity-70 mb-3">子文件夹</h3>
@@ -1212,8 +1234,11 @@ export function LibraryBrowser({
                   rowHeight > 0
                     ? Math.min(totalRows, Math.ceil((gs + viewportH) / rowHeight) + OVERSCAN_ROWS)
                     : Math.min(totalRows, 1);
+                // 防抖：边界每帧最多移动 1 行，消除行边界处的挂/卸载抖动。
+                const win = clampWindow(folderWindowRef.current, { first: firstRow, last: lastRow });
+                folderWindowRef.current = win;
                 const rows: number[] = [];
-                for (let r = firstRow; r < lastRow; r++) rows.push(r);
+                for (let r = win.first; r < win.last; r++) rows.push(r);
                 return (
                   <div style={{ position: 'relative', height: Math.max(1, totalRows * rowHeight) }}>
                     {rows.map((row) => {
@@ -1228,7 +1253,7 @@ export function LibraryBrowser({
                           {childFolderCards.slice(start, end).map(({ folder, cover }) => (
                             <div
                               key={folder.id}
-                              className="card bg-base-200 border border-base-300 shadow hover:shadow-lg hover:scale-[1.02] active:scale-[0.98] transition cursor-pointer overflow-hidden kanitu-card-in"
+                              className="card bg-base-200 border border-base-300 shadow hover:shadow-lg hover:scale-[1.02] active:scale-[0.98] transition cursor-pointer overflow-hidden"
                               onClick={() => handleSelectFolder(folder)}
                               onContextMenu={(event) => openContextMenu(event, buildFolderMenu(folder))}
                             >
@@ -1302,8 +1327,11 @@ export function LibraryBrowser({
                   rowHeight > 0
                     ? Math.min(totalRows, Math.ceil((gs + viewportH) / rowHeight) + OVERSCAN_ROWS)
                     : Math.min(totalRows, 1);
+                // 防抖：边界每帧最多移动 1 行，消除行边界处的挂/卸载抖动。
+                const win = clampWindow(galleryWindowRef.current, { first: firstRow, last: lastRow });
+                galleryWindowRef.current = win;
                 const rows: number[] = [];
-                for (let r = firstRow; r < lastRow; r++) rows.push(r);
+                for (let r = win.first; r < win.last; r++) rows.push(r);
                 return (
                   <div style={{ position: 'relative', height: Math.max(1, totalRows * rowHeight) }}>
                     {rows.map((row) => {
@@ -1318,7 +1346,7 @@ export function LibraryBrowser({
                           {folderImages.slice(start, end).map((image) => (
                             <div
                               key={image.id}
-                              className="card bg-base-200 border border-base-300 shadow hover:shadow-lg hover:scale-[1.02] active:scale-[0.98] transition cursor-pointer overflow-hidden kanitu-card-in"
+                              className="card bg-base-200 border border-base-300 shadow hover:shadow-lg hover:scale-[1.02] active:scale-[0.98] transition cursor-pointer overflow-hidden"
                               onClick={() => setViewerImageId(image.id)}
                               onContextMenu={(event) => openContextMenu(event, buildImageMenu(image))}
                             >
