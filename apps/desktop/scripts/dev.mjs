@@ -26,6 +26,7 @@ function startElectron() {
   if (electronStarted) return;
   electronStarted = true;
   console.log('Starting Electron:', electronPath);
+  // 控制台 UTF-8 由主进程在启动时执行 chcp 65001（见 main.ts），这里直接 spawn。
   electron = spawn(electronPath, ['.'], {
     cwd: desktopDir,
     env: { ...process.env, VITE_DEV_SERVER_URL: 'http://127.0.0.1:5173' },

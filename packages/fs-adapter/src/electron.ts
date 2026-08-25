@@ -10,9 +10,33 @@ export interface DesktopFsEntry {
   height?: number;
 }
 
+/** 缩略图调试统计（主进程侧，供设置页“调试”面板展示）。 */
+export interface ThumbnailDebugStats {
+  queuedByPriority: number[];
+  inFlight: number;
+  workers: number;
+  thumbCacheEntries: number;
+  thumbCacheBytes: number;
+  diskFiles: number;
+  debugEnabled: boolean;
+}
+
+/** 清除缓存的结果。 */
+export interface ClearCacheResult {
+  memoryEntries: number;
+  memoryBytes: number;
+  diskFiles: number;
+  diskBytes: number;
+}
+
 export interface KanituDesktopBridge {
   platform: 'electron';
   version: string;
+  getThumbnailDebugStats(): Promise<ThumbnailDebugStats>;
+  setDebugEnabled(enabled: boolean): Promise<void>;
+  setLogLevel(level: 'debug' | 'info' | 'warn' | 'error'): Promise<void>;
+  readLogs(maxLines?: number): Promise<string[]>;
+  clearCaches(): Promise<ClearCacheResult>;
   pickSourceFolder(): Promise<DesktopFsEntry | null>;
   listSourceChildren(folder: DesktopFsEntry): Promise<DesktopFsEntry[]>;
   readSourceBlob(file: DesktopFsEntry): Promise<Uint8Array>;
@@ -24,7 +48,7 @@ export interface KanituDesktopBridge {
   writeLibraryBlob(folder: DesktopFsEntry, name: string, data: Uint8Array): Promise<DesktopFsEntry>;
   listLibraryChildren(folder: DesktopFsEntry): Promise<DesktopFsEntry[]>;
   readLibraryBlob(file: DesktopFsEntry): Promise<Uint8Array>;
-  readLibraryThumbnail(file: DesktopFsEntry, maxSize: number, low?: boolean): Promise<Uint8Array>;
+  readLibraryThumbnail(file: DesktopFsEntry, maxSize: number, priority?: number): Promise<Uint8Array>;
   moveLibraryEntry(entry: DesktopFsEntry, toFolder: DesktopFsEntry, newName?: string): Promise<DesktopFsEntry>;
   removeLibraryEntry(entry: DesktopFsEntry): Promise<void>;
   exportZip(targetRelPath: string): Promise<{
@@ -134,8 +158,8 @@ export class ElectronLibraryStore implements LibraryStore {
     return new Blob([data as BlobPart]);
   }
 
-  async readThumbnail(file: FileRef, maxSize = 512, options?: { low?: boolean }): Promise<Blob> {
-    const data = await requireBridge().readLibraryThumbnail(toEntry(file), maxSize, options?.low === true);
+  async readThumbnail(file: FileRef, maxSize = 512, options?: { priority?: number }): Promise<Blob> {
+    const data = await requireBridge().readLibraryThumbnail(toEntry(file), maxSize, options?.priority ?? 0);
     return new Blob([data as BlobPart]);
   }
 

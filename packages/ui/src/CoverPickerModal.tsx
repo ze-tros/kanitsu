@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { LibrarySnapshot } from '../../core/src/types';
-import type { LibraryStore } from '../../fs-adapter/src/types';
+import type { FileRef, LibraryStore } from '../../fs-adapter/src/types';
 import { childrenOf, directImagesOf, imagesOf } from '../../core/src/index';
 import { pickCover } from '../../cover-picker/src/index';
 import { BlobImage } from './BlobImage';
+import { preloadThumbnails } from './thumbnailCache';
 
 const MAX_PREVIEW = 500;
 
@@ -53,6 +54,30 @@ export function CoverPickerModal({
 
   const goTo = (index: number) => setChain((prev) => prev.slice(0, index + 1));
   const enterChild = (id: string) => setChain((prev) => [...prev, id]);
+
+  // 与主视图同款低优先级预热：打开弹窗或切换浏览目录时，把当前目录的直属图片
+  // （优先级 1）与子文件夹封面（优先级 2）排入同一缓存/队列。外部已生成的
+  // 缩略图（键一致）直接命中复用；未生成过的也提前后台生成，滚动/点选时即出图。
+  useEffect(() => {
+    const token = { cancelled: false };
+    const direct: FileRef[] = [];
+    const covers: FileRef[] = [];
+    for (const img of directImagesOf(snapshot, currentId)) {
+      direct.push({ id: img.fileRefId ?? img.id, name: img.name, kind: 'file', mtime: img.mtime, size: img.size });
+    }
+    for (const child of childrenOf(snapshot, currentId)) {
+      const cover = pickCover(imagesOf(snapshot, child.id), { preferredId: pinnedCovers?.[child.id] });
+      const coverImg = cover ? snapshot.images[cover.imageId] : undefined;
+      if (coverImg) {
+        covers.push({ id: coverImg.fileRefId ?? coverImg.id, name: coverImg.name, kind: 'file', mtime: coverImg.mtime, size: coverImg.size });
+      }
+    }
+    if (direct.length > 0) preloadThumbnails(store, direct, { priority: 1, shouldStop: () => token.cancelled });
+    if (covers.length > 0) preloadThumbnails(store, covers, { priority: 2, shouldStop: () => token.cancelled });
+    return () => {
+      token.cancelled = true;
+    };
+  }, [snapshot, currentId, store, pinnedCovers]);
 
   return (
     <div className="modal modal-open z-[120]">

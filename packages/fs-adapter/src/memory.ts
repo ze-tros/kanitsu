@@ -239,7 +239,7 @@ export class MemoryLibraryStore implements LibraryStore {
     return node.blob;
   }
 
-  async readThumbnail(file: FileRef, _maxSize?: number, _options?: { low?: boolean }): Promise<Blob> {
+  async readThumbnail(file: FileRef, _maxSize?: number, _options?: { priority?: number }): Promise<Blob> {
     return this.readBlob(file);
   }
 

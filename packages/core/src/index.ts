@@ -8,3 +8,4 @@ export * from './library';
 export * from './indexed';
 export * from './remove';
 export * from './entry-ops';
+export * from './log';

@@ -11,9 +11,31 @@ type DesktopEntry = {
   height?: number;
 };
 
+type ThumbnailDebugStats = {
+  queuedByPriority: number[];
+  inFlight: number;
+  workers: number;
+  thumbCacheEntries: number;
+  thumbCacheBytes: number;
+  diskFiles: number;
+  debugEnabled: boolean;
+};
+
+type ClearCacheResult = {
+  memoryEntries: number;
+  memoryBytes: number;
+  diskFiles: number;
+  diskBytes: number;
+};
+
 const bridge = {
   platform: 'electron' as const,
   version: '0.1.0',
+  getThumbnailDebugStats: (): Promise<ThumbnailDebugStats> => ipcRenderer.invoke('debug:thumbnailStats'),
+  setDebugEnabled: (enabled: boolean): Promise<void> => ipcRenderer.invoke('debug:setEnabled', enabled),
+  setLogLevel: (level: 'debug' | 'info' | 'warn' | 'error'): Promise<void> => ipcRenderer.invoke('debug:setLevel', level),
+  readLogs: (maxLines?: number): Promise<string[]> => ipcRenderer.invoke('debug:readLogs', maxLines),
+  clearCaches: (): Promise<ClearCacheResult> => ipcRenderer.invoke('cache:clear'),
   pickSourceFolder: (): Promise<DesktopEntry | null> => ipcRenderer.invoke('import:pickFolder'),
   listSourceChildren: (folder: DesktopEntry): Promise<DesktopEntry[]> =>
     ipcRenderer.invoke('import:listChildren', folder),
@@ -30,8 +52,8 @@ const bridge = {
   listLibraryChildren: (folder: DesktopEntry): Promise<DesktopEntry[]> =>
     ipcRenderer.invoke('library:listChildren', folder),
   readLibraryBlob: (file: DesktopEntry): Promise<Uint8Array> => ipcRenderer.invoke('library:readBlob', file),
-  readLibraryThumbnail: (file: DesktopEntry, maxSize: number, low?: boolean): Promise<Uint8Array> =>
-    ipcRenderer.invoke('library:readThumbnail', file, maxSize, low ?? false),
+  readLibraryThumbnail: (file: DesktopEntry, maxSize: number, priority?: number): Promise<Uint8Array> =>
+    ipcRenderer.invoke('library:readThumbnail', file, maxSize, priority ?? 0),
   moveLibraryEntry: (entry: DesktopEntry, toFolder: DesktopEntry, newName?: string): Promise<DesktopEntry> =>
     ipcRenderer.invoke('library:move', entry, toFolder, newName),
   removeLibraryEntry: (entry: DesktopEntry): Promise<void> => ipcRenderer.invoke('library:remove', entry),

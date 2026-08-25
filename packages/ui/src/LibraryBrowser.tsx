@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import {
   applyOrganize,
   childrenOf,
@@ -31,6 +31,7 @@ import { organizeByFolder, type CustomOrganizeRule } from '../../organizer/src/i
 import { pickCover } from '../../cover-picker/src/index';
 import { BlobImage } from './BlobImage';
 import { getThumbnailBlob, preloadThumbnails } from './thumbnailCache';
+import { getLogLevelPref, isPrefetchEnabled, logDebug } from './debugLog';
 import {
   backTarget,
   canGoBack,
@@ -198,6 +199,38 @@ export function LibraryBrowser({
     setNav((prev) => recordNav(prev, current));
   }, [selectedFolderId, snapshot]);
 
+  // 启动时把本地保存的日志等级同步给主进程：否则缩略图调试日志要等
+  // “打开设置页”触发 setLogLevel 后才会开始记录。
+  useEffect(() => {
+    void window.kanituDesktop?.setLogLevel?.(getLogLevelPref());
+  }, []);
+
+  // —— 内容区滚动位置记忆：按目录保存/恢复，返回上一级再回来时停留在原处 ——
+  const mainScrollRef = useRef<HTMLElement | null>(null);
+  const scrollPositionsRef = useRef(new Map<string, number>());
+  const scrollSaveFrameRef = useRef<number | null>(null);
+  const currentFolderId = selectedFolderId || snapshot?.rootId || '';
+
+  // 滚动时（rAF 节流）记录该目录的滚动位置。
+  const onMainScroll = useCallback(() => {
+    const el = mainScrollRef.current;
+    if (!el || !currentFolderId) return;
+    if (scrollSaveFrameRef.current != null) return; // 已排队待写
+    scrollSaveFrameRef.current = requestAnimationFrame(() => {
+      scrollSaveFrameRef.current = null;
+      const node = mainScrollRef.current;
+      if (node) scrollPositionsRef.current.set(currentFolderId, node.scrollTop);
+    });
+  }, [currentFolderId]);
+
+  // 切换目录后恢复该目录上次浏览位置（首次进入为顶部）。
+  // currentFolderId 由 selectedFolderId/snapshot 派生，二者已在依赖中。
+  useLayoutEffect(() => {
+    const el = mainScrollRef.current;
+    if (!el) return;
+    el.scrollTop = scrollPositionsRef.current.get(currentFolderId) ?? 0;
+  }, [selectedFolderId, snapshot]);
+
   const notify = useCallback((text: string, kind?: 'info' | 'success' | 'error') => {
     const detected = kind ?? (/失败|错误/.test(text) ? 'error' : (/完成|成功|^已/.test(text) ? 'success' : 'info'));
     setMessage(text);
@@ -265,8 +298,8 @@ export function LibraryBrowser({
     }));
   }, [snapshot, childFolders, pinnedCovers]);
 
-  // 预加载子文件夹的预览图：进入一个文件夹时，在空闲时间后台为每个子文件夹
-  // 前若干张缩略图预热缓存（限并发、可取消），点进子文件夹时网格立即有图。
+  // 预加载子文件夹的预览图（优先级 2）：进入一个文件夹时，在空闲时间后台为每个
+  // 子文件夹前若干张缩略图预热缓存（限并发、可取消），点进子文件夹时网格立即可用。
   // 已缓存的条目会立即命中，因此重复进入同一父目录几乎无成本。
   useEffect(() => {
     if (!snapshot) return;
@@ -279,6 +312,7 @@ export function LibraryBrowser({
       }
     }
     if (targets.length === 0) return;
+    if (!isPrefetchEnabled()) return; // 设置页“调试→预取开关”可关闭
     const schedule = (work: () => void): void => {
       if (typeof requestIdleCallback === 'function') {
         requestIdleCallback(work, { timeout: 1500 });
@@ -286,11 +320,56 @@ export function LibraryBrowser({
         setTimeout(work, 0);
       }
     };
-    schedule(() => preloadThumbnails(store, targets, { shouldStop: () => token.cancelled }));
+    schedule(() => preloadThumbnails(store, targets, { priority: 2, shouldStop: () => token.cancelled }));
+    logDebug('prefetch', `子文件夹预取 P2：${targets.length} 张`);
     return () => {
       token.cancelled = true;
     };
   }, [snapshot, childFolders, store]);
+
+  // 当前目录的其余图片（优先级 1）：不仅仅加载“点击过/可见”的图，整个目录的
+// 缩略图都按顺序排入 worker 后台生成。可见请求仍最高优先级插队在前；预取
+// 命中后，滚动到任意位置都直接出图（配合磁盘缓存，重启后同样免解码）。
+  useEffect(() => {
+    if (!snapshot) return;
+    const token = { cancelled: false };
+    const targets: FileRef[] = folderImages.map((img) => ({
+      id: img.fileRefId ?? img.id,
+      name: img.name,
+      kind: 'file',
+      mtime: img.mtime,
+      size: img.size,
+    }));
+    if (targets.length === 0) return;
+    if (!isPrefetchEnabled()) return; // 设置页“调试→预取开关”可关闭
+    preloadThumbnails(store, targets, { priority: 1, shouldStop: () => token.cancelled });
+    logDebug('prefetch', `当前目录预取 P1：${folderImages.length} 张 → ${selectedFolder?.name ?? '根'}`);
+    return () => {
+      token.cancelled = true;
+    };
+  }, [snapshot, selectedFolderId, folderImages, store]);
+
+  // 启动即全库低优先级预热（优先级 3）：打开应用后就按“当前目录（初始为根目录）
+  // 优先 → 其余随后”的顺序，把整个图库的缩略图排入 worker 后台生成，可见的图
+  // 仍最高优先级插队。已生成的条目落盘（userData/thumbcache），重启直接读盘。
+  // 仅随快照变化（刷新/导入后）重启预热，切换目录不中断。
+  useEffect(() => {
+    if (!snapshot) return;
+    const token = { cancelled: false };
+    const folderImageIds = new Set(directImagesOf(snapshot, snapshot.rootId).map((img) => img.id));
+    const all = Object.values(snapshot.images);
+    const ordered: FileRef[] = [
+      ...all.filter((img) => folderImageIds.has(img.id)),
+      ...all.filter((img) => !folderImageIds.has(img.id)),
+    ].map((img) => ({ id: img.fileRefId ?? img.id, name: img.name, kind: 'file', mtime: img.mtime, size: img.size }));
+    if (ordered.length === 0) return;
+    if (!isPrefetchEnabled()) return; // 设置页“调试→预取开关”可关闭
+    preloadThumbnails(store, ordered, { priority: 3, shouldStop: () => token.cancelled });
+    logDebug('prefetch', `全库预热 P3：${ordered.length} 张（当前目录 ${folderImageIds.size} 张优先）`);
+    return () => {
+      token.cancelled = true;
+    };
+  }, [snapshot, store]);
 
   const selectedFolder = snapshot?.folders[selectedFolderId || snapshot?.rootId || ''] ?? null;
   const rootFolder = snapshot?.folders[snapshot.rootId] ?? null;
@@ -921,7 +1000,7 @@ export function LibraryBrowser({
           </div>
         </div>
 
-        <main className="flex-1 overflow-y-auto p-5 lg:p-8">
+        <main className="flex-1 overflow-y-auto p-5 lg:p-8" ref={mainScrollRef} onScroll={onMainScroll}>
           {childFolderCards.length > 0 && (
             <section className="mb-8">
               <h3 className="text-sm font-semibold opacity-70 mb-3">子文件夹</h3>

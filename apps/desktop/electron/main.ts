@@ -1,11 +1,14 @@
 // Electron main process: native file system for import and album library.
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, net, protocol } from 'electron';
 import { promises as fs, createWriteStream } from 'node:fs';
+import { execSync } from 'node:child_process';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { Worker } from 'node:worker_threads';
 import { pathToFileURL } from 'node:url';
 import archiver from 'archiver';
 import { imageSize } from 'image-size';
+import { logger, readLogTail, setLogLevel } from './logger';
 
 const IMAGE_EXT = new Set(['jpg', 'jpeg', 'png', 'webp', 'avif', 'bmp', 'gif']);
 
@@ -81,6 +84,25 @@ interface DesktopFsEntry {
   mtime?: number;
   width?: number;
   height?: number;
+}
+
+/** 缩略图调试统计（供渲染端“设置→调试”展示）。 */
+interface ThumbnailDebugStats {
+  queuedByPriority: number[];
+  inFlight: number;
+  workers: number;
+  thumbCacheEntries: number;
+  thumbCacheBytes: number;
+  diskFiles: number;
+  debugEnabled: boolean;
+}
+
+/** 清除缓存的结果（供设置页反馈）。 */
+interface ClearCacheResult {
+  memoryEntries: number;
+  memoryBytes: number;
+  diskFiles: number;
+  diskBytes: number;
 }
 
 function getLibraryRoot(): string {
@@ -196,14 +218,16 @@ async function createTopFolder(name: string): Promise<DesktopFsEntry> {
 }
 
 /**
- * 通用字节级 LRU 缓存（Map 迭代序即插入序 = 最近最少使用在前向淘汰）。
- * 用于缩略图与查看器预览：同一文件在同一会话内被反复请求时复用已生成的
- * JPEG 字节，避免每次都磁盘解码 + 缩放 + 重新编码（大图解码很慢）。
+ * 通用字节级 LRU 缓存（仅按总字节数淘汰，无条数上限；Map 迭代序即插入序 =
+ * 最近最少使用在前向淘汰）。用于缩略图：同一文件在同一会话内被反复请求时
+ * 复用已生成的 JPEG 字节，避免每次都磁盘解码 + 缩放 + 重新编码。
  * 键由调用方拼入文件 mtime/size：文件被覆盖或移动后键自动变化，无需手动失效。
  */
-function createByteLruCache(maxEntries: number, maxBytes: number): {
+function createByteLruCache(maxBytes: number): {
   get(key: string): Uint8Array | undefined;
   put(key: string, data: Uint8Array): void;
+  clear(): void;
+  stats: () => { entries: number; bytes: number; maxBytes: number };
 } {
   const map = new Map<string, Uint8Array>();
   let bytes = 0;
@@ -225,7 +249,7 @@ function createByteLruCache(maxEntries: number, maxBytes: number): {
       }
       map.set(key, data);
       bytes += data.byteLength;
-      while ((map.size > maxEntries || bytes > maxBytes) && map.size > 0) {
+      while (bytes > maxBytes && map.size > 0) {
         const oldestKey = map.keys().next().value;
         if (oldestKey === undefined) break;
         const oldest = map.get(oldestKey);
@@ -233,33 +257,107 @@ function createByteLruCache(maxEntries: number, maxBytes: number): {
         if (oldest) bytes -= oldest.byteLength;
       }
     },
+    stats: () => ({ entries: map.size, bytes, maxBytes }),
+    clear(): void {
+      map.clear();
+      bytes = 0;
+    },
   };
 }
 
 /** 网格缩略图缓存（≤1024px JPEG）。 */
-const thumbCache = createByteLruCache(2000, 128 * 1024 * 1024);
+const thumbCache = createByteLruCache(512 * 1024 * 1024);
+/** 单条超过该字节数（多为 GIF 原样大字节）只落磁盘、不进内存缓存，避免挤垮 LRU。 */
+const MAX_MEM_CACHE_ENTRY_BYTES = 512 * 1024;
+/** 小于该字节数的 GIF 原样透传（动画完美且小）；更大的交给 worker 生成动画缩略图。 */
+const GIF_PASSTHROUGH_LIMIT = 256 * 1024;
+
+function putThumbCache(cacheKey: string, data: Uint8Array): void {
+  if (data.byteLength <= MAX_MEM_CACHE_ENTRY_BYTES) thumbCache.put(cacheKey, data);
+}
 
 function thumbCacheKey(file: DesktopFsEntry, targetSize: number): string {
   return `${file.id}\u0000${file.mtime ?? 0}\u0000${file.size ?? 0}\u0000${targetSize}`;
 }
 
+// —— 缩略图磁盘持久化缓存 ——
+// 内存缓存随应用重启清空；缩略图落盘到 userData/thumbcache（按文件
+// mtime/size/尺寸/版本 做 SHA1 键），重启后直接读盘返回，免去重新解码。
+const THUMB_DISK_VERSION = 1;
+const THUMB_DISK_MAX_FILES = 20000;
+const THUMB_DISK_MAX_BYTES = 1536 * 1024 * 1024; // 1.5GB
+
+function thumbCacheDir(): string {
+  return path.join(app.getPath('userData'), 'thumbcache');
+}
+
+function thumbDiskKey(file: DesktopFsEntry, targetSize: number): string {
+  const raw = `${file.id}\u0000${file.mtime ?? 0}\u0000${file.size ?? 0}\u0000${targetSize}\u0000v${THUMB_DISK_VERSION}`;
+  return createHash('sha1').update(raw).digest('hex');
+}
+
+async function readThumbFromDisk(hash: string): Promise<Uint8Array | null> {
+  try {
+    const buf = await fs.readFile(path.join(thumbCacheDir(), `${hash}.jpg`));
+    return new Uint8Array(buf);
+  } catch {
+    return null;
+  }
+}
+
+async function writeThumbToDisk(hash: string, data: Uint8Array): Promise<void> {
+  try {
+    const dir = thumbCacheDir();
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, `${hash}.jpg`), data);
+  } catch {
+    // 落盘失败不影响功能（下次重新生成）。
+  }
+}
+
+/** 启动时清理：文件数/总大小超限时按 mtime 删除最旧的。 */
+async function pruneThumbCache(): Promise<void> {
+  try {
+    const dir = thumbCacheDir();
+    const files: { name: string; size: number; mtimeMs: number }[] = [];
+    for (const entry of await fs.readdir(dir)) {
+      const st = await fs.stat(path.join(dir, entry));
+      if (st.isFile()) files.push({ name: entry, size: st.size, mtimeMs: st.mtimeMs });
+    }
+    let total = files.reduce((n, f) => n + f.size, 0);
+    if (files.length <= THUMB_DISK_MAX_FILES && total <= THUMB_DISK_MAX_BYTES) return;
+    files.sort((a, b) => a.mtimeMs - b.mtimeMs); // 最旧在前
+    for (const f of files) {
+      if (files.length <= THUMB_DISK_MAX_FILES && total <= THUMB_DISK_MAX_BYTES) break;
+      await fs.rm(path.join(dir, f.name), { force: true });
+      files.length--;
+      total -= f.size;
+    }
+  } catch {
+    // 清理失败忽略。
+  }
+}
+
 // —— 缩略图 worker 池 ——
 // nativeImage 只能在主进程使用，解码大图会长时间阻塞事件循环（UI/IPC 全被拖
-// 慢）。缩略图生成交给 worker 线程（主路径 sharp/libvips，兜底纯 JS），主进程
-// 只做缓存与调度：worker 忙时请求排队，主线程不被占用。
+// 慢）。缩略图生成交给 worker 线程（主路径 sharp/libvips），主进程只做缓存与
+// 调度。队列为多级优先级：0 可见 > 1 当前目录 > 2 子文件夹 > 3 全库预热/无关，
+// 高优先级永远先取，保证“屏幕里看到的”优先于后台预热。
 const THUMB_WORKER_FORMATS = new Set(['jpg', 'jpeg', 'png', 'webp', 'avif', 'bmp']);
 const THUMB_WORKER_COUNT = 4;
 const THUMB_JOB_TIMEOUT_MS = 8000;
+const THUMB_PRIORITIES = 4;
 
 interface ThumbnailRequest {
   file: DesktopFsEntry;
   targetSize: number;
-  low: boolean;
+  priority: number;
   resolve: (data: Uint8Array) => void;
   reject: (err: Error) => void;
 }
 
-const thumbnailQueue: ThumbnailRequest[] = [];
+/** 优先级桶数组：下标小者优先（0 可见 > 1 当前目录 > 2 子文件夹 > 3 全库）。 */
+const thumbnailQueues: ThumbnailRequest[][] = Array.from({ length: THUMB_PRIORITIES }, () => []);
 const workerPool: (Worker | null)[] = [];
 const busyWorkers = new Set<Worker>();
 const inFlightJobs = new Map<
@@ -269,19 +367,36 @@ const inFlightJobs = new Map<
 let thumbnailRequestSeq = 0;
 /** worker 处理失败/超时的文件路径黑名单：再次请求时直接走主进程回退，避免反复卡 worker。 */
 const failedWorkerPaths = new Set<string>();
+/** 调试开关：开启后主进程对每次缩略图请求的关键决策打日志（供“设置→调试”排查）。 */
+let debugLogging = false;
 
 function markWorkerFailed(filePath: string): void {
   failedWorkerPaths.add(filePath);
   if (failedWorkerPaths.size > 4000) failedWorkerPaths.clear(); // 简单防涨
 }
 
+function totalQueuedThumbnails(): number {
+  let n = 0;
+  for (const q of thumbnailQueues) n += q.length;
+  return n;
+}
+
+/** 从最高优先级非空桶取下一个请求。 */
+function takeNextThumbnail(): ThumbnailRequest | undefined {
+  for (const q of thumbnailQueues) {
+    if (q.length > 0) return q.shift();
+  }
+  return undefined;
+}
+
 function pumpThumbnailQueue(): void {
   for (let i = 0; i < THUMB_WORKER_COUNT; i++) {
-    if (thumbnailQueue.length === 0) return;
+    if (totalQueuedThumbnails() === 0) return;
     ensureThumbnailWorker(i);
     const worker = workerPool[i];
     if (!worker || busyWorkers.has(worker)) continue;
-    const request = thumbnailQueue.shift()!;
+    const request = takeNextThumbnail();
+    if (!request) return;
     const requestId = ++thumbnailRequestSeq;
     busyWorkers.add(worker);
     const timer = setTimeout(() => {
@@ -350,16 +465,16 @@ function terminateWorkerAt(index: number): void {
   }
 }
 
-function enqueueThumbnail(file: DesktopFsEntry, targetSize: number, low: boolean): Promise<Uint8Array> {
+function enqueueThumbnail(file: DesktopFsEntry, targetSize: number, priority: number): Promise<Uint8Array> {
   const cacheKey = thumbCacheKey(file, targetSize);
   const cached = thumbCache.get(cacheKey);
   if (cached) return Promise.resolve(cached);
   return new Promise<Uint8Array>((resolve, reject) => {
-    const request: ThumbnailRequest = { file, targetSize, low, resolve, reject };
-    // 高优先级（可见图片）插队到最前；低优先级（预加载）排到队尾，
-    // 保证用户正在看的缩略图不被预加载洪峰拖慢。
-    if (low) thumbnailQueue.push(request);
-    else thumbnailQueue.unshift(request);
+    const level = Math.max(0, Math.min(THUMB_PRIORITIES - 1, priority));
+    const request: ThumbnailRequest = { file, targetSize, priority: level, resolve, reject };
+    // 按优先级入桶（0 可见 > 1 当前目录 > 2 子文件夹 > 3 全库预热），
+    // 取任务时总是从高优先级桶开始，保证正在看的图不被预取洪峰拖慢。
+    thumbnailQueues[level]!.push(request);
     for (let i = 0; i < THUMB_WORKER_COUNT; i++) ensureThumbnailWorker(i);
     pumpThumbnailQueue();
   });
@@ -470,41 +585,140 @@ function registerIpc(): void {
     return ext === '.png' ? resized.toPNG() : resized.toJPEG(85);
   });
 
-  ipcMain.handle('library:readThumbnail', async (_event, file: DesktopFsEntry, maxSize: number, low: boolean): Promise<Uint8Array> => {
+  ipcMain.handle('library:readThumbnail', async (_event, file: DesktopFsEntry, maxSize: number, priority: number): Promise<Uint8Array> => {
     assertInsideLibrary(file.id);
+    // 优先级：0 可见 > 1 当前目录 > 2 子文件夹 > 3 全库预热/无关。
+    const level = Math.max(0, Math.min(THUMB_PRIORITIES - 1, priority || 0));
     const targetSize = Math.max(64, Math.min(maxSize || 512, 1024));
     const cacheKey = thumbCacheKey(file, targetSize);
     const cached = thumbCache.get(cacheKey);
     if (cached) return cached;
 
+    // 磁盘持久化缓存：重启后/内存淘汰后直接读盘，免去重新解码。
+    const diskKey = thumbDiskKey(file, targetSize);
+    const diskHit = await readThumbFromDisk(diskKey);
+    if (diskHit) {
+      if (debugLogging) logger.debug('thumb', `磁盘命中 ${path.basename(file.id)} p=${level}`);
+      thumbCache.put(cacheKey, diskHit);
+      return diskHit;
+    }
+    if (debugLogging) {
+      logger.debug('thumb', `缓存未命中，转生成 ${path.basename(file.id)} p=${level} size=${targetSize}`);
+      logger.debug('thumb', `队列状态 ${JSON.stringify(thumbnailQueues.map((q) => q.length))}`);
+    }
+
     const ext = path.extname(file.id).toLowerCase().slice(1);
-    // Electron's nativeImage cannot decode animated GIFs on Windows. Return the
-    // original GIF bytes instead; GIFs are usually small.
+    // GIF：小图原样透传（保持原动画，瞬时）；大图由 worker 生成“可动且小”的
+    // 动画 GIF 缩略图（omggif 抽帧缩放重编码），不再让数 MB 大字节挤挤垮缓存。
     if (ext === 'gif') {
-      const data = new Uint8Array(await fs.readFile(file.id));
-      thumbCache.put(cacheKey, data);
-      return data;
+      const raw = new Uint8Array(await fs.readFile(file.id));
+      if (raw.byteLength <= GIF_PASSTHROUGH_LIMIT) {
+        putThumbCache(cacheKey, raw);
+        void writeThumbToDisk(diskKey, raw);
+        return raw;
+      }
+      try {
+        const data = await enqueueThumbnail(file, targetSize, level);
+        putThumbCache(cacheKey, data);
+        void writeThumbToDisk(diskKey, data);
+        return data;
+      } catch (err) {
+        if (level > 0) throw err;
+        logger.warn('gif', `动画缩略图失败，回退原样：${path.basename(file.id)} (${String(err)})`);
+        void writeThumbToDisk(diskKey, raw);
+        return raw;
+      }
     }
 
     // 优先走 worker 线程生成（不阻塞主进程，sharp 解码大图也快）。可见图片
     // 高优先级插队在前；黑名单文件直接跳过 worker。
     if (THUMB_WORKER_FORMATS.has(ext) && !failedWorkerPaths.has(file.id)) {
       try {
-        const data = await enqueueThumbnail(file, targetSize, low === true);
+        const data = await enqueueThumbnail(file, targetSize, level);
         thumbCache.put(cacheKey, data);
+        void writeThumbToDisk(diskKey, data);
         return data;
       } catch (err) {
         markWorkerFailed(file.id);
-        console.warn(`缩略图 worker 失败，回退主进程解码：${file.id} (${String(err)})`);
-        if (low) throw err; // 预加载不为失败文件触发主进程大图解码
+        logger.warn('thumb', `worker 失败，回退主进程解码：${path.basename(file.id)} (${String(err)})`);
+        if (level > 0) throw err; // 预取不为失败文件触发主进程大图解码
       }
     }
-    if (low) throw new Error('低优先级跳过：worker 不可用，留给可见请求处理');
+    if (level > 0) throw new Error('低优先级跳过：worker 不可用，留给可见请求处理');
     // 让出事件循环：连续多个大图回退解码之间，窗口控制等 IPC 有机会执行。
     await new Promise<void>((r) => setImmediate(() => r()));
     const data = generateThumbnailBytesNative(file, targetSize);
     thumbCache.put(cacheKey, data);
+    void writeThumbToDisk(diskKey, data);
     return data;
+  });
+
+  // 调试统计：主进程缩略图队列/缓存状态（供设置页“调试”面板）。
+  ipcMain.handle('debug:thumbnailStats', async (): Promise<ThumbnailDebugStats> => {
+    let diskFiles = 0;
+    try {
+      diskFiles = (await fs.readdir(thumbCacheDir())).length;
+    } catch {
+      diskFiles = 0;
+    }
+    const mem = thumbCache.stats();
+    return {
+      queuedByPriority: thumbnailQueues.map((q) => q.length),
+      inFlight: inFlightJobs.size,
+      workers: workerPool.filter((w): w is Worker => w !== null).length,
+      thumbCacheEntries: mem.entries,
+      thumbCacheBytes: mem.bytes,
+      diskFiles,
+      debugEnabled: debugLogging,
+    };
+  });
+
+  ipcMain.handle('debug:setEnabled', (_event, enabled: boolean): void => {
+    debugLogging = enabled === true;
+    setLogLevel(debugLogging ? 'debug' : 'info'); // 调试开关同步控制主进程日志级别
+  });
+
+  // 日志等级选择（设置页“调试”）：校验后同步主进程日志级别与调试开关。
+  ipcMain.handle('debug:setLevel', (_event, level: unknown): void => {
+    const lvl = level === 'debug' || level === 'info' || level === 'warn' || level === 'error' ? level : 'info';
+    debugLogging = lvl === 'debug';
+    setLogLevel(lvl);
+  });
+
+  // 读取主进程日志文件尾部（UTF-8，含时间/等级；设置页“调试→主进程日志”）。
+  ipcMain.handle('debug:readLogs', async (_event, maxLines?: number): Promise<string[]> => {
+    return readLogTail(Math.max(10, Math.min(2000, maxLines ?? 300)));
+  });
+
+  // 清除缓存（供设置页“调试→清除缓存”测试用）：主进程内存 + 磁盘缩略图缓存。
+  ipcMain.handle('cache:clear', async (): Promise<ClearCacheResult> => {
+    const memStats = thumbCache.stats();
+    thumbCache.clear();
+    let diskFiles = 0;
+    let diskBytes = 0;
+    try {
+      const dir = thumbCacheDir();
+      const names = await fs.readdir(dir);
+      for (const name of names) {
+        const full = path.join(dir, name);
+        try {
+          const st = await fs.stat(full);
+          diskBytes += st.size;
+          diskFiles++;
+          await fs.rm(full, { force: true });
+        } catch {
+          // 单个文件删除失败忽略
+        }
+      }
+    } catch {
+      // 目录不存在等情况忽略
+    }
+    return {
+      memoryEntries: memStats.entries,
+      memoryBytes: memStats.bytes,
+      diskFiles,
+      diskBytes,
+    };
   });
 
   ipcMain.handle('library:move', async (_event, entry: DesktopFsEntry, toFolder: DesktopFsEntry, newName?: string): Promise<DesktopFsEntry> => {
@@ -651,10 +865,20 @@ function createWindow() {
 }
 
 void app.whenReady().then(() => {
+  // Windows 控制台切 UTF-8 代码页（尽力而为），避免中文日志按 GBK 显示乱码。
+  if (process.platform === 'win32') {
+    try {
+      execSync('chcp 65001>nul', { stdio: 'ignore' });
+    } catch {
+      // 非交互控制台下可能失败，忽略（日志文件与设置页面板不受影响）。
+    }
+  }
   registerIpc();
   registerViewerProtocol();
   registerWindowControlIpc();
   createWindow();
+  // 后台清理缩略图磁盘缓存（超限时删除最旧）。
+  void pruneThumbCache();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });

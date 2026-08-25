@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { FileRef, LibraryStore } from '../../fs-adapter/src/types';
-import { getThumbnailBlob } from './thumbnailCache';
+import { getThumbnailBlob, peekThumbnailBlob } from './thumbnailCache';
 
 export function BlobImage({
   store,
@@ -19,7 +19,14 @@ export function BlobImage({
   lazy?: boolean;
   blur?: boolean;
 }) {
-  const [url, setUrl] = useState<string | null>(null);
+  // 挂载时若缓存已命中则同步生成 object URL：切换文件夹时命中缓存的图
+  // 直接出图，不闪加载条（未命中则走下方 effect 异步加载）。
+  const [url, setUrl] = useState<string | null>(() => {
+    if (!thumbnail) return null;
+    const cached = peekThumbnailBlob(fileRef, 512);
+    return cached ? URL.createObjectURL(cached) : null;
+  });
+  const urlRef = useRef<string | null>(url);
   const [failed, setFailed] = useState(false);
   const [visible, setVisible] = useState(!lazy);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -44,9 +51,7 @@ export function BlobImage({
 
   useEffect(() => {
     if (!visible) return;
-    let objectUrl: string | null = null;
     let cancelled = false;
-    setUrl(null);
     setFailed(false);
     // 缩略图走内存缓存：同一文件切走再切回时直接复用已生成的 Blob，
     // 不再触发 IPC / 磁盘解码 / 重新编码（见 thumbnailCache.ts）。
@@ -54,15 +59,21 @@ export function BlobImage({
     load
       .then((blob) => {
         if (cancelled) return;
-        objectUrl = URL.createObjectURL(blob);
-        setUrl(objectUrl);
+        const next = URL.createObjectURL(blob);
+        // 替换旧 URL（含挂载时预热生成的），保持 urlRef 始终指向当前展示的 URL。
+        if (urlRef.current) URL.revokeObjectURL(urlRef.current);
+        urlRef.current = next;
+        setUrl(next);
       })
       .catch(() => {
         if (!cancelled) setFailed(true);
       });
     return () => {
       cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      if (urlRef.current) {
+        URL.revokeObjectURL(urlRef.current);
+        urlRef.current = null;
+      }
     };
   }, [store, fileRef.id, fileRef.mtime, fileRef.size, visible, thumbnail]);
 
