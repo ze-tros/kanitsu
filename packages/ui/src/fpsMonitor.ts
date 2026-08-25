@@ -28,6 +28,8 @@ export interface FpsStats {
   totalDropped: number;
   /** 滚动回调样本数。 */
   scrollSamples: number;
+  /** 最近 1s 的 scrollTop 写入次数（应≈60Hz 节流上限）。 */
+  scrollWrites: number;
   /** 滚动回调平均耗时（ms）。 */
   scrollAvgMs: number;
   /** 滚动回调最大耗时（ms）。 */
@@ -44,6 +46,7 @@ const MAX_SCROLL_SAMPLES = 200;
 /** 最近 1s 的帧间隔样本（t=结束时间戳，gap=间隔 ms）。 */
 const samples: { t: number; gap: number }[] = [];
 const scrollMs: number[] = [];
+const scrollWriteTs: number[] = [];
 
 let rafId = 0;
 let running = false;
@@ -79,6 +82,7 @@ function compute(now: number): FpsStats {
     scrollAvgMs: scrollMs.length > 0 ? scrollMs.reduce((a, b) => a + b, 0) / scrollMs.length : 0,
     scrollMaxMs: scrollSorted.length > 0 ? scrollSorted[scrollSorted.length - 1]! : 0,
     scrollP95Ms: percentile(scrollSorted, 95),
+    scrollWrites: scrollWriteTs.filter((t) => now - t <= WINDOW_MS).length,
   };
 }
 
@@ -123,6 +127,7 @@ export function stopFpsMonitor(): void {
 export function resetFpsMonitor(): void {
   samples.length = 0;
   scrollMs.length = 0;
+  scrollWriteTs.length = 0;
   totalFrames = 0;
   totalDropped = 0;
   lastTime = 0;
@@ -137,4 +142,12 @@ export function getFpsStats(): FpsStats {
 export function recordScrollFrame(ms: number): void {
   scrollMs.push(ms);
   if (scrollMs.length > MAX_SCROLL_SAMPLES) scrollMs.shift();
+}
+
+/** 记录一次 scrollTop 写入（smoothScroll 60Hz 节流内上报，验证封顶生效）。 */
+export function recordScrollWrite(): void {
+  scrollWriteTs.push(performance.now());
+  while (scrollWriteTs.length > 0 && scrollWriteTs[0]! < performance.now() - WINDOW_MS) {
+    scrollWriteTs.shift();
+  }
 }

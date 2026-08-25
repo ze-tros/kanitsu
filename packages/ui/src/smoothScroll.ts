@@ -1,10 +1,17 @@
 import { useEffect, type RefObject } from 'react';
+import { recordScrollWrite } from './fpsMonitor';
 
 export interface WheelSmoothOptions {
   /** 每 16.7ms 向目标逼近的比例（0~1），越小越绵长。默认 0.16。 */
   lerp?: number;
   /** deltaMode=1（按"行"）时每行换算像素数。默认 33。 */
   lineHeight?: number;
+  /**
+   * 实际写入 scrollTop 的最小间隔（ms）。高刷屏（120/240Hz）上每帧写位置会让
+   * 合成管线在极短的帧预算内持续提交，导致掉帧；内容帧率封顶 60Hz 与手机信息流
+   * 一致。默认 16.7。
+   */
+  writeIntervalMs?: number;
 }
 
 /**
@@ -28,6 +35,7 @@ export function useWheelSmoothScroll(
 ): void {
   const lerp = options.lerp ?? 0.16;
   const lineHeight = options.lineHeight ?? 33;
+  const writeIntervalMs = options.writeIntervalMs ?? 16.7;
 
   useEffect(() => {
     const el = elRef.current;
@@ -40,6 +48,7 @@ export function useWheelSmoothScroll(
     let raf = 0;
     let running = false;
     let lastTime = 0;
+    let lastWrite = 0;
 
     const clampTarget = (): void => {
       const max = Math.max(0, el.scrollHeight - el.clientHeight);
@@ -59,7 +68,15 @@ export function useWheelSmoothScroll(
       lastTime = time;
       // 帧率无关的指数缓动：60/120/144Hz 下手感一致。
       const factor = 1 - Math.pow(1 - lerp, dt / 16.7);
-      el.scrollTop = current + diff * factor;
+      const next = current + diff * factor;
+      // 内容帧率封顶 60Hz：高刷屏上值仍按每帧（vsync）逼近，但 scrollTop 写入
+      // 不超过 writeIntervalMs 一次——合成提交压力从“每帧提交”降为稳定 60Hz，
+      // 掉帧主因（240Hz 屏 4.17ms 预算下持续提交）随之消除。
+      if (time - lastWrite >= writeIntervalMs) {
+        lastWrite = time;
+        el.scrollTop = next;
+        recordScrollWrite();
+      }
       raf = requestAnimationFrame(step);
     };
 

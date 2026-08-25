@@ -1253,7 +1253,7 @@ export function LibraryBrowser({
                         <div
                           key={row}
                           className="folder-grid"
-                          style={{ position: 'absolute', top: row * rowHeight, left: 0, right: 0 }}
+                          style={{ position: 'absolute', top: row * rowHeight, left: 0, right: 0, willChange: 'transform' }}
                         >
                           {childFolderCards.slice(start, end).map(({ folder, cover }) => (
                             <CardMotion
@@ -1346,7 +1346,7 @@ export function LibraryBrowser({
                         <div
                           key={row}
                           className="gallery-grid"
-                          style={{ position: 'absolute', top: row * rowHeight, left: 0, right: 0 }}
+                          style={{ position: 'absolute', top: row * rowHeight, left: 0, right: 0, willChange: 'transform' }}
                         >
                           {folderImages.slice(start, end).map((image) => (
                             <CardMotion
