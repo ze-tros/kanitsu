@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import {
   applyOrganize,
   childrenOf,
@@ -30,7 +30,14 @@ import type { KanituDesktopBridge } from '../../fs-adapter/src/electron';
 import { organizeByFolder, type CustomOrganizeRule } from '../../organizer/src/index';
 import { pickCover } from '../../cover-picker/src/index';
 import { BlobImage } from './BlobImage';
-import { getThumbnailBlob, preloadThumbnails } from './thumbnailCache';
+import {
+  getThumbnailBlob,
+  preloadThumbnails,
+  THUMB_PRIORITY_CURRENT_DIR,
+  THUMB_PRIORITY_DIRECTIONAL,
+  THUMB_PRIORITY_SUBFOLDER,
+  THUMB_PRIORITY_WARMUP,
+} from './thumbnailCache';
 import { getLogLevelPref, isPrefetchEnabled, logDebug } from './debugLog';
 import {
   backTarget,
@@ -93,6 +100,38 @@ const PINNED_COVERS_KEY = 'kanitu-pinned-covers';
 // 缩略图预热缓存（见下方 useEffect），点进子文件夹时网格立即可用。
 const PRELOAD_PER_FOLDER = 12;
 const PRELOAD_MAX_FOLDERS = 16;
+
+// —— 图片网格虚拟化（性能优化 P2）——
+// 卡片尺寸固定（aspect-[4/3] + 定宽列），因此行高可精确度量。滚动时只挂载
+// 可视区 ± OVERSCAN_ROWS 的行，其余行以绝对定位撑起总高度（与安卓相册
+// RecyclerView 的"只实例化可视 ItemView + 缓冲区"同思路）。
+const MIN_CARD_WIDTH = 180; // 与 styles.css .gallery-grid minmax(180px, 1fr) 对齐
+const GRID_GAP = 16; // 与 .gallery-grid gap: 1rem 对齐
+const OVERSCAN_ROWS = 3; // 可视区上下各多挂载的行数（缓冲）
+
+interface GalleryMetrics {
+  cols: number;
+  cardHeight: number;
+  rowHeight: number;
+  /** 该 section 相对主滚动容器内容的顶部偏移（滚动无关）。 */
+  galleryTop: number;
+  /** 主滚动容器可视高度。 */
+  viewportH: number;
+}
+
+/** 通用虚拟窗口计算：按滚动位置返回某区应挂载的首/末行（含上下缓冲）。 */
+function windowRowsFor(
+  m: GalleryMetrics,
+  scrollTop: number,
+  itemCount: number,
+): { first: number; last: number } {
+  if (m.rowHeight <= 0 || m.cols <= 0 || itemCount <= 0) return { first: 0, last: 0 };
+  const totalRows = Math.ceil(itemCount / m.cols);
+  const gs = Math.max(0, scrollTop - m.galleryTop);
+  const first = Math.max(0, Math.floor(gs / m.rowHeight) - OVERSCAN_ROWS);
+  const last = Math.min(totalRows, Math.ceil((gs + m.viewportH) / m.rowHeight) + OVERSCAN_ROWS);
+  return { first, last };
+}
 
 function loadPinnedCovers(): Record<string, string> {
   try {
@@ -206,30 +245,7 @@ export function LibraryBrowser({
   }, []);
 
   // —— 内容区滚动位置记忆：按目录保存/恢复，返回上一级再回来时停留在原处 ——
-  const mainScrollRef = useRef<HTMLElement | null>(null);
-  const scrollPositionsRef = useRef(new Map<string, number>());
-  const scrollSaveFrameRef = useRef<number | null>(null);
-  const currentFolderId = selectedFolderId || snapshot?.rootId || '';
-
-  // 滚动时（rAF 节流）记录该目录的滚动位置。
-  const onMainScroll = useCallback(() => {
-    const el = mainScrollRef.current;
-    if (!el || !currentFolderId) return;
-    if (scrollSaveFrameRef.current != null) return; // 已排队待写
-    scrollSaveFrameRef.current = requestAnimationFrame(() => {
-      scrollSaveFrameRef.current = null;
-      const node = mainScrollRef.current;
-      if (node) scrollPositionsRef.current.set(currentFolderId, node.scrollTop);
-    });
-  }, [currentFolderId]);
-
-  // 切换目录后恢复该目录上次浏览位置（首次进入为顶部）。
-  // currentFolderId 由 selectedFolderId/snapshot 派生，二者已在依赖中。
-  useLayoutEffect(() => {
-    const el = mainScrollRef.current;
-    if (!el) return;
-    el.scrollTop = scrollPositionsRef.current.get(currentFolderId) ?? 0;
-  }, [selectedFolderId, snapshot]);
+  // （滚动处理函数与虚拟化/方向预取逻辑整体移到了 folderImages 之后，见下方。）
 
   const notify = useCallback((text: string, kind?: 'info' | 'success' | 'error') => {
     const detected = kind ?? (/失败|错误/.test(text) ? 'error' : (/完成|成功|^已/.test(text) ? 'success' : 'info'));
@@ -298,7 +314,181 @@ export function LibraryBrowser({
     }));
   }, [snapshot, childFolders, pinnedCovers]);
 
-  // 预加载子文件夹的预览图（优先级 2）：进入一个文件夹时，在空闲时间后台为每个
+  // —— 内容区滚动位置记忆 + 图片网格虚拟化（P2）+ 滚动方向预取（P3）——
+  // 统一放在 folderImages/childFolders 之后：虚拟化窗口与方向预取都依赖
+  // folderImages，且滚动时须同步 scrollTop 驱动窗口重算。
+  const mainScrollRef = useRef<HTMLElement | null>(null);
+  const scrollPositionsRef = useRef(new Map<string, number>());
+  const scrollSaveFrameRef = useRef<number | null>(null);
+  const currentFolderId = selectedFolderId || snapshot?.rootId || '';
+  const [scrollTop, setScrollTop] = useState(0);
+  const [galleryMetrics, setGalleryMetrics] = useState<GalleryMetrics>({
+    cols: 1,
+    cardHeight: 0,
+    rowHeight: 0,
+    galleryTop: 0,
+    viewportH: 0,
+  });
+  const galleryMetricsRef = useRef<GalleryMetrics>(galleryMetrics);
+  const gallerySectionRef = useRef<HTMLElement | null>(null);
+  const probeCardRef = useRef<HTMLDivElement | null>(null);
+  // 子文件夹区同样虚拟化（目录多时文件夹卡片也是全量渲染的卡顿源）。
+  const [folderMetrics, setFolderMetrics] = useState<GalleryMetrics>({
+    cols: 1,
+    cardHeight: 0,
+    rowHeight: 0,
+    galleryTop: 0,
+    viewportH: 0,
+  });
+  const folderMetricsRef = useRef<GalleryMetrics>(folderMetrics);
+  const folderSectionRef = useRef<HTMLElement | null>(null);
+  const folderProbeCardRef = useRef<HTMLDivElement | null>(null);
+  const [layoutTick, setLayoutTick] = useState(0);
+
+  // 滚动时（rAF 节流）记录该目录的滚动位置；只在虚拟窗口（文件夹/图片两区）
+  // 发生变化时才 setScrollTop 触发整树重渲——小幅度滚动（仍在同一行内）不重渲，
+  // 护住目录多/图多场景的帧率。
+  const lastWindowKeyRef = useRef('');
+  const onMainScroll = useCallback(() => {
+    const el = mainScrollRef.current;
+    if (!el || !currentFolderId) return;
+    if (scrollSaveFrameRef.current != null) return; // 已排队待写
+    scrollSaveFrameRef.current = requestAnimationFrame(() => {
+      scrollSaveFrameRef.current = null;
+      const node = mainScrollRef.current;
+      if (!node) return;
+      const st = node.scrollTop;
+      scrollPositionsRef.current.set(currentFolderId, st); // 位置记忆始终更新
+      const fw = windowRowsFor(folderMetricsRef.current, st, childFolderCards.length);
+      const gw = windowRowsFor(galleryMetricsRef.current, st, folderImages.length);
+      const key = `${fw.first}:${fw.last}|${gw.first}:${gw.last}`;
+      if (key !== lastWindowKeyRef.current) {
+        lastWindowKeyRef.current = key;
+        setScrollTop(st);
+      }
+    });
+  }, [currentFolderId, childFolderCards.length, folderImages.length]);
+
+  // 主滚动容器尺寸变化（窗口缩放 / 侧栏调宽）时重新度量。
+  useEffect(() => {
+    const main = mainScrollRef.current;
+    if (!main) return;
+    const ro = new ResizeObserver(() => setLayoutTick((t) => t + 1));
+    ro.observe(main);
+    return () => ro.disconnect();
+  }, []);
+
+  // 度量两个虚拟区（子文件夹 / 图片）的列数、真实卡片高度、相对主容器的偏移
+  // 与视口高度。各自用同构探测卡量高度（含 figcaption/边框），行高无累积漂移；
+  // 文件夹卡片与图片卡片 caption 高度不同，因此分开度量。
+  useLayoutEffect(() => {
+    const main = mainScrollRef.current;
+    if (!main) return;
+    const measure = (
+      section: HTMLElement | null,
+      probe: HTMLDivElement | null,
+      fallbackCaptionH: number,
+    ): GalleryMetrics => {
+      if (!section) {
+        return { cols: 1, cardHeight: 0, rowHeight: 0, galleryTop: 0, viewportH: 0 };
+      }
+      const sectionW = section.clientWidth;
+      const cols = Math.max(1, Math.floor((sectionW + GRID_GAP) / (MIN_CARD_WIDTH + GRID_GAP)));
+      const estCardW = (sectionW - GRID_GAP * (cols - 1)) / cols;
+      const cardHeight = probe?.offsetHeight || estCardW * 0.75 + fallbackCaptionH;
+      const rowHeight = cardHeight + GRID_GAP;
+      const offset =
+        section.getBoundingClientRect().top - main.getBoundingClientRect().top + main.scrollTop;
+      return { cols, cardHeight, rowHeight, galleryTop: offset, viewportH: main.clientHeight };
+    };
+    const same = (a: GalleryMetrics, b: GalleryMetrics): boolean =>
+      a.cols === b.cols &&
+      a.cardHeight === b.cardHeight &&
+      a.rowHeight === b.rowHeight &&
+      a.galleryTop === b.galleryTop &&
+      a.viewportH === b.viewportH;
+    const nextFolder = measure(folderSectionRef.current, folderProbeCardRef.current, 46);
+    const nextGallery = measure(gallerySectionRef.current, probeCardRef.current, 42);
+    setFolderMetrics((prev) => (same(prev, nextFolder) ? prev : nextFolder));
+    setGalleryMetrics((prev) => (same(prev, nextGallery) ? prev : nextGallery));
+  }, [folderImages.length, childFolderCards.length, searchQuery, selectedFolderId, snapshot, sidebarHidden, sidebarWidth, layoutTick]);
+
+  // 最新度量同步到 ref：滚动窗口计算/方向预取在 rAF/effect 里读取，避免陈旧值。
+  useEffect(() => {
+    galleryMetricsRef.current = galleryMetrics;
+    folderMetricsRef.current = folderMetrics;
+  }, [galleryMetrics, folderMetrics]);
+
+  // 切换目录后恢复该目录上次浏览位置（首次进入为顶部）。主区启用了
+  // scroll-smooth，恢复动作为“柔和滑回”；但要等各 section 的虚拟化度量就绪
+  // （行高准确、内容高度真实）再执行，否则平滑滚动会在内容还没撑高时先被
+  // 钳到 0，出现“先跳顶再滑回”的抽搐。
+  useLayoutEffect(() => {
+    const el = mainScrollRef.current;
+    if (!el) return;
+    if (childFolderCards.length > 0 && folderMetrics.rowHeight <= 0) return;
+    if (folderImages.length > 0 && galleryMetrics.rowHeight <= 0) return;
+    el.scrollTop = scrollPositionsRef.current.get(currentFolderId) ?? 0;
+  }, [
+    selectedFolderId,
+    snapshot,
+    galleryMetrics,
+    folderMetrics,
+    currentFolderId,
+    childFolderCards.length,
+    folderImages.length,
+  ]);
+
+  // —— 滚动方向预取（P3）：按方向把“下一屏”缩略图以优先级 1 排入 worker，
+  // 抢在整目录后台预热（优先级 2）之前生成，快速滚动时白格明显减少。
+  // 与安卓 RecyclerView 的 prefetch（滚动时预解码下一屏）同思路。 ——
+  const lastScrollTopRef = useRef(0);
+  const lastDirectionalKeyRef = useRef('');
+  const directionalTokenRef = useRef<{ cancelled: boolean } | null>(null);
+
+  useEffect(() => {
+    if (folderImages.length === 0 || !isPrefetchEnabled()) return;
+    const st = scrollTop;
+    const prev = lastScrollTopRef.current;
+    const dir = st > prev ? 'down' : st < prev ? 'up' : null;
+    lastScrollTopRef.current = st;
+    if (!dir) return;
+    const m = galleryMetricsRef.current;
+    if (m.rowHeight <= 0 || m.viewportH <= 0 || m.cols <= 0) return;
+    const totalRows = Math.ceil(folderImages.length / m.cols);
+    const gs = Math.max(0, st - m.galleryTop);
+    const firstRow = Math.max(0, Math.floor(gs / m.rowHeight) - OVERSCAN_ROWS);
+    const lastRow = Math.min(totalRows, Math.ceil((gs + m.viewportH) / m.rowHeight) + OVERSCAN_ROWS);
+    const screenRows = Math.max(1, Math.ceil(m.viewportH / m.rowHeight));
+    const r0 = dir === 'down' ? lastRow : firstRow - screenRows;
+    const r1 = dir === 'down' ? lastRow + screenRows : firstRow;
+    const c0 = Math.max(0, r0) * m.cols;
+    const c1 = Math.min(folderImages.length, Math.max(0, r1) * m.cols);
+    if (c1 <= c0) return;
+    const key = `${dir}:${c0}:${c1}`;
+    if (key === lastDirectionalKeyRef.current) return;
+    lastDirectionalKeyRef.current = key;
+    if (directionalTokenRef.current) directionalTokenRef.current.cancelled = true;
+    const token = { cancelled: false };
+    directionalTokenRef.current = token;
+    const targets: FileRef[] = folderImages.slice(c0, c1).map((img) => ({
+      id: img.fileRefId ?? img.id,
+      name: img.name,
+      kind: 'file',
+      mtime: img.mtime,
+      size: img.size,
+    }));
+    preloadThumbnails(store, targets, {
+      priority: THUMB_PRIORITY_DIRECTIONAL,
+      // 已排在整目录预取（优先级 2）队尾的文件：重新以优先 1 请求并替换缓存
+      // Promise，让 worker 先出下一屏的图（否则合并返回慢 Promise = 没预取）。
+      recheck: true,
+      shouldStop: () => token.cancelled,
+    });
+    logDebug('prefetch', `滚动方向预取：${targets.length} 张（${c0}–${c1}，${dir}）`);
+  }, [scrollTop, folderImages, store]);
+
+  // 预加载子文件夹的预览图（优先级 3）：进入一个文件夹时，在空闲时间后台为每个
   // 子文件夹前若干张缩略图预热缓存（限并发、可取消），点进子文件夹时网格立即可用。
   // 已缓存的条目会立即命中，因此重复进入同一父目录几乎无成本。
   useEffect(() => {
@@ -320,7 +510,7 @@ export function LibraryBrowser({
         setTimeout(work, 0);
       }
     };
-    schedule(() => preloadThumbnails(store, targets, { priority: 2, shouldStop: () => token.cancelled }));
+    schedule(() => preloadThumbnails(store, targets, { priority: THUMB_PRIORITY_SUBFOLDER, shouldStop: () => token.cancelled }));
     logDebug('prefetch', `子文件夹预取 P2：${targets.length} 张`);
     return () => {
       token.cancelled = true;
@@ -342,7 +532,13 @@ export function LibraryBrowser({
     }));
     if (targets.length === 0) return;
     if (!isPrefetchEnabled()) return; // 设置页“调试→预取开关”可关闭
-    preloadThumbnails(store, targets, { priority: 1, shouldStop: () => token.cancelled });
+    preloadThumbnails(store, targets, {
+      priority: THUMB_PRIORITY_CURRENT_DIR,
+      // 并发 2 → 4（与主进程 worker 数对齐）：5000 张的整目录预取等待时间减半；
+      // 可见请求会按需升级插队，因此稍高的并发不会拖慢正在显示的图。
+      concurrency: 4,
+      shouldStop: () => token.cancelled,
+    });
     logDebug('prefetch', `当前目录预取 P1：${folderImages.length} 张 → ${selectedFolder?.name ?? '根'}`);
     return () => {
       token.cancelled = true;
@@ -364,7 +560,7 @@ export function LibraryBrowser({
     ].map((img) => ({ id: img.fileRefId ?? img.id, name: img.name, kind: 'file', mtime: img.mtime, size: img.size }));
     if (ordered.length === 0) return;
     if (!isPrefetchEnabled()) return; // 设置页“调试→预取开关”可关闭
-    preloadThumbnails(store, ordered, { priority: 3, shouldStop: () => token.cancelled });
+    preloadThumbnails(store, ordered, { priority: THUMB_PRIORITY_WARMUP, shouldStop: () => token.cancelled });
     logDebug('prefetch', `全库预热 P3：${ordered.length} 张（当前目录 ${folderImageIds.size} 张优先）`);
     return () => {
       token.cancelled = true;
@@ -1000,80 +1196,169 @@ export function LibraryBrowser({
           </div>
         </div>
 
-        <main className="flex-1 overflow-y-auto p-5 lg:p-8" ref={mainScrollRef} onScroll={onMainScroll}>
+        <main className="flex-1 overflow-y-auto p-5 lg:p-8 scroll-smooth" ref={mainScrollRef} onScroll={onMainScroll}>
           {childFolderCards.length > 0 && (
-            <section className="mb-8">
+            <section className="mb-8" ref={folderSectionRef}>
               <h3 className="text-sm font-semibold opacity-70 mb-3">子文件夹</h3>
-              <div className="folder-grid">
-                {childFolderCards.map(({ folder, cover }) => (
-                  <div
-                    key={folder.id}
-                    className="card bg-base-200 border border-base-300 shadow hover:shadow-lg transition cursor-pointer overflow-hidden"
-                    onClick={() => handleSelectFolder(folder)}
-                    onContextMenu={(event) => openContextMenu(event, buildFolderMenu(folder))}
-                  >
-                    <figure className="aspect-[4/3] overflow-hidden relative">
-                      {cover ? (
-                        <BlobImage
-                          store={store}
-                          fileRef={{
-                            id: snapshot?.images[cover.imageId]?.fileRefId ?? cover.imageId,
-                            name: snapshot?.images[cover.imageId]?.name ?? '',
-                            kind: 'file',
-                            mtime: snapshot?.images[cover.imageId]?.mtime,
-                            size: snapshot?.images[cover.imageId]?.size,
-                          }}
-                          alt={folder.name}
-                          className="w-full h-full object-cover"
-                          thumbnail
-                          lazy
-                          blur={isImageBlurred(snapshot?.images[cover.imageId]?.relPath, blurredImages)}
-                        />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center opacity-60 text-sm">无图片</div>
-                      )}
-                      {pinnedCovers[folder.id] != null && (
-                        <span className="absolute top-2 left-2 z-10 badge badge-primary badge-sm shadow">⭐ 已固定</span>
-                      )}
-                    </figure>
-                    <figcaption className="p-3 flex items-center justify-between gap-2">
-                      <span className="text-sm font-medium truncate">{folder.name}</span>
-                      <span className="text-[11px] opacity-60 whitespace-nowrap">{folder.imageCount} 图 / {folder.childCount} 子</span>
-                    </figcaption>
+              {/* 文件夹区虚拟化（同图片区）：目录多时只挂载可视行 ± 缓冲，DOM 稳定 */}
+              {(() => {
+                const { cols, rowHeight, galleryTop, viewportH } = folderMetrics;
+                const totalRows = cols > 0 ? Math.ceil(childFolderCards.length / cols) : 0;
+                if (totalRows === 0) return null;
+                const gs = Math.max(0, scrollTop - galleryTop);
+                const firstRow =
+                  rowHeight > 0 ? Math.max(0, Math.floor(gs / rowHeight) - OVERSCAN_ROWS) : 0;
+                const lastRow =
+                  rowHeight > 0
+                    ? Math.min(totalRows, Math.ceil((gs + viewportH) / rowHeight) + OVERSCAN_ROWS)
+                    : Math.min(totalRows, 1);
+                const rows: number[] = [];
+                for (let r = firstRow; r < lastRow; r++) rows.push(r);
+                return (
+                  <div style={{ position: 'relative', height: Math.max(1, totalRows * rowHeight) }}>
+                    {rows.map((row) => {
+                      const start = row * cols;
+                      const end = Math.min(childFolderCards.length, start + cols);
+                      return (
+                        <div
+                          key={row}
+                          className="folder-grid"
+                          style={{ position: 'absolute', top: row * rowHeight, left: 0, right: 0 }}
+                        >
+                          {childFolderCards.slice(start, end).map(({ folder, cover }) => (
+                            <div
+                              key={folder.id}
+                              className="card bg-base-200 border border-base-300 shadow hover:shadow-lg hover:scale-[1.02] active:scale-[0.98] transition cursor-pointer overflow-hidden kanitu-card-in"
+                              onClick={() => handleSelectFolder(folder)}
+                              onContextMenu={(event) => openContextMenu(event, buildFolderMenu(folder))}
+                            >
+                              <figure className="aspect-[4/3] overflow-hidden relative">
+                                {cover ? (
+                                  <BlobImage
+                                    store={store}
+                                    fileRef={{
+                                      id: snapshot?.images[cover.imageId]?.fileRefId ?? cover.imageId,
+                                      name: snapshot?.images[cover.imageId]?.name ?? '',
+                                      kind: 'file',
+                                      mtime: snapshot?.images[cover.imageId]?.mtime,
+                                      size: snapshot?.images[cover.imageId]?.size,
+                                    }}
+                                    alt={folder.name}
+                                    className="w-full h-full object-cover"
+                                    thumbnail
+                                    lazy
+                                    blur={isImageBlurred(snapshot?.images[cover.imageId]?.relPath, blurredImages)}
+                                  />
+                                ) : (
+                                  <div className="w-full h-full flex items-center justify-center opacity-60 text-sm">无图片</div>
+                                )}
+                                {pinnedCovers[folder.id] != null && (
+                                  <span className="absolute top-2 left-2 z-10 badge badge-primary badge-sm shadow">⭐ 已固定</span>
+                                )}
+                              </figure>
+                              <figcaption className="p-3 flex items-center justify-between gap-2">
+                                <span className="text-sm font-medium truncate">{folder.name}</span>
+                                <span className="text-[11px] opacity-60 whitespace-nowrap">{folder.imageCount} 图 / {folder.childCount} 子</span>
+                              </figcaption>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })}
+                    {/* 隐藏的同构文件夹卡片探测：度量真实高度（含 figcaption/边框） */}
+                    <div
+                      aria-hidden="true"
+                      style={{ position: 'absolute', left: 0, right: 0, top: 0, visibility: 'hidden', pointerEvents: 'none' }}
+                    >
+                      <div className="folder-grid">
+                        <div ref={folderProbeCardRef} className="card bg-base-200 border border-base-300 shadow overflow-hidden">
+                          <figure className="aspect-[4/3] overflow-hidden relative" />
+                          <figcaption className="p-3 flex items-center justify-between gap-2">
+                            <span className="text-sm font-medium truncate">测</span>
+                            <span className="text-[11px] opacity-60 whitespace-nowrap">0 图 / 0 子</span>
+                          </figcaption>
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                ))}
-              </div>
+                );
+              })()}
             </section>
           )}
 
           {folderImages.length > 0 && (
-            <section className="mb-8">
+            <section className="mb-8" ref={gallerySectionRef}>
               <h3 className="text-sm font-semibold opacity-70 mb-3">图片</h3>
-              <div className="gallery-grid">
-                {folderImages.map((image) => (
-                  <div
-                    key={image.id}
-                    className="card bg-base-200 border border-base-300 shadow hover:shadow-lg transition cursor-pointer overflow-hidden"
-                    onClick={() => setViewerImageId(image.id)}
-                    onContextMenu={(event) => openContextMenu(event, buildImageMenu(image))}
-                  >
-                    <figure className="aspect-[4/3] overflow-hidden relative">
-                      <BlobImage
-                        store={store}
-                        fileRef={{ id: image.fileRefId ?? image.id, name: image.name, kind: 'file', mtime: image.mtime, size: image.size }}
-                        alt={image.name}
-                        className="w-full h-full object-cover"
-                        thumbnail
-                        lazy
-                        blur={blurredImages.has(image.relPath)}
-                      />
-                    </figure>
-                    <figcaption className="p-3">
-                      <span className="text-xs truncate block">{image.name}</span>
-                    </figcaption>
+              {/* 虚拟化网格（P2）：只挂载可视区 ± 缓冲的行，其余行由绝对定位撑起总高，
+                  从"全量 DOM"变为"固定几十张"，滚动时只替换窗口内的行。 */}
+              {(() => {
+                const { cols, rowHeight, galleryTop, viewportH } = galleryMetrics;
+                const totalRows = cols > 0 ? Math.ceil(folderImages.length / cols) : 0;
+                if (totalRows === 0) return null;
+                const gs = Math.max(0, scrollTop - galleryTop);
+                const firstRow =
+                  rowHeight > 0 ? Math.max(0, Math.floor(gs / rowHeight) - OVERSCAN_ROWS) : 0;
+                const lastRow =
+                  rowHeight > 0
+                    ? Math.min(totalRows, Math.ceil((gs + viewportH) / rowHeight) + OVERSCAN_ROWS)
+                    : Math.min(totalRows, 1);
+                const rows: number[] = [];
+                for (let r = firstRow; r < lastRow; r++) rows.push(r);
+                return (
+                  <div style={{ position: 'relative', height: Math.max(1, totalRows * rowHeight) }}>
+                    {rows.map((row) => {
+                      const start = row * cols;
+                      const end = Math.min(folderImages.length, start + cols);
+                      return (
+                        <div
+                          key={row}
+                          className="gallery-grid"
+                          style={{ position: 'absolute', top: row * rowHeight, left: 0, right: 0 }}
+                        >
+                          {folderImages.slice(start, end).map((image) => (
+                            <div
+                              key={image.id}
+                              className="card bg-base-200 border border-base-300 shadow hover:shadow-lg hover:scale-[1.02] active:scale-[0.98] transition cursor-pointer overflow-hidden kanitu-card-in"
+                              onClick={() => setViewerImageId(image.id)}
+                              onContextMenu={(event) => openContextMenu(event, buildImageMenu(image))}
+                            >
+                              <figure className="aspect-[4/3] overflow-hidden relative">
+                                <BlobImage
+                                  store={store}
+                                  fileRef={{ id: image.fileRefId ?? image.id, name: image.name, kind: 'file', mtime: image.mtime, size: image.size }}
+                                  alt={image.name}
+                                  className="w-full h-full object-cover"
+                                  thumbnail
+                                  lazy
+                                  blur={blurredImages.has(image.relPath)}
+                                />
+                              </figure>
+                              <figcaption className="p-3">
+                                <span className="text-xs truncate block">{image.name}</span>
+                              </figcaption>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })}
+                    {/* 隐藏的同构探测卡片：度量真实卡片高度（含 figcaption 与边框），
+                        保证绝对定位的行高与真实渲染一致、无累积漂移。 */}
+                    <div
+                      aria-hidden="true"
+                      style={{ position: 'absolute', left: 0, right: 0, top: 0, visibility: 'hidden', pointerEvents: 'none' }}
+                    >
+                      <div className="gallery-grid">
+                        <div ref={probeCardRef} className="card bg-base-200 border border-base-300 shadow overflow-hidden">
+                          <figure className="aspect-[4/3] overflow-hidden relative" />
+                          <figcaption className="p-3">
+                            <span className="text-xs truncate block">测</span>
+                          </figcaption>
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                ))}
-              </div>
+                );
+              })()}
             </section>
           )}
 
@@ -1350,7 +1635,10 @@ export function LibraryBrowser({
   );
 }
 
-function FolderTree({
+// 侧栏目录树：浅比较 memo。LibraryBrowser 每帧滚动都会重渲外壳，但树的
+// props（snapshot/选中目录/展开集/回调）在滚动期间稳定，memo 让整棵树跳过
+// 每帧 Reconciliation——文件夹越多收益越大。
+const FolderTree = memo(function FolderTree({
   snapshot,
   folderId,
   selectedFolderId,
@@ -1419,7 +1707,7 @@ function FolderTree({
       })}
     </ul>
   );
-}
+});
 
 function TitleBar() {
   const bridge = (window as { kanituDesktop?: KanituDesktopBridge }).kanituDesktop;

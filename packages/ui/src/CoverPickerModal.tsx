@@ -4,7 +4,7 @@ import type { FileRef, LibraryStore } from '../../fs-adapter/src/types';
 import { childrenOf, directImagesOf, imagesOf } from '../../core/src/index';
 import { pickCover } from '../../cover-picker/src/index';
 import { BlobImage } from './BlobImage';
-import { preloadThumbnails } from './thumbnailCache';
+import { preloadThumbnails, THUMB_PRIORITY_DIRECTIONAL, THUMB_PRIORITY_SUBFOLDER } from './thumbnailCache';
 
 const MAX_PREVIEW = 500;
 
@@ -56,8 +56,9 @@ export function CoverPickerModal({
   const enterChild = (id: string) => setChain((prev) => [...prev, id]);
 
   // 与主视图同款低优先级预热：打开弹窗或切换浏览目录时，把当前目录的直属图片
-  // （优先级 1）与子文件夹封面（优先级 2）排入同一缓存/队列。外部已生成的
-  // 缩略图（键一致）直接命中复用；未生成过的也提前后台生成，滚动/点选时即出图。
+  // （优先级 1＝滚动方向预取档，仅次于可见）与子文件夹封面（优先级 3）排入同一
+  // 缓存/队列。外部已生成的缩略图（键一致）直接命中复用；未生成过的也提前后台
+  // 生成，滚动/点选时即出图。
   useEffect(() => {
     const token = { cancelled: false };
     const direct: FileRef[] = [];
@@ -72,8 +73,8 @@ export function CoverPickerModal({
         covers.push({ id: coverImg.fileRefId ?? coverImg.id, name: coverImg.name, kind: 'file', mtime: coverImg.mtime, size: coverImg.size });
       }
     }
-    if (direct.length > 0) preloadThumbnails(store, direct, { priority: 1, shouldStop: () => token.cancelled });
-    if (covers.length > 0) preloadThumbnails(store, covers, { priority: 2, shouldStop: () => token.cancelled });
+    if (direct.length > 0) preloadThumbnails(store, direct, { priority: THUMB_PRIORITY_DIRECTIONAL, shouldStop: () => token.cancelled });
+    if (covers.length > 0) preloadThumbnails(store, covers, { priority: THUMB_PRIORITY_SUBFOLDER, shouldStop: () => token.cancelled });
     return () => {
       token.cancelled = true;
     };

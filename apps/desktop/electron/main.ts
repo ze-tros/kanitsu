@@ -341,12 +341,14 @@ async function pruneThumbCache(): Promise<void> {
 // —— 缩略图 worker 池 ——
 // nativeImage 只能在主进程使用，解码大图会长时间阻塞事件循环（UI/IPC 全被拖
 // 慢）。缩略图生成交给 worker 线程（主路径 sharp/libvips），主进程只做缓存与
-// 调度。队列为多级优先级：0 可见 > 1 当前目录 > 2 子文件夹 > 3 全库预热/无关，
-// 高优先级永远先取，保证“屏幕里看到的”优先于后台预热。
+// 调度。队列为多级优先级：
+//   0 可见 > 1 滚动方向预取 > 2 当前目录 > 3 子文件夹/封面 > 4 全库预热/无关，
+// 高优先级永远先取，保证“屏幕里看到的”永远优先于后台预热；滚动方向预取只
+// 落后可见请求一档，快速滚动时下一屏缩略图能抢在整目录预热洪峰前面生成。
 const THUMB_WORKER_FORMATS = new Set(['jpg', 'jpeg', 'png', 'webp', 'avif', 'bmp']);
 const THUMB_WORKER_COUNT = 4;
 const THUMB_JOB_TIMEOUT_MS = 8000;
-const THUMB_PRIORITIES = 4;
+const THUMB_PRIORITIES = 5;
 
 interface ThumbnailRequest {
   file: DesktopFsEntry;
@@ -356,7 +358,7 @@ interface ThumbnailRequest {
   reject: (err: Error) => void;
 }
 
-/** 优先级桶数组：下标小者优先（0 可见 > 1 当前目录 > 2 子文件夹 > 3 全库）。 */
+/** 优先级桶数组：下标小者优先（0 可见 > 1 滚动方向 > 2 当前目录 > 3 子文件夹 > 4 全库）。 */
 const thumbnailQueues: ThumbnailRequest[][] = Array.from({ length: THUMB_PRIORITIES }, () => []);
 const workerPool: (Worker | null)[] = [];
 const busyWorkers = new Set<Worker>();
@@ -472,7 +474,7 @@ function enqueueThumbnail(file: DesktopFsEntry, targetSize: number, priority: nu
   return new Promise<Uint8Array>((resolve, reject) => {
     const level = Math.max(0, Math.min(THUMB_PRIORITIES - 1, priority));
     const request: ThumbnailRequest = { file, targetSize, priority: level, resolve, reject };
-    // 按优先级入桶（0 可见 > 1 当前目录 > 2 子文件夹 > 3 全库预热），
+    // 按优先级入桶（0 可见 > 1 滚动方向预取 > 2 当前目录 > 3 子文件夹 > 4 全库预热），
     // 取任务时总是从高优先级桶开始，保证正在看的图不被预取洪峰拖慢。
     thumbnailQueues[level]!.push(request);
     for (let i = 0; i < THUMB_WORKER_COUNT; i++) ensureThumbnailWorker(i);

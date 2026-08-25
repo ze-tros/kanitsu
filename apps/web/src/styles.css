@@ -323,3 +323,29 @@ body {
   margin: 5px 6px;
   background: var(--color-base-300, rgba(128, 128, 128, 0.28));
 }
+
+/* —— 柔和动画（真实网页交替/滚动场景）——
+   卡片/图片各自在同构元素（新挂载）时播放一次：
+   - kanitu-card-in：虚拟化窗口换行时新进入的行/卡片淡入 + 轻微上移；
+   - kanitu-image-in：缩略图/原图就绪换入时淡入，取代生硬硬切。
+   仅合成器属性（opacity/transform），不触发 layout；尊重系统“减少动态效果”。 */
+@keyframes kanitu-card-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.kanitu-card-in {
+  animation: kanitu-card-in 180ms ease-out both;
+}
+@keyframes kanitu-image-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.kanitu-image-in {
+  animation: kanitu-image-in 180ms ease-out both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .kanitu-card-in,
+  .kanitu-image-in {
+    animation: none !important;
+  }
+}

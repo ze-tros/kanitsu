@@ -1,4 +1,6 @@
 export * from './BlobImage';
+export * from './objectUrlPool';
+export * from './visibleObserver';
 export * from './ContextMenu';
 export * from './LibraryBrowser';
 export * from './NavButton';
