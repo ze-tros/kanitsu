@@ -342,7 +342,8 @@ export function LibraryBrowser({
   const currentFolderId = selectedFolderId || snapshot?.rootId || '';
   const [scrollTop, setScrollTop] = useState(0);
   // 滚轮平滑（类手机信息流）：接管 main 的 wheel 事件，rAF 指数缓动逼近目标。
-  useWheelSmoothScroll(mainScrollRef, { lerp: 0.16 });
+  // lerp 0.24（收敛更快）+ arriveEps 2px（到达即停）——避免渐近尾巴拖沓。
+  useWheelSmoothScroll(mainScrollRef, { lerp: 0.24, arriveEps: 2 });
   const [galleryMetrics, setGalleryMetrics] = useState<GalleryMetrics>({
     cols: 1,
     cardHeight: 0,

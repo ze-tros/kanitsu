@@ -12,6 +12,11 @@ export interface WheelSmoothOptions {
    * 一致。默认 16.7。
    */
   writeIntervalMs?: number;
+  /**
+   * 到达吸附阈值（px）：距目标小于该值就直接写目标并停止，避免指数缓动的
+   * 渐近尾巴（最后几十像素以极慢速度爬行）造成“太拖沓”的手感。默认 2。
+   */
+  arriveEps?: number;
 }
 
 /**
@@ -36,6 +41,7 @@ export function useWheelSmoothScroll(
   const lerp = options.lerp ?? 0.16;
   const lineHeight = options.lineHeight ?? 33;
   const writeIntervalMs = options.writeIntervalMs ?? 16.7;
+  const arriveEps = options.arriveEps ?? 2;
 
   useEffect(() => {
     const el = elRef.current;
@@ -58,7 +64,9 @@ export function useWheelSmoothScroll(
     const step = (time: number): void => {
       const current = el.scrollTop;
       const diff = target - current;
-      if (Math.abs(diff) < 0.5) {
+      // 到达吸附：距目标足够近时直接落位并停止。指数缓动是渐近收敛的，
+      // 若等到 0.5px 才停，最后几十像素会以 30px/s 左右的极慢速度“爬”很久。
+      if (Math.abs(diff) < arriveEps) {
         el.scrollTop = target;
         running = false;
         raf = 0;
