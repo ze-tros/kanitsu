@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { useWheelSmoothScroll } from './smoothScroll';
+import { CardMotion } from './CardMotion';
 import {
   applyOrganize,
   childrenOf,
@@ -1251,9 +1252,9 @@ export function LibraryBrowser({
                           style={{ position: 'absolute', top: row * rowHeight, left: 0, right: 0 }}
                         >
                           {childFolderCards.slice(start, end).map(({ folder, cover }) => (
-                            <div
+                            <CardMotion
                               key={folder.id}
-                              className="card bg-base-200 border border-base-300 shadow hover:shadow-lg hover:scale-[1.02] active:scale-[0.98] transition cursor-pointer overflow-hidden"
+                              className="card bg-base-200 border border-base-300 shadow hover:shadow-lg transition-shadow cursor-pointer overflow-hidden"
                               onClick={() => handleSelectFolder(folder)}
                               onContextMenu={(event) => openContextMenu(event, buildFolderMenu(folder))}
                             >
@@ -1285,7 +1286,7 @@ export function LibraryBrowser({
                                 <span className="text-sm font-medium truncate">{folder.name}</span>
                                 <span className="text-[11px] opacity-60 whitespace-nowrap">{folder.imageCount} 图 / {folder.childCount} 子</span>
                               </figcaption>
-                            </div>
+                            </CardMotion>
                           ))}
                         </div>
                       );
@@ -1344,9 +1345,9 @@ export function LibraryBrowser({
                           style={{ position: 'absolute', top: row * rowHeight, left: 0, right: 0 }}
                         >
                           {folderImages.slice(start, end).map((image) => (
-                            <div
+                            <CardMotion
                               key={image.id}
-                              className="card bg-base-200 border border-base-300 shadow hover:shadow-lg hover:scale-[1.02] active:scale-[0.98] transition cursor-pointer overflow-hidden"
+                              className="card bg-base-200 border border-base-300 shadow hover:shadow-lg transition-shadow cursor-pointer overflow-hidden"
                               onClick={() => setViewerImageId(image.id)}
                               onContextMenu={(event) => openContextMenu(event, buildImageMenu(image))}
                             >
@@ -1364,7 +1365,7 @@ export function LibraryBrowser({
                               <figcaption className="p-3">
                                 <span className="text-xs truncate block">{image.name}</span>
                               </figcaption>
-                            </div>
+                            </CardMotion>
                           ))}
                         </div>
                       );
