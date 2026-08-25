@@ -267,8 +267,10 @@ function createByteLruCache(maxBytes: number): {
 
 /** 网格缩略图缓存（≤1024px JPEG）。 */
 const thumbCache = createByteLruCache(512 * 1024 * 1024);
-/** 单条超过该字节数（多为 GIF 原样大字节）只落磁盘、不进内存缓存，避免挤垮 LRU。 */
-const MAX_MEM_CACHE_ENTRY_BYTES = 512 * 1024;
+/** 单条内存缓存上限。普通缩略图几 KB~几十 KB；worker 生成的大 GIF 动画缩略图
+ *  可能到数百 KB~数 MB，若按旧 512KB 上限则每次都要重读磁盘。提到 4MB，
+ *  配合 512MB 总容量 LRU 兜底。 */
+const MAX_MEM_CACHE_ENTRY_BYTES = 4 * 1024 * 1024;
 /** 小于该字节数的 GIF 原样透传（动画完美且小）；更大的交给 worker 生成动画缩略图。 */
 const GIF_PASSTHROUGH_LIMIT = 256 * 1024;
 
