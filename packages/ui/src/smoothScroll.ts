@@ -8,7 +8,11 @@ export interface WheelSmoothOptions {
   activeLerp?: number;
   /** deltaMode=1（按"行"）时每行换算像素数。默认 33。 */
   lineHeight?: number;
-  /** scrollTop 写入限频（ms）。0 = 每帧写入（跟手优先）。默认 0。 */
+  /**
+   * scrollTop 写入限频（ms）。0 = 每帧写入（跟手优先）；16.7 = 60Hz（最省）。
+   * 默认 8.3（120Hz 内容帧率）：240Hz 屏上仍足够跟手，但主线程布局/提交
+   * 工作量比“每帧写”减半——生产版实测每帧写位置是掉帧主因。
+   */
   writeIntervalMs?: number;
   /** 到达吸附阈值（px）：松手后距目标小于该值直接落位停止。默认 2。 */
   arriveEps?: number;
@@ -37,7 +41,7 @@ export function useWheelSmoothScroll(
   const lerp = options.lerp ?? 0.3;
   const activeLerp = options.activeLerp ?? 0.5;
   const lineHeight = options.lineHeight ?? 33;
-  const writeIntervalMs = options.writeIntervalMs ?? 0;
+  const writeIntervalMs = options.writeIntervalMs ?? 8.3;
   const arriveEps = options.arriveEps ?? 2;
   const inputActiveMs = options.inputActiveMs ?? 70;
 
