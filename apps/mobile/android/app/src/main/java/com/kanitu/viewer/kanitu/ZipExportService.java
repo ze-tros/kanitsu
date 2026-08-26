@@ -15,6 +15,7 @@ import java.util.Set;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 import org.json.JSONArray;
+import org.json.JSONException;
 import org.json.JSONObject;
 
 /** Streams a library folder into a user-chosen SAF zip document. */
@@ -27,7 +28,7 @@ public final class ZipExportService {
         this.context = context;
     }
 
-    public int[] export(AlbumLibrary albums, String targetRelPath, Uri outUri, ProgressEmitter emitter) throws IOException {
+    public int[] export(AlbumLibrary albums, String targetRelPath, Uri outUri, ProgressEmitter emitter) throws IOException, JSONException {
         File root = albums.ensureRoot();
         String norm = normalize(targetRelPath);
         File sourceDir = norm.isEmpty() ? root : new File(root, norm);
@@ -82,7 +83,7 @@ public final class ZipExportService {
         zos.closeEntry();
     }
 
-    private void writeIndexJson(ZipOutputStream zos, String indexRoot, List<Item> items) throws IOException {
+    private void writeIndexJson(ZipOutputStream zos, String indexRoot, List<Item> items) throws IOException, JSONException {
         JSONArray imagesArr = new JSONArray();
         for (Item item : items) {
             JSONObject o = new JSONObject();
