@@ -79,6 +79,11 @@ export function CardMotion({
     const el = ref.current;
     if (!el) return;
     lastControls.current?.stop();
+    // 入场动画可能正处于中途（opacity 0→1）；悬停/按压如果直接接管，透明
+    // 度会冻结在半途——卡片看起来“消失”。因此这里一律先复位为完全可见，
+    // transform 交给随后的 scale 动画。
+    el.style.opacity = '';
+    el.style.transform = '';
     if (prefersReducedMotion()) {
       el.style.transform = scale === 1 ? '' : `scale(${scale})`;
       return;
