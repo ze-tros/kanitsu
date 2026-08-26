@@ -35,14 +35,26 @@ export function CardMotion({
   const ref = useRef<HTMLDivElement | null>(null);
   const lastControls = useRef<ReturnType<typeof animate> | null>(null);
 
-  // 入场动画：只在“非滚动中”挂载时播放（滚动中的窗口替换跳过，避免换行时
-  // 每行闪一次造成“跳两次”的观感）。useLayoutEffect 在浏览器首帧绘制前把卡片
-  // 置为透明+上移，杜绝“先完整出现一帧再淡入”的闪烁。
+  // 入场动画：只在“非滚动中”挂载时播放（快速滚动/拖动期间 .sk-scrolling
+  // 存在则跳过，滚动过卡得更清楚）。useLayoutEffect 在首帧绘制前把卡片置为
+  // 透明+上移，杜绝“先完整出现一帧再淡入”的闪烁；跳过或中断时一律复位内联
+  // 样式，绝不把透明度卡死在 0（否则卡片会“变白”）。
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    if (el.closest('.sk-scrolling')) return; // 滚动中：瞬时出现
-    if (prefersReducedMotion()) return; // 减少动态效果：瞬时出现
+    const skipEntrance = (): void => {
+      // 无论因何种原因跳过：保证元素立即可见。
+      el.style.opacity = '';
+      el.style.transform = '';
+    };
+    if (el.closest('.sk-scrolling')) {
+      skipEntrance(); // 快速滚动/拖动中：瞬时出现
+      return;
+    }
+    if (prefersReducedMotion()) {
+      skipEntrance();
+      return;
+    }
     // 显式起点 keyframes，避免依赖浏览器对既有 transform 的解析。
     el.style.opacity = '0';
     el.style.transform = 'translateY(8px)';
@@ -54,6 +66,9 @@ export function CardMotion({
     );
     return () => {
       lastControls.current?.stop();
+      // StrictMode 双挂载/中途卸载：复位内联样式，避免透明度冻结在 0。
+      el.style.opacity = '';
+      el.style.transform = '';
     };
   }, []);
 

@@ -384,11 +384,13 @@ export function LibraryBrowser({
     if (!el || !currentFolderId) return;
     setScrollingClass(el, true);
     if (scrollAnimPauseTimerRef.current != null) window.clearTimeout(scrollAnimPauseTimerRef.current);
+    // 滚动中窗口留得更久一点（400ms）：快速滚动/拖动期间持续挂载的新行
+    // 都会命中 .sk-scrolling → 跳过入场动画，滚动过程卡片保持清晰可见。
     scrollAnimPauseTimerRef.current = window.setTimeout(() => {
       scrollAnimPauseTimerRef.current = null;
       const node = mainScrollRef.current;
       if (node) setScrollingClass(node, false);
-    }, 150);
+    }, 400);
     if (scrollSaveFrameRef.current != null) return; // 已排队待写
     scrollSaveFrameRef.current = requestAnimationFrame(() => {
       scrollSaveFrameRef.current = null;
