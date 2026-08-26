@@ -79,7 +79,6 @@ export function MobileViewer({
   onClose,
   onNavigate,
   onShowActions,
-  originRect,
 }: {
   images: ImageEntry[];
   index: number;
@@ -88,24 +87,11 @@ export function MobileViewer({
   onClose: () => void;
   onNavigate: (id: string) => void;
   onShowActions: (image: ImageEntry) => void;
-  /** 打开时被点击卡片的屏幕位置：用于从卡片放大到全屏的共享元素过渡。 */
-  originRect?: { x: number; y: number; w: number; h: number } | null;
 }) {
   const current = images[index];
   const containerRef = useRef<HTMLDivElement>(null);
-  const rootRef = useRef<HTMLDivElement>(null);
-
-  // 打开过渡：从点击卡片中心放大到全屏（近似 FLIP；reduced-motion 跳过）。
-  useEffect(() => {
-    if (!originRect || prefersReducedMotion()) return;
-    const el = rootRef.current;
-    if (!el) return;
-    el.style.setProperty('--m-enter-x', `${originRect.x + originRect.w / 2}px`);
-    el.style.setProperty('--m-enter-y', `${originRect.y + originRect.h / 2}px`);
-    el.classList.add('m-viewer-enter');
-    const raf = requestAnimationFrame(() => requestAnimationFrame(() => el.classList.remove('m-viewer-enter')));
-    return () => cancelAnimationFrame(raf);
-  }, [originRect]);
+  const [entering, setEntering] = useState(true);
+  const [closing, setClosing] = useState(false);
   const [containerSize, setContainerSize] = useState({ w: 0, h: 0 });
   const [uiVisible, setUiVisible] = useState(true);
   const [rotation, setRotation] = useState(0); // 0/90/180/270
@@ -120,6 +106,22 @@ export function MobileViewer({
   imagesRef.current = images;
   const indexRef = useRef(index);
   indexRef.current = index;
+  const initialImageIdRef = useRef(current?.id);
+  const closeTimerRef = useRef<number | null>(null);
+
+  const requestClose = useCallback(() => {
+    if (closing) return;
+    if (prefersReducedMotion()) {
+      onClose();
+      return;
+    }
+    setClosing(true);
+    closeTimerRef.current = window.setTimeout(onClose, 160);
+  }, [closing, onClose]);
+
+  useEffect(() => () => {
+    if (closeTimerRef.current != null) window.clearTimeout(closeTimerRef.current);
+  }, []);
 
   const patchPage = useCallback((id: string, patch: Partial<PageInfo>) => {
     setPages((prev) => {
@@ -162,7 +164,10 @@ export function MobileViewer({
     (image: ImageEntry) => {
       const existing = pagesRef.current.get(image.id);
       if (existing?.thumbUrl) return;
-      patchPage(image.id, {});
+      patchPage(image.id, {
+        naturalW: image.width ?? 0,
+        naturalH: image.height ?? 0,
+      });
       let cancelled = false;
       getThumbnailBlob(store, toFileRef(image), 512)
         .then((blob) => {
@@ -588,7 +593,7 @@ export function MobileViewer({
       const vy = dy / dt;
       const mask = containerRef.current?.parentElement;
       if (dy > CLOSE_THRESHOLD || vy > 0.5) {
-        onClose();
+        requestClose();
       } else {
         // 回弹
         if (mask) (mask as HTMLElement).style.background = '';
@@ -608,15 +613,19 @@ export function MobileViewer({
   if (!current) return null;
   const currentPage = pages.get(current.id);
 
-  // 渲染页：当前 ±1
-  const pageIndexes: number[] = [];
-  for (let d = -1; d <= 1; d++) {
-    const i = index + d;
-    if (i >= 0 && i < images.length) pageIndexes.push(i);
+  // 静止时只挂载当前图片，确保新会话的首帧不包含旧页或相邻页。
+  // 开始滑动后才临时挂载相邻页，保留跟手翻页效果。
+  const pageIndexes = [index];
+  if (dragX !== 0 || animating) {
+    if (index > 0) pageIndexes.unshift(index - 1);
+    if (index + 1 < images.length) pageIndexes.push(index + 1);
   }
 
   return (
-    <div ref={rootRef} className="fixed inset-0 bg-black flex flex-col select-none" style={{ touchAction: 'none', zIndex: Z_VIEWER }}>
+    <div
+      className={`fixed inset-0 bg-black flex flex-col select-none ${closing ? 'm-viewer-exit' : ''}`}
+      style={{ touchAction: 'none', zIndex: Z_VIEWER }}
+    >
       {/* 手势层 + 图片页 */}
       <div
         ref={containerRef}
@@ -630,56 +639,87 @@ export function MobileViewer({
           const img = images[i];
           const p = pages.get(img.id);
           const offsetPages = i - index;
-          const x = offsetPages * containerSize.w + dragX;
+          // Percentage translation is available on the first paint, before ResizeObserver
+          // reports the container width. Using the measured width here briefly stacked the
+          // current and adjacent pages at x=0 when opening the viewer.
+          const x = `calc(${offsetPages * 100}% + ${dragX}px)`;
           const isCurrent = i === index;
           const d = displayDims(p, containerSize.w, containerSize.h);
           return (
             <div
               key={img.id}
-              className="absolute inset-0 flex items-center justify-center"
+              className="absolute inset-0"
               style={{
-                transform: `translateX(${x}px)`,
+                transform: `translateX(${x})`,
                 transition: animating ? 'transform 240ms cubic-bezier(0.25, 0.8, 0.3, 1)' : 'none',
-                visibility: Math.abs(x) > containerSize.w * 1.5 ? 'hidden' : 'visible',
+                visibility: Math.abs(offsetPages) > 1 ? 'hidden' : 'visible',
               }}
             >
-              {/* 缩略图铺底 */}
-              {p?.thumbUrl && !p.fullReady && (
-                <img
-                  src={p.thumbUrl}
-                  alt=""
-                  draggable={false}
-                  className={`object-contain ${isBlurred(img) ? 'blur-preview' : ''}`}
-                  style={{ pointerEvents: 'none', width: d.iw, height: d.ih }}
-                />
-              )}
-              {/* 原图 */}
-              {p?.fullUrl && (
-                <img
-                  ref={isCurrent ? imgElRef : undefined}
-                  src={p.fullUrl}
-                  alt={img.name}
-                  draggable={false}
-                  decoding="async"
-                  className={`object-contain ${isBlurred(img) ? 'blur-preview' : ''} ${
-                    p.fullReady ? '' : 'opacity-0'
-                  }`}
-                  style={{
-                    pointerEvents: 'none',
-                    width: d.iw,
-                    height: d.ih,
-                    transition: animating ? 'none' : 'opacity 160ms ease-out',
-                    willChange: isCurrent ? 'transform' : undefined,
-                  }}
-                  onLoad={(e) => {
-                    const el = e.currentTarget;
-                    patchPage(img.id, { fullReady: true, naturalW: el.naturalWidth, naturalH: el.naturalHeight });
-                  }}
-                />
-              )}
-              {!p?.thumbUrl && !p?.fullUrl && (
-                <span className="loading loading-spinner loading-lg text-white/60" />
-              )}
+              <div
+                className={`absolute inset-0 ${
+                  isCurrent && entering && img.id === initialImageIdRef.current && (p?.thumbUrl || p?.fullReady)
+                    ? 'm-viewer-media-enter'
+                    : ''
+                }`}
+                onAnimationEnd={() => {
+                  if (isCurrent && img.id === initialImageIdRef.current) setEntering(false);
+                }}
+              >
+                {/* Both image layers have identical geometry and never participate in page layout. */}
+                {p?.thumbUrl && (
+                  <div
+                    className="absolute inset-0 flex items-center justify-center"
+                    style={{
+                      // Keep the thumbnail fully opaque until the original has
+                      // finished fading in. Fading both layers exposes the black
+                      // background at mid-transition and creates a dark flash.
+                      visibility: p.fullReady ? 'hidden' : 'visible',
+                      transition: animating || !p.fullReady ? 'none' : 'visibility 0ms linear 140ms',
+                    }}
+                  >
+                    <img
+                      src={p.thumbUrl}
+                      alt=""
+                      draggable={false}
+                      className={`object-contain ${isBlurred(img) ? 'blur-preview' : ''}`}
+                      style={{ pointerEvents: 'none', width: d.iw, height: d.ih }}
+                    />
+                  </div>
+                )}
+                {p?.fullUrl && (
+                  <div
+                    className="absolute inset-0 flex items-center justify-center"
+                    style={{
+                      opacity: p.fullReady ? 1 : 0,
+                      transition: animating ? 'none' : 'opacity 140ms ease-out',
+                    }}
+                  >
+                    <img
+                      ref={isCurrent ? imgElRef : undefined}
+                      src={p.fullUrl}
+                      alt={img.name}
+                      draggable={false}
+                      decoding="async"
+                      className={`object-contain ${isBlurred(img) ? 'blur-preview' : ''}`}
+                      style={{
+                        pointerEvents: 'none',
+                        width: d.iw,
+                        height: d.ih,
+                        willChange: isCurrent ? 'transform' : undefined,
+                      }}
+                      onLoad={(e) => {
+                        const el = e.currentTarget;
+                        patchPage(img.id, { fullReady: true, naturalW: el.naturalWidth, naturalH: el.naturalHeight });
+                      }}
+                    />
+                  </div>
+                )}
+                {!p?.thumbUrl && !p?.fullReady && (
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <span className="loading loading-spinner loading-lg text-white/60" />
+                  </div>
+                )}
+              </div>
             </div>
           );
         })}
@@ -696,7 +736,7 @@ export function MobileViewer({
         }}
       >
         <div className="flex items-center gap-1 px-1 py-2">
-          <button className="w-11 h-11 flex items-center justify-center text-white active:opacity-60" onClick={onClose} aria-label="返回">
+          <button className="w-11 h-11 flex items-center justify-center text-white active:opacity-60" onClick={requestClose} aria-label="返回">
             <svg viewBox="0 0 24 24" className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M15 18l-6-6 6-6" />
             </svg>
@@ -809,6 +849,7 @@ function Filmstrip({
   onSelect: (image: ImageEntry) => void;
 }) {
   const stripRef = useRef<HTMLDivElement>(null);
+  const positionedRef = useRef(false);
 
   // 虚拟化：只渲染当前项 ±FILM_WINDOW 张。几千张图不再全量挂载 FilmThumb
   // （每张都发一次缩略图请求，全量渲染会直接 OOM）。两侧用 padding 撑出总宽度，
@@ -823,7 +864,11 @@ function Filmstrip({
     const active = strip.children[index - start] as HTMLElement | undefined;
     if (!active) return;
     const target = active.offsetLeft - strip.clientWidth / 2 + active.clientWidth / 2;
-    strip.scrollTo({ left: target, behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+    strip.scrollTo({
+      left: target,
+      behavior: !positionedRef.current || prefersReducedMotion() ? 'auto' : 'smooth',
+    });
+    positionedRef.current = true;
   }, [index, start]);
 
   return (

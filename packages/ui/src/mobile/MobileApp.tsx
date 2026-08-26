@@ -78,8 +78,6 @@ const IMAGE_COLS = IMAGE_GRID.cols;
 const IMAGE_GAP = IMAGE_GRID.gap;
 /** 图片卡片文件名行高（开关「显示文件名」时参与网格行高计算）。 */
 const IMAGE_NAME_H = 16;
-/** 记录最近一次点击的图片卡片位置（供查看器「从卡片放大到全屏」共享元素过渡）。 */
-let lastImageTapRect: { x: number; y: number; w: number; h: number } | null = null;
 const FOLDER_COLS = FOLDER_GRID.cols;
 const FOLDER_GAP = FOLDER_GRID.gap;
 const FOLDER_CAPTION_H = 46;
@@ -282,14 +280,12 @@ function ImageCard({
       onTouchMove={lp.onTouchMove}
       onTouchEnd={lp.onTouchEnd}
       onTouchCancel={lp.onTouchCancel}
-      onClick={(e) => {
+      onClick={() => {
         if (selectMode) {
           onToggleSelect?.(image.id);
           return;
         }
         if (lp.wasLongPress()) return;
-        const r = e.currentTarget.getBoundingClientRect();
-        lastImageTapRect = { x: r.left, y: r.top, w: r.width, h: r.height };
         onOpen();
       }}
       onContextMenu={(e) => e.preventDefault()}
@@ -369,14 +365,12 @@ function ImageListRow({
       onTouchMove={lp.onTouchMove}
       onTouchEnd={lp.onTouchEnd}
       onTouchCancel={lp.onTouchCancel}
-      onClick={(e) => {
+      onClick={() => {
         if (selectMode) {
           onToggleSelect?.(image.id);
           return;
         }
         if (lp.wasLongPress()) return;
-        const r = e.currentTarget.getBoundingClientRect();
-        lastImageTapRect = { x: r.left, y: r.top, w: r.width, h: r.height };
         onOpen();
       }}
       onContextMenu={(e) => e.preventDefault()}
@@ -568,6 +562,7 @@ export function MobileApp({
   const [snapshot, setSnapshot] = useState<LibrarySnapshot | null>(null);
   const [selectedFolderId, setSelectedFolderId] = useState('');
   const [viewerImageId, setViewerImageId] = useState<string | null>(null);
+  const [viewerSessionId, setViewerSessionId] = useState(0);
   const [toast, setToast] = useState<{ text: string; kind: 'info' | 'success' | 'error' } | null>(null);
   const [importReport, setImportReport] = useState<ImportTask | null>(null);
   const [showReport, setShowReport] = useState(false);
@@ -594,7 +589,6 @@ export function MobileApp({
   // 多选 / 批量操作
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set());
-  const [viewerOrigin, setViewerOrigin] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const [organizePreview, setOrganizePreview] = useState<{ folder: FolderNode; bindings: OrganizeBinding[] } | null>(null);
   const [organizeResult, setOrganizeResult] = useState<OrganizeResult | null>(null);
   const [lastManifest, setLastManifest] = useState<OrganizeManifest | null>(null);
@@ -1419,7 +1413,9 @@ export function MobileApp({
   const openViewer = useCallback(
     (image: ImageEntry) => {
       setViewerImageId(image.id);
-      setViewerOrigin(lastImageTapRect);
+      // Force a new viewer tree for every open so WebView cannot reuse the
+      // previous session's decoded image or compositor layer.
+      setViewerSessionId((id) => id + 1);
       openOverlay('viewer');
     },
     [openOverlay],
@@ -1884,10 +1880,10 @@ export function MobileApp({
       {/* 查看器 */}
       {viewerOpen && (
         <MobileViewer
+          key={viewerSessionId}
           images={viewerImages}
           index={viewerIndex}
           store={store}
-          originRect={viewerOrigin}
           isBlurred={(img) => blurredImages.has(img.relPath)}
           onClose={() => closeOverlay('viewer')}
           onNavigate={(id) => setViewerImageId(id)}

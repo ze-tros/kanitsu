@@ -475,15 +475,22 @@ body {
 
 
 
-/* —— 查看器打开过渡（从点击卡片的位置放大到全屏，共享元素近似）——
-   transform-origin 由 JS 注入的 --m-enter-x/y 指向被点击卡片中心。 */
-.m-viewer-enter {
-  animation: m-viewer-in 220ms cubic-bezier(0.22, 0.8, 0.36, 1) both;
-  transform-origin: var(--m-enter-x, 50%) var(--m-enter-y, 50%);
+/* Viewer motion is split by responsibility: media enter/exit uses opacity and
+   scale, while page navigation owns horizontal translation. */
+.m-viewer-media-enter {
+  animation: m-viewer-media-in 180ms cubic-bezier(0.22, 0.8, 0.36, 1) both;
 }
-@keyframes m-viewer-in {
-  from { opacity: 0; transform: scale(0.06); }
+@keyframes m-viewer-media-in {
+  from { opacity: 0; transform: scale(0.985); }
   to { opacity: 1; transform: scale(1); }
+}
+.m-viewer-exit {
+  animation: m-viewer-out 150ms ease-in both;
+  pointer-events: none;
+}
+@keyframes m-viewer-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
 }
 
 /* —— 查看器胶片条：隐藏滚动条 —— */
@@ -542,7 +549,8 @@ body {
   .m-dialog-mask,
   .m-dialog,
   .m-toast,
-  .m-viewer-enter,
+  .m-viewer-media-enter,
+  .m-viewer-exit,
   .m-fullscreen .modal-box {
     animation-duration: 1ms !important;
   }
