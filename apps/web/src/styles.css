@@ -164,21 +164,39 @@ body {
     max-width: 85vw;
   }
 
-  /* 图片/文件夹网格：手机上一行 2 列，卡片更小 */
+  /* 图片/文件夹网格：手机上行 2 列，卡片更小。
+     minmax/gap 与 LibraryBrowser.tsx 的 gridUnits() 保持一致（130px/10px），
+     虚拟化按此切片、CSS 按此布局，两者列数才不会错位。 */
   .folder-grid,
   .gallery-grid {
-    grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
-    gap: 0.6rem;
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    gap: 0.625rem;
   }
 
-  /* 内容区收紧内边距，给竖屏更多可用宽度 */
+  /* 内容区收紧内边距，给竖屏更多可用宽度；底部预留手势条安全区。 */
   .drawer-content main {
     padding: 0.75rem;
+    padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
   }
 
-  /* 顶部面包屑区在手机上留足点击空间，避免按钮挤压 */
+  /* 顶部面包屑区在手机上留足点击空间，避免按钮挤压；顶部预留状态栏安全区。 */
   .navbar {
     gap: 0.25rem;
+    padding-top: calc(0.25rem + env(safe-area-inset-top, 0px));
+  }
+
+  /* 操作按钮行更紧凑：小屏下横向留白少一点，wrap 后不至于太挤。 */
+  .drawer-content .btn {
+    padding-left: 0.65rem;
+    padding-right: 0.65rem;
+  }
+
+  /* 顶栏导航图标按钮放大到约 44px 触控目标（btn-sm 默认 32px 太小，
+     也让它与左侧 ☰ 汉堡按钮（~48px）视觉协调；保留 square 布局）。 */
+  .drawer-content .navbar .btn-square {
+    width: 2.75rem;
+    min-height: 2.75rem;
+    height: 2.75rem;
   }
 }
 

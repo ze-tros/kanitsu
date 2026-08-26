@@ -108,8 +108,13 @@ const PRELOAD_MAX_FOLDERS = 16;
 // 卡片尺寸固定（aspect-[4/3] + 定宽列），因此行高可精确度量。滚动时只挂载
 // 可视区 ± OVERSCAN_ROWS 的行，其余行以绝对定位撑起总高度（与安卓相册
 // RecyclerView 的"只实例化可视 ItemView + 缓冲区"同思路）。
-const MIN_CARD_WIDTH = 180; // 与 styles.css .gallery-grid minmax(180px, 1fr) 对齐
-const GRID_GAP = 16; // 与 .gallery-grid gap: 1rem 对齐
+// 网格常量随视口变化：桌面 180px/16px；移动端（<1024px）130px/10px。
+// 与 styles.css 的移动端媒体查询成对对齐：保证虚拟化计算的列数 == CSS 实际渲染列数，
+// 避免"JS 按 N 列切片、CSS 却渲染 M 列"导致的卡片变窄/错位/滚动高度失真。
+function gridUnits() {
+  const mobile = typeof window !== 'undefined' && window.innerWidth < 1024;
+  return mobile ? { minCard: 130, gap: 10 } : { minCard: 180, gap: 16 };
+}
 const OVERSCAN_ROWS = 2; // 可视区上下各多挂载的行数（缓冲）
 
 interface GalleryMetrics {
@@ -444,10 +449,11 @@ export function LibraryBrowser({
         return { cols: 1, cardHeight: 0, rowHeight: 0, galleryTop: 0, viewportH: 0 };
       }
       const sectionW = section.clientWidth;
-      const cols = Math.max(1, Math.floor((sectionW + GRID_GAP) / (MIN_CARD_WIDTH + GRID_GAP)));
-      const estCardW = (sectionW - GRID_GAP * (cols - 1)) / cols;
+      const { minCard, gap } = gridUnits();
+      const cols = Math.max(1, Math.floor((sectionW + gap) / (minCard + gap)));
+      const estCardW = (sectionW - gap * (cols - 1)) / cols;
       const cardHeight = probe?.offsetHeight || estCardW * 0.75 + fallbackCaptionH;
-      const rowHeight = cardHeight + GRID_GAP;
+      const rowHeight = cardHeight + gap;
       const offset =
         section.getBoundingClientRect().top - main.getBoundingClientRect().top + main.scrollTop;
       return { cols, cardHeight, rowHeight, galleryTop: offset, viewportH: main.clientHeight };
@@ -1159,6 +1165,7 @@ export function LibraryBrowser({
 
   const viewerImages = folderImages;
   const viewerIndex = viewerImages.findIndex((img) => img.id === viewerImageId);
+  const isEmptyLibrary = childFolderCards.length === 0 && folderImages.length === 0;
 
   return (
     <div className="app-shell flex h-screen flex-col">
@@ -1212,7 +1219,7 @@ export function LibraryBrowser({
           </div>
         </div>
 
-        <div className="bg-base-100 px-5 lg:px-8 py-3 flex items-end justify-between gap-3">
+        <div className="bg-base-100 px-4 lg:px-8 py-3 flex flex-col gap-3 lg:flex-row lg:items-end justify-between">
           <div className="min-w-0">
             <div className="min-w-0">
               <h2 className="text-2xl font-bold min-w-0">{selectedFolder?.name ?? '全部相册'}</h2>
@@ -1234,7 +1241,7 @@ export function LibraryBrowser({
               )}
             </div>
           </div>
-          <div className="flex flex-none shrink-0 flex-wrap justify-end gap-2">
+          <div className="flex flex-none shrink-0 flex-wrap justify-start lg:justify-end gap-2">
             <button className="btn btn-primary btn-sm" disabled={busy} onClick={handleAdd}>导入相册</button>
             <button className="btn btn-ghost btn-sm" disabled={!selectedFolder} onClick={() => void refresh()}>刷新</button>
             <button className="btn btn-ghost btn-sm" disabled={!selectedFolder} onClick={openOrganizePreview}>整理</button>
@@ -1247,13 +1254,14 @@ export function LibraryBrowser({
           </div>
         </div>
 
-        <main className="flex-1 overflow-y-auto p-5 lg:p-8 [overflow-anchor:none]" ref={mainScrollRef} onScroll={onMainScroll}>
+        <main className={'flex-1 overflow-y-auto p-5 lg:p-8 [overflow-anchor:none]' + (isEmptyLibrary ? ' flex flex-col' : '')} ref={mainScrollRef} onScroll={onMainScroll}>
           {childFolderCards.length > 0 && (
             <section className="mb-8" ref={folderSectionRef}>
               <h3 className="text-sm font-semibold opacity-70 mb-3">子文件夹</h3>
               {/* 文件夹区虚拟化（同图片区）：目录多时只挂载可视行 ± 缓冲，DOM 稳定 */}
               {(() => {
                 const { cols, rowHeight, galleryTop, viewportH } = folderMetrics;
+                const gridGap = gridUnits().gap;
                 const totalRows = cols > 0 ? Math.ceil(childFolderCards.length / cols) : 0;
                 if (totalRows === 0) return null;
                 const gs = Math.max(0, scrollTop - galleryTop);
@@ -1277,7 +1285,7 @@ export function LibraryBrowser({
                         <div
                           key={row}
                           className="folder-grid"
-                          style={{ position: 'absolute', top: row * rowHeight, left: 0, right: 0, willChange: 'transform' }}
+                          style={{ position: 'absolute', top: row * rowHeight, left: 0, right: 0, willChange: 'transform', gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gap: `${gridGap}px` }}
                         >
                           {childFolderCards.slice(start, end).map(({ folder, cover }) => (
                             <CardMotion
@@ -1324,7 +1332,7 @@ export function LibraryBrowser({
                       aria-hidden="true"
                       style={{ position: 'absolute', left: 0, right: 0, top: 0, visibility: 'hidden', pointerEvents: 'none' }}
                     >
-                      <div className="folder-grid">
+                      <div className="folder-grid" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gap: `${gridGap}px` }}>
                         <div ref={folderProbeCardRef} className="card bg-base-200 border border-base-300 shadow overflow-hidden">
                           <figure className="aspect-[4/3] overflow-hidden relative" />
                           <figcaption className="p-3 flex items-center justify-between gap-2">
@@ -1347,6 +1355,7 @@ export function LibraryBrowser({
                   从"全量 DOM"变为"固定几十张"，滚动时只替换窗口内的行。 */}
               {(() => {
                 const { cols, rowHeight, galleryTop, viewportH } = galleryMetrics;
+                const gridGap = gridUnits().gap;
                 const totalRows = cols > 0 ? Math.ceil(folderImages.length / cols) : 0;
                 if (totalRows === 0) return null;
                 const gs = Math.max(0, scrollTop - galleryTop);
@@ -1370,7 +1379,7 @@ export function LibraryBrowser({
                         <div
                           key={row}
                           className="gallery-grid"
-                          style={{ position: 'absolute', top: row * rowHeight, left: 0, right: 0, willChange: 'transform' }}
+                          style={{ position: 'absolute', top: row * rowHeight, left: 0, right: 0, willChange: 'transform', gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gap: `${gridGap}px` }}
                         >
                           {folderImages.slice(start, end).map((image) => (
                             <CardMotion
@@ -1404,7 +1413,7 @@ export function LibraryBrowser({
                       aria-hidden="true"
                       style={{ position: 'absolute', left: 0, right: 0, top: 0, visibility: 'hidden', pointerEvents: 'none' }}
                     >
-                      <div className="gallery-grid">
+                      <div className="gallery-grid" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gap: `${gridGap}px` }}>
                         <div ref={probeCardRef} className="card bg-base-200 border border-base-300 shadow overflow-hidden">
                           <figure className="aspect-[4/3] overflow-hidden relative" />
                           <figcaption className="p-3">
@@ -1420,7 +1429,7 @@ export function LibraryBrowser({
           )}
 
           {childFolderCards.length === 0 && folderImages.length === 0 && (
-            <div className="border-2 border-dashed border-base-300 rounded-2xl p-12 text-center">
+            <div className="flex flex-1 flex-col items-center justify-center border-2 border-dashed border-base-300 rounded-2xl p-8 text-center">
               <p className="text-4xl mb-3">{searchTerm ? '⍰' : '◻'}</p>
               <div className="text-lg font-medium mb-1">{searchTerm ? '未找到匹配结果' : '该目录暂无图片'}</div>
               <p className="text-sm opacity-70 mb-4">{searchTerm ? `没有与“${searchQuery}”匹配的相册或图片` : '导入照片，开始整理你的图库'}</p>
