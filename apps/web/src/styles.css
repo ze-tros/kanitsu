@@ -179,7 +179,9 @@ body {
   border-color: var(--color-primary, #4f8cff);
 }
 
-/* Visible loading state for thumbnails / covers: shimmer sweep + spinner. */
+/* Visible loading state for thumbnails / covers: shimmer sweep + spinner.
+   高亮条用 ::before 作独立图层 + transform 平移（合成器属性），替代
+   background-position 动画——后者每帧触发重绘，是滚动掉帧的常驻来源。 */
 .blob-image {
   position: relative;
   overflow: hidden;
@@ -187,18 +189,31 @@ body {
 .blob-image-shimmer {
   position: absolute;
   inset: 0;
+  overflow: hidden;
+}
+.blob-image-shimmer::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 100%;
   background: linear-gradient(
     100deg,
-    var(--color-base-300) 20%,
+    transparent 0%,
     color-mix(in srgb, var(--color-base-content) 12%, var(--color-base-300)) 50%,
-    var(--color-base-300) 80%
+    transparent 100%
   );
-  background-size: 200% 100%;
-  animation: blob-shimmer 1.2s linear infinite;
+  will-change: transform;
+  animation: kanitu-shimmer-sweep 1.2s linear infinite;
 }
-@keyframes blob-shimmer {
-  0% { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
+@keyframes kanitu-shimmer-sweep {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+/* 滚动期间暂停加载动画（抖动闪烁也更安静），滚动停止 ~150ms 后恢复。 */
+.sk-scrolling .blob-image-shimmer::before,
+.sk-scrolling .blob-image-spinner::before {
+  animation-play-state: paused;
 }
 .blob-image-spinner {
   position: absolute;

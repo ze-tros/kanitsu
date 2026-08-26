@@ -110,7 +110,7 @@ const PRELOAD_MAX_FOLDERS = 16;
 // RecyclerView 的"只实例化可视 ItemView + 缓冲区"同思路）。
 const MIN_CARD_WIDTH = 180; // 与 styles.css .gallery-grid minmax(180px, 1fr) 对齐
 const GRID_GAP = 16; // 与 .gallery-grid gap: 1rem 对齐
-const OVERSCAN_ROWS = 3; // 可视区上下各多挂载的行数（缓冲）
+const OVERSCAN_ROWS = 2; // 可视区上下各多挂载的行数（缓冲）
 
 interface GalleryMetrics {
   cols: number;
@@ -374,9 +374,21 @@ export function LibraryBrowser({
   // 发生变化时才 setScrollTop 触发整树重渲——小幅度滚动（仍在同一行内）不重渲，
   // 护住目录多/图多场景的帧率。
   const lastWindowKeyRef = useRef('');
+  const scrollAnimPauseTimerRef = useRef<number | null>(null);
+  // 滚动开始时给主区加 .sk-scrolling（暂停 loading 闪烁动画），停止 ~150ms 恢复。
+  const setScrollingClass = (node: HTMLElement, scrolling: boolean): void => {
+    node.classList.toggle('sk-scrolling', scrolling);
+  };
   const onMainScroll = useCallback(() => {
     const el = mainScrollRef.current;
     if (!el || !currentFolderId) return;
+    setScrollingClass(el, true);
+    if (scrollAnimPauseTimerRef.current != null) window.clearTimeout(scrollAnimPauseTimerRef.current);
+    scrollAnimPauseTimerRef.current = window.setTimeout(() => {
+      scrollAnimPauseTimerRef.current = null;
+      const node = mainScrollRef.current;
+      if (node) setScrollingClass(node, false);
+    }, 150);
     if (scrollSaveFrameRef.current != null) return; // 已排队待写
     scrollSaveFrameRef.current = requestAnimationFrame(() => {
       scrollSaveFrameRef.current = null;
@@ -403,7 +415,11 @@ export function LibraryBrowser({
     if (!main) return;
     const ro = new ResizeObserver(() => setLayoutTick((t) => t + 1));
     ro.observe(main);
-    return () => ro.disconnect();
+    return () => {
+      ro.disconnect();
+      if (scrollAnimPauseTimerRef.current != null) window.clearTimeout(scrollAnimPauseTimerRef.current);
+      main.classList.remove('sk-scrolling');
+    };
   }, []);
 
   // 度量两个虚拟区（子文件夹 / 图片）的列数、真实卡片高度、相对主容器的偏移
