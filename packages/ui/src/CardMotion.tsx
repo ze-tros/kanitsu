@@ -1,4 +1,4 @@
-import { useRef, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { useLayoutEffect, useRef, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { animate } from 'motion/mini';
 
 /**
@@ -13,6 +13,9 @@ import { animate } from 'motion/mini';
 const SCALE_UP = { type: 'spring', stiffness: 480, damping: 32, mass: 0.5 } as const;
 const SCALE_DOWN = { type: 'spring', stiffness: 700, damping: 26, mass: 0.4 } as const;
 const SCALE_RESET = { type: 'spring', stiffness: 400, damping: 34, mass: 0.6 } as const;
+/** 入场动画（仅挂载时播放一次）：淡入 + 8px 上移，弹簧缓动。 */
+const ENTRANCE_SPRING = { type: 'spring', stiffness: 320, damping: 28, mass: 0.6 } as const;
+type SpringOptions = { type: 'spring'; stiffness: number; damping: number; mass: number };
 
 function prefersReducedMotion(): boolean {
   return typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -31,6 +34,28 @@ export function CardMotion({
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const lastControls = useRef<ReturnType<typeof animate> | null>(null);
+
+  // 入场动画：只在“非滚动中”挂载时播放（滚动中的窗口替换跳过，避免换行时
+  // 每行闪一次造成“跳两次”的观感）。useLayoutEffect 在浏览器首帧绘制前把卡片
+  // 置为透明+上移，杜绝“先完整出现一帧再淡入”的闪烁。
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (el.closest('.sk-scrolling')) return; // 滚动中：瞬时出现
+    if (prefersReducedMotion()) return; // 减少动态效果：瞬时出现
+    // 显式起点 keyframes，避免依赖浏览器对既有 transform 的解析。
+    el.style.opacity = '0';
+    el.style.transform = 'translateY(8px)';
+    lastControls.current?.stop();
+    lastControls.current = animate(
+      el,
+      { opacity: [0, 1], y: [8, 0] },
+      ENTRANCE_SPRING as SpringOptions,
+    );
+    return () => {
+      lastControls.current?.stop();
+    };
+  }, []);
 
   const to = (
     scale: number,
