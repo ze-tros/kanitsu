@@ -397,3 +397,139 @@ body {
     animation: none !important;
   }
 }
+
+/* ══════════════════════════════════════════════════════════════
+   移动端 UI（Android WebView 专用组件 packages/ui/src/mobile）
+   ══════════════════════════════════════════════════════════════ */
+
+/* 禁止长按弹出系统菜单 / 选中（网格卡片、查看器由 JS 手势接管） */
+.m-gallery-item,
+.m-viewer-root {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* —— 底部动作面板 —— */
+.m-sheet-mask {
+  animation: m-mask-in 180ms ease-out both;
+}
+.m-sheet-mask.m-closing {
+  animation: m-mask-out 180ms ease-in both;
+}
+.m-sheet-panel {
+  animation: m-sheet-in 220ms cubic-bezier(0.32, 0.72, 0.35, 1) both;
+}
+.m-sheet-mask.m-closing .m-sheet-panel {
+  animation: m-sheet-out 180ms ease-in both;
+}
+@keyframes m-mask-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes m-mask-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+@keyframes m-sheet-in {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+@keyframes m-sheet-out {
+  from { transform: translateY(0); }
+  to { transform: translateY(100%); }
+}
+
+/* —— 侧滑抽屉 —— */
+.m-drawer-mask {
+  animation: m-mask-in 200ms ease-out both;
+}
+.m-drawer-panel {
+  animation: m-drawer-in 240ms cubic-bezier(0.32, 0.72, 0.35, 1) both;
+}
+@keyframes m-drawer-in {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
+}
+
+/* —— 居中对话框 —— */
+.m-dialog-mask {
+  animation: m-mask-in 160ms ease-out both;
+}
+.m-dialog {
+  animation: m-dialog-in 200ms cubic-bezier(0.32, 0.72, 0.35, 1) both;
+}
+@keyframes m-dialog-in {
+  from { opacity: 0; transform: scale(0.92) translateY(8px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+/* —— Toast —— */
+.m-toast {
+  animation: m-toast-in 240ms cubic-bezier(0.32, 0.72, 0.35, 1) both;
+}
+@keyframes m-toast-in {
+  from { opacity: 0; transform: translate(-50%, 12px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+
+/* —— 查看器胶片条：隐藏滚动条 —— */
+.m-filmstrip {
+  scrollbar-width: none;
+}
+.m-filmstrip::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+/* —— 桌面 modal 组件（整理预览 / 封面选择）在移动端全屏化 ——
+   不改组件本体，用容器类覆盖 daisyUI modal 的居中小窗样式。 */
+.m-fullscreen .modal.modal-open {
+  position: fixed;
+  inset: 0;
+  z-index: 125;
+  display: flex;
+  padding: 0;
+}
+.m-fullscreen .modal-box {
+  width: 100%;
+  max-width: 100%;
+  height: 100%;
+  max-height: none;
+  border-radius: 0;
+  margin: 0;
+  padding-top: calc(env(safe-area-inset-top, 0px) + 14px);
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
+  animation: m-dialog-in 200ms cubic-bezier(0.32, 0.72, 0.35, 1) both;
+}
+/* 全屏化后内部弹出的二级 prompt 仍保持小窗 */
+.m-fullscreen .modal .modal.modal-open {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  background: rgba(0, 0, 0, 0.45);
+}
+.m-fullscreen .modal .modal .modal-box {
+  width: 100%;
+  max-width: 24rem;
+  height: auto;
+  max-height: 80vh;
+  border-radius: 1.5rem;
+  padding-top: 1.25rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .m-sheet-mask,
+  .m-sheet-panel,
+  .m-drawer-mask,
+  .m-drawer-panel,
+  .m-dialog-mask,
+  .m-dialog,
+  .m-toast,
+  .m-fullscreen .modal-box {
+    animation-duration: 1ms !important;
+  }
+}

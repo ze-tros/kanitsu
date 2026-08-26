@@ -61,7 +61,7 @@ import { ArrowLeftIcon, ArrowRightIcon, FolderUpIcon, HomeIcon, NavButton, NavIc
 import { SidebarResizeHandle } from './SidebarResizeHandle';
 import { SettingsPage } from './SettingsPage';
 
-function skippedReasonLabel(reason: ImportSkippedFile['reason']): string {
+export function skippedReasonLabel(reason: ImportSkippedFile['reason']): string {
   switch (reason) {
     case 'no-extension':
       return '无扩展名';
@@ -72,7 +72,7 @@ function skippedReasonLabel(reason: ImportSkippedFile['reason']): string {
   }
 }
 
-function conflictReasonLabel(reason: string): string {
+export function conflictReasonLabel(reason: string): string {
   switch (reason) {
     case 'source-missing':
       return '源文件缺失';
@@ -115,9 +115,9 @@ function gridUnits() {
   const mobile = typeof window !== 'undefined' && window.innerWidth < 1024;
   return mobile ? { minCard: 130, gap: 10 } : { minCard: 180, gap: 16 };
 }
-const OVERSCAN_ROWS = 2; // 可视区上下各多挂载的行数（缓冲）
+export const OVERSCAN_ROWS = 2; // 可视区上下各多挂载的行数（缓冲）
 
-interface GalleryMetrics {
+export interface GalleryMetrics {
   cols: number;
   cardHeight: number;
   rowHeight: number;
@@ -128,7 +128,7 @@ interface GalleryMetrics {
 }
 
 /** 通用虚拟窗口计算：按滚动位置返回某区应挂载的首/末行（含上下缓冲）。 */
-function windowRowsFor(
+export function windowRowsFor(
   m: GalleryMetrics,
   scrollTop: number,
   itemCount: number,
@@ -146,7 +146,7 @@ function windowRowsFor(
  * 大跳变（切目录 / 快速滚动跨多行）直接跟随。防止首尾行反复挂/卸载造成的
  * “滚动一下跳动两次”。渲染期写 ref 为受控写法：仅用于跨帧记忆窗口。
  */
-function clampWindow(
+export function clampWindow(
   prev: { first: number; last: number },
   next: { first: number; last: number },
 ): { first: number; last: number } {
@@ -157,7 +157,7 @@ function clampWindow(
   };
 }
 
-function loadPinnedCovers(): Record<string, string> {
+export function loadPinnedCovers(): Record<string, string> {
   try {
     const raw = localStorage.getItem(PINNED_COVERS_KEY);
     return raw ? (JSON.parse(raw) as Record<string, string>) : {};
@@ -166,7 +166,7 @@ function loadPinnedCovers(): Record<string, string> {
   }
 }
 
-function savePinnedCovers(covers: Record<string, string>): void {
+export function savePinnedCovers(covers: Record<string, string>): void {
   try {
     localStorage.setItem(PINNED_COVERS_KEY, JSON.stringify(covers));
   } catch {
@@ -174,7 +174,7 @@ function savePinnedCovers(covers: Record<string, string>): void {
   }
 }
 
-function loadBlurredImages(): ReadonlySet<string> {
+export function loadBlurredImages(): ReadonlySet<string> {
   try {
     // 旧版按相册（文件夹）存储，现改为逐图标记，作废旧键。
     localStorage.removeItem('kanitu-blurred-albums');
@@ -185,7 +185,7 @@ function loadBlurredImages(): ReadonlySet<string> {
   }
 }
 
-function saveBlurredImages(paths: ReadonlySet<string>): void {
+export function saveBlurredImages(paths: ReadonlySet<string>): void {
   try {
     localStorage.setItem(BLUR_STORAGE_KEY, JSON.stringify([...paths]));
   } catch {
@@ -193,7 +193,7 @@ function saveBlurredImages(paths: ReadonlySet<string>): void {
   }
 }
 
-function isImageBlurred(relPath: string | undefined, blurred: ReadonlySet<string>): boolean {
+export function isImageBlurred(relPath: string | undefined, blurred: ReadonlySet<string>): boolean {
   return !!relPath && blurred.has(relPath);
 }
 
@@ -1903,7 +1903,7 @@ function originalPoolPut(url: string, img: HTMLImageElement): void {
 }
 
 /** 预解码一张原图并把位图放入缓存池。 */
-function prefetchOriginal(url: string, estWidth?: number, estHeight?: number): void {
+export function prefetchOriginal(url: string, estWidth?: number, estHeight?: number): void {
   if (ORIGINAL_POOL.has(url)) {
     originalPoolTouch(url);
     return;

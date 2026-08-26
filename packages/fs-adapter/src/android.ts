@@ -161,6 +161,14 @@ function toEntry(ref: FolderRef | FileRef): AndroidFsEntry {
 
 let bridgePromise: Promise<KanituAndroidBridge> | undefined;
 
+/**
+ * Eagerly registers the Capacitor plugin and exposes window.kanituAndroid.
+ * Call once at app startup on Android so platform detection and later calls are synchronous.
+ */
+export function initAndroidBridge(): Promise<KanituAndroidBridge> {
+  return requireBridge();
+}
+
 function requireBridge(): Promise<KanituAndroidBridge> {
   if (window.kanituAndroid) return Promise.resolve(window.kanituAndroid);
   if (!bridgePromise) {
