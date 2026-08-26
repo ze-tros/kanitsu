@@ -399,7 +399,7 @@ public class KanituPlugin extends Plugin {
     }
 
     private static String baseName(String relPath) {
-        String p = relPath == null ? "" : relPath.replace('\', '/');
+        String p = relPath == null ? "" : relPath.replace('\\', '/');
         int i = p.lastIndexOf('/');
         return i < 0 ? p : p.substring(i + 1);
     }
