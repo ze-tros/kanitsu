@@ -1,5 +1,7 @@
 import { useMemo, useState } from 'react';
 import {
+  AndroidImportSourcePicker,
+  AndroidLibraryStore,
   ElectronImportSourcePicker,
   ElectronLibraryStore,
   MemoryImportSourcePicker,
@@ -13,6 +15,12 @@ import { LibraryBrowser } from '../../../packages/ui/src/index';
 
 export default function App() {
   const adapters = useMemo(() => {
+    if (window.kanituAndroid?.platform === 'android') {
+      return {
+        picker: new AndroidImportSourcePicker(),
+        store: new AndroidLibraryStore(),
+      };
+    }
     if (window.kanituDesktop?.platform === 'electron') {
       return {
         picker: new ElectronImportSourcePicker(),
@@ -28,7 +36,7 @@ export default function App() {
   // Only persist the scan index for the Electron (persistent) library. The web/memory
   // demo store is ephemeral, so it always rescans fresh and caches in memory only.
   const [index] = useState(() =>
-    window.kanituDesktop?.platform === 'electron'
+    window.kanituAndroid?.platform === 'android' || window.kanituDesktop?.platform === 'electron'
       ? createIdbPersistentIndex()
       : createMemoryPersistentIndex(),
   );

@@ -32,6 +32,32 @@ export async function importFolder(
     options.onProgress?.({ status: 'scanning', scanned: 0, copied: 0, skipped: 0, current: sourceRoot.name });
 
     await store.ensureLibraryRoot();
+
+    // Native fast path (Android SAF / Electron) copies the whole source tree without
+    // round-tripping file bytes through the JS bridge. Platforms without it fall back
+    // to picker.readBlob + store.writeBlob below.
+    if (store.importSourceTree) {
+      task.status = 'copying';
+      const result = await store.importSourceTree(sourceRoot, task.sourceFolderName, (p) =>
+        options.onProgress?.({
+          status: 'copying',
+          scanned: p.scanned,
+          copied: p.copied,
+          skipped: p.skipped,
+          current: p.current,
+        }),
+      );
+      task.targetTopFolder = result.targetTopFolder;
+      task.scannedFileCount = result.scannedFileCount;
+      task.copiedImageCount = result.copiedImageCount;
+      task.skippedCount = result.skippedCount;
+      task.skippedFiles = result.skippedFiles;
+      task.errors = result.errors;
+      task.status = 'done';
+      task.finishedAt = Date.now();
+      return task;
+    }
+
     targetTop = await store.createTopFolder(task.sourceFolderName);
     task.targetTopFolder = targetTop.name;
     task.status = 'copying';

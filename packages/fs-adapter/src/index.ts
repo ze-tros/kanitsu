@@ -3,3 +3,4 @@ export * from './zip';
 export * from './exportIndex';
 export * from './memory';
 export * from './electron';
+export * from './android';

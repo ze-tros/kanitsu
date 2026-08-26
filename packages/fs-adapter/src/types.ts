@@ -17,6 +17,27 @@ export interface FileRef {
 export type FsEntry = FolderRef | FileRef;
 export type Unwatch = () => void;
 
+export interface NativeImportSkippedFile {
+  path: string;
+  reason: 'no-extension' | 'unsupported-format';
+}
+
+export interface NativeImportProgress {
+  scanned: number;
+  copied: number;
+  skipped: number;
+  current?: string;
+}
+
+export interface NativeImportResult {
+  targetTopFolder: string;
+  scannedFileCount: number;
+  copiedImageCount: number;
+  skippedCount: number;
+  skippedFiles: NativeImportSkippedFile[];
+  errors: string[];
+}
+
 /** Reads the user-selected source folder during import. */
 export interface ImportSourcePicker {
   pickFolder(): Promise<FolderRef>;
@@ -57,4 +78,10 @@ export interface LibraryStore {
   remove(entry: FsEntry): Promise<void>;
   /** Zips targetRelPath (empty = whole library) preserving directory structure. */
   zipLibrary(targetRelPath: string, onProgress?: (done: number, total: number) => void): Promise<ZipExportResult>;
+  /**
+   * Optional native fast path: copies the whole source tree into the library without
+   * round-tripping file bytes through the JS bridge. Android SAF and Electron can both
+   * implement this; platforms without it fall back to picker.readBlob + writeBlob.
+   */
+  importSourceTree?(source: FolderRef, targetTopName: string, onProgress?: (p: NativeImportProgress) => void): Promise<NativeImportResult>;
 }

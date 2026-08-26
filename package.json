@@ -11,6 +11,8 @@
     "dev:web": "npm run dev -w @kanitu/web",
     "dev:desktop": "npm run dev -w @kanitu/desktop",
     "build:web": "npm run build -w @kanitu/web",
+    "build:mobile": "npm run build:web && npm run cap:sync -w @kanitu/mobile",
+    "cap:add:android": "npm run cap:add -w @kanitu/mobile",
     "typecheck": "npm run typecheck --workspaces --if-present"
   },
   "devDependencies": {
