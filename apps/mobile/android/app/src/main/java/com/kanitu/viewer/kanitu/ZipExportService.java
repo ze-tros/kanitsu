@@ -12,6 +12,7 @@ import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 import org.json.JSONArray;
@@ -28,7 +29,7 @@ public final class ZipExportService {
         this.context = context;
     }
 
-    public int[] export(AlbumLibrary albums, String targetRelPath, Uri outUri, ProgressEmitter emitter) throws IOException, JSONException {
+    public int[] export(AlbumLibrary albums, String targetRelPath, Uri outUri, ProgressEmitter emitter, AtomicBoolean cancel) throws IOException, JSONException {
         File root = albums.ensureRoot();
         String norm = normalize(targetRelPath);
         File sourceDir = norm.isEmpty() ? root : new File(root, norm);
@@ -49,11 +50,17 @@ public final class ZipExportService {
         try (ZipOutputStream zos = new ZipOutputStream(raw)) {
             zos.setLevel(0); // STORE
             for (Item item : items) {
+                // 取消检查：立即停止写入，已写入的条目保留。
+                if (cancel != null && cancel.get()) {
+                    break;
+                }
                 writeEntry(zos, item);
                 counts[1]++;
                 emitter.emit(counts[1], total, 0, item.relPath);
             }
-            writeIndexJson(zos, indexRoot, items);
+            if (counts[1] > 0) {
+                writeIndexJson(zos, indexRoot, items);
+            }
             zos.finish();
         }
         return counts;

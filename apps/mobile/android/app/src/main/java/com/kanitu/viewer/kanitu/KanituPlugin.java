@@ -20,14 +20,22 @@ import org.json.JSONArray;
 import java.io.File;
 import java.util.ArrayDeque;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /** Capacitor bridge for SAF import, album library, thumbnails and zip export. */
 @CapacitorPlugin(name = "Kanitu")
 public class KanituPlugin extends Plugin {
 
-    private final ExecutorService executor = Executors.newCachedThreadPool();
+    // 有界线程池：大图库快速滚动时可见卡片 + 各级预取会同时发出大量缩略图请求，
+    // 无界 cachedThreadPool 会为每个请求各起一个线程并发解码，堆内存瞬间被打爆
+    // （OOM 闪退）。固定小池限制线程总数，解码并发再由 ThumbnailService 内部的
+    // 信号量进一步收口到常数，保证同时解码的图片数有硬上限。
+    private final ExecutorService executor =
+        Executors.newFixedThreadPool(Math.max(2, Math.min(4, Runtime.getRuntime().availableProcessors())));
     private final ArrayDeque<String> logBuffer = new ArrayDeque<>();
     private String logLevel = "info";
 
@@ -35,6 +43,24 @@ public class KanituPlugin extends Plugin {
     private AlbumLibrary albums;
     private ThumbnailService thumbnails;
     private ZipExportService zipExport;
+
+    /** 进行中的可取消任务（导入/导出）：token -> 取消标志。 */
+    private final Map<String, AtomicBoolean> taskCancels = new ConcurrentHashMap<>();
+    private String pendingExportToken = "";
+
+    private AtomicBoolean registerCancel(String token) {
+        AtomicBoolean c = new AtomicBoolean(false);
+        if (token != null && !token.isEmpty()) {
+            taskCancels.put(token, c);
+        }
+        return c;
+    }
+
+    private void unregisterCancel(String token, AtomicBoolean cancel) {
+        if (token != null && !token.isEmpty() && taskCancels.get(token) == cancel) {
+            taskCancels.remove(token);
+        }
+    }
 
     @Override
     public void load() {
@@ -121,13 +147,17 @@ public class KanituPlugin extends Plugin {
     public void importSourceTree(PluginCall call) {
         JSObject source = call.getObject("source");
         String targetTopName = call.getString("targetTopName", "未命名相册");
+        String cancelToken = call.getString("cancelToken", "");
         executor.execute(() -> {
+            AtomicBoolean cancel = registerCancel(cancelToken);
             try {
                 AndroidEntry src = AndroidEntry.fromJS(source);
-                JSObject result = safSource.importTree(targetTopName, albums, importEmitter());
+                JSObject result = safSource.importTree(targetTopName, albums, importEmitter(), cancel);
                 call.resolve(result);
             } catch (Exception e) {
                 call.reject(e.getMessage(), e);
+            } finally {
+                unregisterCancel(cancelToken, cancel);
             }
         });
     }
@@ -267,7 +297,19 @@ public class KanituPlugin extends Plugin {
     public void getViewerUrl(PluginCall call) {
         AndroidEntry file = AndroidEntry.fromJS(call.getObject("file"));
         JSObject out = new JSObject();
-        out.put("url", getBridge().getServerUrl() + Bridge.CAPACITOR_FILE_START + file.id);
+        // 用 getLocalUrl()（实际服务 origin，如 https://localhost/）而不是 getServerUrl()
+        //（读 config.server.url，默认 null——会导致拼出 "null/_capacitor_file_/..." 的
+        // 非法 URL，全图加载失败、查看器只显示缩略图）。
+        String base = getBridge().getLocalUrl();
+        if (base == null) {
+            base = getBridge().getServerUrl();
+        }
+        if (base == null) {
+            base = "";
+        }
+        // 文件路径含空格 / 方括号 / 括号等特殊字符，需转义（Uri.encode 保留 '/'）。
+        String url = base.replaceAll("/+$", "") + Bridge.CAPACITOR_FILE_START + Uri.encode(file.id, "/");
+        out.put("url", url);
         call.resolve(out);
     }
 
@@ -278,6 +320,7 @@ public class KanituPlugin extends Plugin {
     @PluginMethod
     public void exportZip(PluginCall call) {
         String target = call.getString("targetRelPath", "");
+        pendingExportToken = call.getString("cancelToken", "");
         getActivity().runOnUiThread(() -> {
             Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
             intent.addCategory(Intent.CATEGORY_OPENABLE);
@@ -304,17 +347,21 @@ public class KanituPlugin extends Plugin {
             return;
         }
         String target = call.getString("targetRelPath", "");
+        String cancelToken = pendingExportToken;
         executor.execute(() -> {
+            AtomicBoolean cancel = registerCancel(cancelToken);
             try {
-                int[] counts = zipExport.export(albums, target, uri, exportEmitter());
+                int[] counts = zipExport.export(albums, target, uri, exportEmitter(), cancel);
                 JSObject out = new JSObject();
-                out.put("canceled", false);
+                out.put("canceled", cancel.get());
                 out.put("outputPath", uri.toString());
                 out.put("totalImages", counts[0]);
                 out.put("exportedCount", counts[1]);
                 call.resolve(out);
             } catch (Exception e) {
                 call.reject(e.getMessage(), e);
+            } finally {
+                unregisterCancel(cancelToken, cancel);
             }
         });
     }
@@ -340,6 +387,16 @@ public class KanituPlugin extends Plugin {
     @PluginMethod
     public void clearCaches(PluginCall call) {
         thumbnails.clear();
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void cancelTask(PluginCall call) {
+        String token = call.getString("token", "");
+        AtomicBoolean c = taskCancels.get(token);
+        if (c != null) {
+            c.set(true);
+        }
         call.resolve();
     }
 

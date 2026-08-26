@@ -26,6 +26,7 @@ export interface AndroidBinaryPayload {
 }
 
 export interface AndroidImportResultPayload {
+  canceled?: boolean;
   targetTopFolder: string;
   scannedFileCount: number;
   copiedImageCount: number;
@@ -57,7 +58,7 @@ interface KanituPluginNative {
   listSourceChildren(opts: { folder: AndroidFsEntry }): Promise<{ entries: AndroidFsEntry[] }>;
   readSourceBlob(opts: { file: AndroidFsEntry }): Promise<AndroidBinaryPayload>;
   releaseSource(): Promise<void>;
-  importSourceTree(opts: { source: AndroidFsEntry; targetTopName: string }): Promise<AndroidImportResultPayload>;
+  importSourceTree(opts: { source: AndroidFsEntry; targetTopName: string; cancelToken?: string }): Promise<AndroidImportResultPayload>;
   addListener(eventName: string, callback: (data: any) => void): { remove: () => void };
   getLibraryRoot(): Promise<AndroidFsEntry>;
   ensureLibraryRoot(): Promise<AndroidFsEntry>;
@@ -71,7 +72,8 @@ interface KanituPluginNative {
   removeLibraryEntry(opts: { entry: AndroidFsEntry }): Promise<void>;
   getLibraryFingerprint(): Promise<{ fingerprint: string }>;
   getViewerUrl(opts: { file: AndroidFsEntry }): Promise<{ url: string }>;
-  exportZip(opts: { targetRelPath: string }): Promise<AndroidExportResultPayload>;
+  exportZip(opts: { targetRelPath: string; cancelToken?: string }): Promise<AndroidExportResultPayload>;
+  cancelTask(opts: { token: string }): Promise<void>;
   getThumbnailStats(): Promise<AndroidThumbnailStats>;
   clearCaches(): Promise<void>;
   setLogLevel(opts: { level: 'debug' | 'info' | 'warn' | 'error' }): Promise<void>;
@@ -86,7 +88,7 @@ export interface KanituAndroidBridge {
   listSourceChildren(folder: AndroidFsEntry): Promise<AndroidFsEntry[]>;
   readSourceBlob(file: AndroidFsEntry): Promise<Uint8Array>;
   releaseSource(): Promise<void>;
-  importSourceTree(source: AndroidFsEntry, targetTopName: string): Promise<AndroidImportResultPayload>;
+  importSourceTree(source: AndroidFsEntry, targetTopName: string, cancelToken?: string): Promise<AndroidImportResultPayload>;
   onImportProgress(callback: (p: NativeImportProgress) => void): () => void;
   getLibraryRoot(): Promise<AndroidFsEntry>;
   ensureLibraryRoot(): Promise<AndroidFsEntry>;
@@ -100,7 +102,8 @@ export interface KanituAndroidBridge {
   removeLibraryEntry(entry: AndroidFsEntry): Promise<void>;
   getLibraryFingerprint(): Promise<string>;
   getViewerUrl(file: AndroidFsEntry): Promise<string>;
-  exportZip(targetRelPath: string): Promise<AndroidExportResultPayload>;
+  exportZip(targetRelPath: string, cancelToken?: string): Promise<AndroidExportResultPayload>;
+  cancelTask(token: string): Promise<void>;
   onExportProgress(callback: (p: { done: number; total: number }) => void): () => void;
   getThumbnailStats(): Promise<AndroidThumbnailStats>;
   clearCaches(): Promise<void>;
@@ -182,7 +185,7 @@ function requireBridge(): Promise<KanituAndroidBridge> {
         listSourceChildren: async (folder) => (await p.listSourceChildren({ folder })).entries,
         readSourceBlob: async (file) => b64ToBytes((await p.readSourceBlob({ file })).data),
         releaseSource: () => p.releaseSource(),
-        importSourceTree: (source, targetTopName) => p.importSourceTree({ source, targetTopName }),
+        importSourceTree: (source, targetTopName, cancelToken) => p.importSourceTree({ source, targetTopName, cancelToken }),
         onImportProgress: (callback) => {
           const handle = p.addListener('importProgress', callback);
           let removed = false;
@@ -211,7 +214,8 @@ function requireBridge(): Promise<KanituAndroidBridge> {
         removeLibraryEntry: (entry) => p.removeLibraryEntry({ entry }),
         getLibraryFingerprint: async () => (await p.getLibraryFingerprint()).fingerprint,
         getViewerUrl: async (file) => (await p.getViewerUrl({ file })).url,
-        exportZip: (targetRelPath) => p.exportZip({ targetRelPath }),
+        exportZip: (targetRelPath, cancelToken) => p.exportZip({ targetRelPath, cancelToken }),
+        cancelTask: (token) => p.cancelTask({ token }),
         onExportProgress: (callback) => {
           const handle = p.addListener('exportProgress', callback);
           let removed = false;
@@ -320,12 +324,13 @@ export class AndroidLibraryStore implements LibraryStore {
     await (await requireBridge()).removeLibraryEntry(toEntry(entry));
   }
 
-  async importSourceTree(source: FolderRef, targetTopName: string, onProgress?: (p: NativeImportProgress) => void): Promise<NativeImportResult> {
+  async importSourceTree(source: FolderRef, targetTopName: string, onProgress?: (p: NativeImportProgress) => void, cancelToken?: string): Promise<NativeImportResult> {
     const bridge = await requireBridge();
     const off = bridge.onImportProgress((p) => onProgress?.(p));
     try {
-      const result = await bridge.importSourceTree(toEntry(source), targetTopName);
+      const result = await bridge.importSourceTree(toEntry(source), targetTopName, cancelToken);
       return {
+        canceled: result.canceled,
         targetTopFolder: result.targetTopFolder,
         scannedFileCount: result.scannedFileCount,
         copiedImageCount: result.copiedImageCount,
@@ -338,22 +343,26 @@ export class AndroidLibraryStore implements LibraryStore {
     }
   }
 
-  async zipLibrary(targetRelPath: string, onProgress?: (done: number, total: number) => void): Promise<ZipExportResult> {
+  async zipLibrary(targetRelPath: string, onProgress?: (done: number, total: number) => void, cancelToken?: string): Promise<ZipExportResult> {
     const bridge = await requireBridge();
     const off = bridge.onExportProgress((p) => onProgress?.(p.done, p.total));
     try {
       onProgress?.(0, 0);
-      const result = await bridge.exportZip(targetRelPath);
-      if (result.canceled) throw new Error('导出已取消。');
+      const result = await bridge.exportZip(targetRelPath, cancelToken);
       onProgress?.(result.exportedCount ?? 0, result.totalImages ?? 0);
       return {
         kind: 'file',
         outputPath: result.outputPath,
+        canceled: result.canceled,
         totalImages: result.totalImages ?? 0,
         exportedCount: result.exportedCount ?? 0,
       };
     } finally {
       off();
     }
+  }
+
+  async cancelTask(token: string): Promise<void> {
+    await (await requireBridge()).cancelTask(token);
   }
 }

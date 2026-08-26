@@ -20,6 +20,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -27,9 +28,17 @@ import java.util.concurrent.atomic.AtomicInteger;
 public final class ThumbnailService {
     public static final int MAX_CACHE_BYTES = 512 * 1024 * 1024;
     public static final int GIF_PASSTHROUGH_BYTES = 256 * 1024;
+    /** 超过该字节数的 GIF 不做「整读 + 动画缩略图」，只取静态首帧：避免把数 MB
+     *  源文件整体读进堆内存。快速滚动并发下大 GIF 整读正是 OOM 的主要来源。 */
+    public static final int MAX_ANIMATED_GIF_BYTES = 4 * 1024 * 1024;
+    /** 同时进行内存密集型解码/编码的通道数。快速滑动 + 各级预取会同时触发大量
+     *  缩略图生成，每路都持有解码位图与编码缓冲；无界并发会瞬间打爆 256MB 堆
+     *  （OOM 闪退）。固定 2 路：一屏内缩略图仍足够快，且内存安全。 */
+    private static final int MAX_CONCURRENT_DECODES = 2;
 
     private final File cacheDir;
     private final Map<String, Object> locks = new ConcurrentHashMap<>();
+    private final Semaphore decodeSlots = new Semaphore(MAX_CONCURRENT_DECODES);
     private final AtomicInteger inFlight = new AtomicInteger(0);
 
     public ThumbnailService(Context context) {
@@ -134,15 +143,36 @@ public final class ThumbnailService {
     }
 
     private Result generate(File file, int maxSize) {
+        // 解码/编码是内存密集段：用信号量把同时进行的生成收口到常数，防止
+        // 快速滚动时可见卡片 + 预取同时触发几十路生成把 256MB 堆打爆。
+        decodeSlots.acquireUninterruptibly();
+        try {
+            return doGenerate(file, maxSize);
+        } finally {
+            decodeSlots.release();
+        }
+    }
+
+    private Result doGenerate(File file, int maxSize) {
         String ext = AlbumLibrary.extOf(file.getName());
         if ("gif".equals(ext)) {
-            byte[] raw = readFile(file);
-            if (raw != null && raw.length <= GIF_PASSTHROUGH_BYTES) {
-                return new Result(raw, "image/gif");
-            }
-            byte[] animated = tryAnimatedGif(raw, maxSize);
-            if (animated != null) {
-                return new Result(animated, "image/gif");
+            long len = file.length();
+            // 先看文件大小再决定是否整读（原来先整读后判断，数 MB 的 GIF 会先占
+            // 满内存才被拒，并发下正是 OOM 来源）：
+            //   ≤256KB  原样透传（动画完美且小）；
+            //   256KB~4MB 抽帧做「可动且小」的动画缩略图；
+            //   >4MB    只取静态首帧，绝不整读到内存。
+            if (len > 0 && len <= GIF_PASSTHROUGH_BYTES) {
+                byte[] raw = readFile(file);
+                if (raw != null) {
+                    return new Result(raw, "image/gif");
+                }
+            } else if (len <= MAX_ANIMATED_GIF_BYTES) {
+                byte[] raw = readFile(file);
+                byte[] animated = tryAnimatedGif(raw, maxSize);
+                if (animated != null) {
+                    return new Result(animated, "image/gif");
+                }
             }
         }
 

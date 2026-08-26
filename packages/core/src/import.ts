@@ -5,6 +5,18 @@ import { stableHash } from './hash';
 
 export interface ImportOptions {
   onProgress?: (state: { status: string; scanned: number; copied: number; skipped: number; current?: string }) => void;
+  /** 原生任务取消 token：传入后 UI 可通过 store.cancelTask(token) 取消（Android SAF 原生导入）。 */
+  cancelToken?: string;
+  /** 非原生回退路径的取消判定：返回 true 时停止复制并标记已取消（已复制文件保留）。 */
+  shouldCancel?: () => boolean;
+}
+
+/** 用户取消导入的哨兵错误：不清理已复制文件、不视为失败。 */
+class ImportCancelledError extends Error {
+  constructor() {
+    super('已取消');
+    this.name = 'ImportCancelledError';
+  }
 }
 
 export async function importFolder(
@@ -46,6 +58,7 @@ export async function importFolder(
           skipped: p.skipped,
           current: p.current,
         }),
+        options.cancelToken,
       );
       task.targetTopFolder = result.targetTopFolder;
       task.scannedFileCount = result.scannedFileCount;
@@ -64,6 +77,7 @@ export async function importFolder(
 
     async function copyFolder(srcFolder: FolderRef, dstFolder: FolderRef, relPath: string): Promise<void> {
       for await (const child of picker.listChildren(srcFolder)) {
+        if (options.shouldCancel?.()) throw new ImportCancelledError();
         task.scannedFileCount++;
         if (child.kind === 'folder') {
           const nextDst = await store.createFolder(dstFolder, child.name);
@@ -99,6 +113,12 @@ export async function importFolder(
     task.finishedAt = Date.now();
     return task;
   } catch (err) {
+    if (err instanceof ImportCancelledError) {
+      // 取消：已复制的文件保留在目标目录，任务标记为 canceled，不视为失败。
+      task.status = 'canceled';
+      task.finishedAt = Date.now();
+      return task;
+    }
     task.status = 'failed';
     task.finishedAt = Date.now();
     if (targetTop) {

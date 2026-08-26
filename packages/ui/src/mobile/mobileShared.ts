@@ -25,6 +25,11 @@ export const FOLDER_GRID = { cols: 2, gap: 10 } as const;
 /** 内容区水平内边距（与 mobile CSS 对齐）。 */
 export const CONTENT_PADDING_X = 10;
 
+/** 系统是否开启「减少动态效果」。动画/过渡应据此降级（DESIGN.md 8.5）。 */
+export function prefersReducedMotion(): boolean {
+  return typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
 export function formatBytes(n: number): string {
   if (n >= 1048576) return `${(n / 1048576).toFixed(1)} MB`;
   if (n >= 1024) return `${(n / 1024).toFixed(0)} KB`;

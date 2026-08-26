@@ -30,6 +30,8 @@ export interface NativeImportProgress {
 }
 
 export interface NativeImportResult {
+  /** 用户主动取消：已复制的文件保留，可直接在目标目录看到部分结果。 */
+  canceled?: boolean;
   targetTopFolder: string;
   scannedFileCount: number;
   copiedImageCount: number;
@@ -53,6 +55,8 @@ export interface ZipExportResult {
   kind: 'blob' | 'file';
   blob?: Blob;
   outputPath?: string;
+  /** 用户主动取消：已写入的条目保留。 */
+  canceled?: boolean;
   totalImages: number;
   exportedCount: number;
 }
@@ -77,11 +81,13 @@ export interface LibraryStore {
   move(entry: FsEntry, toFolder: FolderRef, newName?: string): Promise<FsEntry>;
   remove(entry: FsEntry): Promise<void>;
   /** Zips targetRelPath (empty = whole library) preserving directory structure. */
-  zipLibrary(targetRelPath: string, onProgress?: (done: number, total: number) => void): Promise<ZipExportResult>;
+  zipLibrary(targetRelPath: string, onProgress?: (done: number, total: number) => void, cancelToken?: string): Promise<ZipExportResult>;
   /**
    * Optional native fast path: copies the whole source tree into the library without
    * round-tripping file bytes through the JS bridge. Android SAF and Electron can both
    * implement this; platforms without it fall back to picker.readBlob + writeBlob.
    */
-  importSourceTree?(source: FolderRef, targetTopName: string, onProgress?: (p: NativeImportProgress) => void): Promise<NativeImportResult>;
+  importSourceTree?(source: FolderRef, targetTopName: string, onProgress?: (p: NativeImportProgress) => void, cancelToken?: string): Promise<NativeImportResult>;
+  /** 取消指定 token 的原生任务（导入/导出）。未实现该能力的平台可省略。 */
+  cancelTask?(token: string): Promise<void>;
 }

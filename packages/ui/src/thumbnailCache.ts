@@ -44,6 +44,34 @@ const MAX_SINGLE_BLOB_BYTES = 4 * 1024 * 1024;
 const entries = new Map<string, ThumbEntry>();
 let totalBytes = 0;
 
+// —— 全局并发上限 ——
+// 无论可见卡片 + 各级预取（当前目录/子文件夹/全库预热/滚动方向）同时触发多少
+// 个 readThumbnail，真正打到原生层的并发读取数不超过 MAX_CONCURRENT_READS。
+// Android 原生侧无优先级队列、无界线程池，每个请求会立刻被拉起来解码；这里在
+// 源头把洪峰收口成常量，避免快速滚动时几十上百张同时解码打爆堆（OOM 闪退）。
+// 同键请求仍由上面的 Promise 缓存合并；这是不同键之间的全局限流。
+const MAX_CONCURRENT_READS = 3;
+let inFlightReads = 0;
+const readQueue: Array<() => void> = [];
+
+function runWhenSlotFree<T>(task: () => Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const start = (): void => {
+      inFlightReads++;
+      Promise.resolve()
+        .then(task)
+        .then(resolve, reject)
+        .finally(() => {
+          inFlightReads--;
+          const next = readQueue.shift();
+          if (next) next();
+        });
+    };
+    if (inFlightReads < MAX_CONCURRENT_READS) start();
+    else readQueue.push(start);
+  });
+}
+
 // —— 调试统计（供设置页“调试”面板展示，定位“大文件夹仍在滚动时加载”等问题）——
 export interface RendererThumbnailStats {
   entries: number;
@@ -191,7 +219,7 @@ export function getThumbnailBlob(
         return hit.promise;
       }
       hit.lastPromotedAt = now;
-      hit.promise = Promise.resolve(store.readThumbnail(file, maxSize, { priority: 0 })).then(
+      hit.promise = runWhenSlotFree(() => store.readThumbnail(file, maxSize, { priority: 0 })).then(
         (blob) => settleEntry(key, hit, blob),
         (err: unknown) => {
           failEntry(key, hit);
@@ -207,7 +235,7 @@ export function getThumbnailBlob(
         return hit.promise;
       }
       hit.lastPromotedAt = now;
-      hit.promise = Promise.resolve(
+      hit.promise = runWhenSlotFree(() =>
         store.readThumbnail(file, maxSize, { priority: options.priority ?? 1 }),
       ).then(
         (blob) => settleEntry(key, hit, blob),
@@ -223,7 +251,7 @@ export function getThumbnailBlob(
   counters.cacheMisses++;
 
   let entry: ThumbEntry | null = null;
-  const promise = Promise.resolve(
+  const promise = runWhenSlotFree(() =>
     store.readThumbnail(file, maxSize, { priority: options?.priority }),
   ).then(
     (blob) => settleEntry(key, entry, blob),

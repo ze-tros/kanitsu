@@ -60,7 +60,7 @@ export function MobileActionSheet({
   };
 
   return (
-    <div className={`m-sheet-mask fixed inset-0 z-[140] ${closing ? 'm-closing' : ''}`}>
+    <div className={`m-sheet-mask fixed inset-0 ${closing ? 'm-closing' : ''}`} style={{ zIndex: Z_SHEET }}>
       <div className="absolute inset-0 bg-black/45" onClick={requestClose} />
       <div
         ref={panelRef}
@@ -96,7 +96,11 @@ export function MobileActionSheet({
                 window.setTimeout(() => action.onSelect(), 190);
               }}
             >
-              {action.icon && <span className="w-6 text-center text-lg opacity-80 shrink-0">{action.icon}</span>}
+              {action.icon && (
+                <span className="w-6 shrink-0 flex items-center justify-center opacity-80">
+                  {typeof action.icon === 'string' ? <MobileIcon name={action.icon} className="w-5 h-5" /> : action.icon}
+                </span>
+              )}
               <span className="flex-1 min-w-0 truncate">{action.label}</span>
             </button>
           ))}
@@ -126,7 +130,7 @@ export function MobileConfirmDialog({
   onCancel: () => void;
 }) {
   return (
-    <div className="m-dialog-mask fixed inset-0 z-[150] flex items-center justify-center p-8">
+    <div className="m-dialog-mask fixed inset-0 flex items-center justify-center p-8" style={{ zIndex: Z_DIALOG }}>
       <div className="absolute inset-0 bg-black/45" onClick={onCancel} />
       <div className="m-dialog relative bg-base-100 rounded-3xl shadow-2xl w-full max-w-sm p-5">
         <h3 className="text-base font-semibold">{title}</h3>
@@ -178,7 +182,7 @@ export function MobilePromptDialog({
   };
 
   return (
-    <div className="m-dialog-mask fixed inset-0 z-[150] flex items-center justify-center p-8">
+    <div className="m-dialog-mask fixed inset-0 flex items-center justify-center p-8" style={{ zIndex: Z_DIALOG }}>
       <div className="absolute inset-0 bg-black/45" onClick={onCancel} />
       <div className="m-dialog relative bg-base-100 rounded-3xl shadow-2xl w-full max-w-sm p-5">
         <h3 className="text-base font-semibold">{title}</h3>
@@ -217,8 +221,8 @@ export function MobileToast({ text, kind }: { text: string; kind: 'info' | 'succ
   const cls = kind === 'error' ? 'bg-error text-error-content' : kind === 'success' ? 'bg-success text-success-content' : 'bg-neutral text-neutral-content';
   return (
     <div
-      className="m-toast fixed left-1/2 -translate-x-1/2 z-[170] pointer-events-none max-w-[86vw]"
-      style={{ bottom: 'calc(env(safe-area-inset-bottom, 0px) + 88px)' }}
+      className="m-toast fixed left-1/2 -translate-x-1/2 pointer-events-none max-w-[86vw]"
+      style={{ bottom: 'calc(env(safe-area-inset-bottom, 0px) + 88px)', zIndex: Z_TOAST }}
     >
       <div className={`${cls} rounded-2xl px-4 py-2.5 text-sm shadow-xl leading-snug`}>{text}</div>
     </div>
@@ -226,22 +230,27 @@ export function MobileToast({ text, kind }: { text: string; kind: 'info' | 'succ
 }
 
 /** 底部进度卡片（导入 / 导出 / 整理进行中）。 */
+import { Z_DIALOG, Z_PROGRESS, Z_SHEET, Z_TOAST } from './zindex';
+import { MobileIcon } from './mobileIcons';
+
 export function MobileProgressCard({
   title,
   detail,
   done,
   total,
+  onCancel,
 }: {
   title: string;
   detail?: string;
   done?: number;
   total?: number;
+  onCancel?: () => void;
 }) {
   const hasProgress = typeof done === 'number' && typeof total === 'number' && total > 0;
   return (
     <div
-      className="fixed left-3 right-3 z-[160]"
-      style={{ bottom: 'calc(env(safe-area-inset-bottom, 0px) + 16px)' }}
+      className="fixed left-3 right-3"
+      style={{ bottom: 'calc(env(safe-area-inset-bottom, 0px) + 16px)', zIndex: Z_PROGRESS }}
     >
       <div className="bg-base-100 border border-base-300 rounded-2xl shadow-xl p-4">
         <div className="flex items-center gap-3">
@@ -254,6 +263,16 @@ export function MobileProgressCard({
             <span className="text-xs opacity-70 shrink-0 tabular-nums">
               {done}/{total}
             </span>
+          )}
+          {onCancel && (
+            <button
+              type="button"
+              className="btn btn-ghost btn-xs shrink-0 text-error"
+              onClick={onCancel}
+              aria-label="取消"
+            >
+              取消
+            </button>
           )}
         </div>
         {hasProgress && (

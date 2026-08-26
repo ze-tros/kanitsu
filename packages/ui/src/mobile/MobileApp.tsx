@@ -57,8 +57,11 @@ import {
 } from './MobileSheets';
 import { MobileSettingsScreen } from './MobileSettingsScreen';
 import {
+  FOLDER_GRID,
+  IMAGE_GRID,
   OVERSCAN_ROWS,
   conflictReasonLabel,
+  formatBytes,
   haptic,
   isImageBlurred,
   loadBlurredImages,
@@ -67,12 +70,18 @@ import {
   savePinnedCovers,
   skippedReasonLabel,
 } from './mobileShared';
+import { Z_BATCH_BAR, Z_DIALOG, Z_DRAWER } from './zindex';
+import { MobileIcon } from './mobileIcons';
 
-// —— 移动端网格参数 ——
-const IMAGE_COLS = 3;
-const IMAGE_GAP = 3;
-const FOLDER_COLS = 2;
-const FOLDER_GAP = 10;
+// —— 移动端网格参数（单一数据源：mobileShared，避免与库内 IMAGE_GRID 漂移）——
+const IMAGE_COLS = IMAGE_GRID.cols;
+const IMAGE_GAP = IMAGE_GRID.gap;
+/** 图片卡片文件名行高（开关「显示文件名」时参与网格行高计算）。 */
+const IMAGE_NAME_H = 16;
+/** 记录最近一次点击的图片卡片位置（供查看器「从卡片放大到全屏」共享元素过渡）。 */
+let lastImageTapRect: { x: number; y: number; w: number; h: number } | null = null;
+const FOLDER_COLS = FOLDER_GRID.cols;
+const FOLDER_GAP = FOLDER_GRID.gap;
 const FOLDER_CAPTION_H = 46;
 
 type OverlayLayer = 'drawer' | 'sheet' | 'viewer' | 'settings' | 'organize' | 'cover' | 'dialog' | 'report' | 'search';
@@ -89,7 +98,8 @@ type DeleteTarget = { kind: 'image'; image: ImageEntry } | { kind: 'folder'; fol
 type PromptState =
   | { kind: 'rename-image'; image: ImageEntry }
   | { kind: 'rename-folder'; folder: FolderNode }
-  | { kind: 'create-folder'; folder: FolderNode };
+  | { kind: 'create-folder'; folder: FolderNode }
+  | { kind: 'batch-move'; count: number };
 
 function imageToFileRef(image: ImageEntry): FileRef {
   return {
@@ -103,32 +113,69 @@ function imageToFileRef(image: ImageEntry): FileRef {
   };
 }
 
-/** 长按手势（移动端替代右键）。 */
+/** 手指位移超过该值即视为滚动而非长按（原实现移动 1px 就取消，网格里手抖变滚动）。 */
+const LONG_PRESS_MOVE_TOLERANCE = 10;
+
+/** 长按手势（移动端替代右键）。带位移阈值 + 触发前按压视觉反馈。 */
 function useLongPress(onLongPress: () => void, ms = 460) {
   const timerRef = useRef<number | null>(null);
   const firedRef = useRef(false);
+  const startPointRef = useRef<{ x: number; y: number } | null>(null);
+  const [pressing, setPressing] = useState(false);
+
   const cancel = useCallback(() => {
     if (timerRef.current != null) {
       window.clearTimeout(timerRef.current);
       timerRef.current = null;
     }
+    startPointRef.current = null;
+    setPressing(false);
   }, []);
-  const start = useCallback(() => {
-    firedRef.current = false;
-    cancel();
-    timerRef.current = window.setTimeout(() => {
-      firedRef.current = true;
-      haptic(18);
-      onLongPress();
-    }, ms);
-  }, [cancel, onLongPress, ms]);
+
+  const start = useCallback(
+    (e: React.TouchEvent) => {
+      firedRef.current = false;
+      const t = e.touches[0];
+      startPointRef.current = t ? { x: t.clientX, y: t.clientY } : null;
+      setPressing(true);
+      cancel();
+      timerRef.current = window.setTimeout(() => {
+        timerRef.current = null;
+        firedRef.current = true;
+        setPressing(false);
+        haptic(18);
+        onLongPress();
+      }, ms);
+    },
+    [cancel, onLongPress, ms],
+  );
+
+  const move = useCallback(
+    (e: React.TouchEvent) => {
+      if (timerRef.current == null) return; // 非按压中
+      const p = startPointRef.current;
+      const t = e.touches[0];
+      if (!p || !t) return;
+      if (Math.hypot(t.clientX - p.x, t.clientY - p.y) > LONG_PRESS_MOVE_TOLERANCE) cancel();
+    },
+    [cancel],
+  );
+
+  const end = useCallback(() => {
+    // 未触发长按的普通触摸（点按/滚动）：清定时器并复位按压态。
+    if (timerRef.current != null) cancel();
+    else setPressing(false);
+  }, [cancel]);
+
   useEffect(() => cancel, [cancel]);
   return {
     onTouchStart: start,
-    onTouchMove: cancel,
-    onTouchEnd: cancel,
+    onTouchMove: move,
+    onTouchEnd: end,
     onTouchCancel: cancel,
     wasLongPress: () => firedRef.current,
+    /** 按压中（用于触发前的视觉反馈，替代容易误判的 active:opacity）。 */
+    pressing,
   };
 }
 
@@ -159,29 +206,38 @@ function VirtualGrid<T>({
   const gs = Math.max(0, scrollTop - sectionTop);
   const first = Math.max(0, Math.floor(gs / rowHeight) - OVERSCAN_ROWS);
   const last = Math.min(totalRows, Math.ceil((gs + viewportH) / rowHeight) + OVERSCAN_ROWS);
-  const rows: number[] = [];
-  for (let r = first; r < last; r++) rows.push(r);
+  // 可视行号窗口：窗口未变时复用同一数组，避免每次滚动都重建（万级图时减少 GC）。
+  const rowIndexes = useMemo(() => {
+    const out: number[] = [];
+    for (let r = first; r < last; r++) out.push(r);
+    return out;
+  }, [first, last]);
   return (
     <div style={{ position: 'relative', height: Math.max(1, totalRows * rowHeight - gap) }}>
-      {rows.map((r) => (
-        <div
-          key={r}
-          style={{
-            position: 'absolute',
-            top: r * rowHeight,
-            left: 0,
-            right: 0,
-            display: 'grid',
-            gridTemplateColumns: `repeat(${cols}, 1fr)`,
-            gap,
-            willChange: 'transform',
-          }}
-        >
-          {items.slice(r * cols, Math.min(items.length, r * cols + cols)).map((item) => (
-            <Fragment key={getKey(item)}>{renderItem(item)}</Fragment>
-          ))}
-        </div>
-      ))}
+      {rowIndexes.map((r) => {
+        const rowStart = r * cols;
+        const firstKey = items[rowStart] ? getKey(items[rowStart]!) : `row-${r}`;
+        return (
+          <div
+            // key 用行首条目的 id 而不是行号：快速滚动时 React 组件随条目走，
+            // 避免复用错误行的组件导致 BlobImage 的 lazy 状态串图。
+            key={firstKey}
+            style={{
+              position: 'absolute',
+              top: r * rowHeight,
+              left: 0,
+              right: 0,
+              display: 'grid',
+              gridTemplateColumns: `repeat(${cols}, 1fr)`,
+              gap,
+            }}
+          >
+            {items.slice(rowStart, Math.min(items.length, rowStart + cols)).map((item) => (
+              <Fragment key={getKey(item)}>{renderItem(item)}</Fragment>
+            ))}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -193,35 +249,162 @@ function ImageCard({
   blurred,
   onOpen,
   onActions,
+  showName = false,
+  selectMode = false,
+  selected = false,
+  onToggleSelect,
 }: {
   image: ImageEntry;
   store: LibraryStore;
   blurred: boolean;
   onOpen: () => void;
   onActions: () => void;
+  showName?: boolean;
+  selectMode?: boolean;
+  selected?: boolean;
+  onToggleSelect?: (id: string) => void;
 }) {
   const lp = useLongPress(onActions);
   return (
     <div
-      className="relative aspect-square overflow-hidden rounded-[4px] bg-base-300/40 active:opacity-80"
+      className="relative overflow-hidden rounded-[4px] bg-base-300/40 flex flex-col"
+      role="button"
+      tabIndex={0}
+      aria-label={selectMode ? (selected ? `已选择 ${image.name}` : `选择 ${image.name}`) : image.name}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          if (selectMode) onToggleSelect?.(image.id);
+          else onOpen();
+        }
+      }}
       onTouchStart={lp.onTouchStart}
       onTouchMove={lp.onTouchMove}
       onTouchEnd={lp.onTouchEnd}
       onTouchCancel={lp.onTouchCancel}
-      onClick={() => {
-        if (!lp.wasLongPress()) onOpen();
+      onClick={(e) => {
+        if (selectMode) {
+          onToggleSelect?.(image.id);
+          return;
+        }
+        if (lp.wasLongPress()) return;
+        const r = e.currentTarget.getBoundingClientRect();
+        lastImageTapRect = { x: r.left, y: r.top, w: r.width, h: r.height };
+        onOpen();
       }}
       onContextMenu={(e) => e.preventDefault()}
     >
-      <BlobImage
-        store={store}
-        fileRef={imageToFileRef(image)}
-        alt={image.name}
-        className="w-full h-full object-cover"
-        thumbnail
-        lazy
-        blur={blurred}
-      />
+      <div className="relative w-full aspect-square overflow-hidden shrink-0">
+        {lp.pressing && <div className="absolute inset-0 bg-black/25 pointer-events-none" aria-hidden="true" />}
+        {selectMode && (
+          <div
+            className={"absolute top-1 right-1 w-5 h-5 rounded-full border-2 flex items-center justify-center text-[10px] z-10 " +
+              (selected ? 'bg-primary border-primary text-primary-content' : 'bg-black/40 border-white/70 text-white')}
+            aria-hidden="true"
+          >
+            {selected ? '✓' : ''}
+          </div>
+        )}
+        <BlobImage
+          store={store}
+          fileRef={imageToFileRef(image)}
+          alt={image.name}
+          className="w-full h-full object-cover"
+          thumbnail
+          lazy
+          blur={blurred}
+        />
+      </div>
+      {showName && (
+        <div
+          className="shrink-0 px-0.5 pt-0.5 text-[10px] leading-tight truncate opacity-80 select-none"
+          style={{ height: IMAGE_NAME_H }}
+          aria-hidden="true"
+        >
+          {image.name}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** 列表视图行（缩略图 + 名称 + 尺寸）。 */
+function ImageListRow({
+  image,
+  store,
+  blurred,
+  onOpen,
+  onActions,
+  selectMode = false,
+  selected = false,
+  onToggleSelect,
+}: {
+  image: ImageEntry;
+  store: LibraryStore;
+  blurred: boolean;
+  onOpen: () => void;
+  onActions: () => void;
+  selectMode?: boolean;
+  selected?: boolean;
+  onToggleSelect?: (id: string) => void;
+}) {
+  const lp = useLongPress(onActions);
+  const meta = [image.width && image.height ? `${image.width}×${image.height}` : '', image.size ? formatBytes(image.size) : '']
+    .filter(Boolean)
+    .join(' · ');
+  return (
+    <div
+      className={"flex items-center gap-3 rounded-lg px-1.5 py-1.5 " + (selectMode && selected ? 'bg-primary/10' : 'active:bg-base-200/60')}
+      role="button"
+      tabIndex={0}
+      aria-label={selectMode ? (selected ? `已选择 ${image.name}` : `选择 ${image.name}`) : image.name}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          if (selectMode) onToggleSelect?.(image.id);
+          else onOpen();
+        }
+      }}
+      onTouchStart={lp.onTouchStart}
+      onTouchMove={lp.onTouchMove}
+      onTouchEnd={lp.onTouchEnd}
+      onTouchCancel={lp.onTouchCancel}
+      onClick={(e) => {
+        if (selectMode) {
+          onToggleSelect?.(image.id);
+          return;
+        }
+        if (lp.wasLongPress()) return;
+        const r = e.currentTarget.getBoundingClientRect();
+        lastImageTapRect = { x: r.left, y: r.top, w: r.width, h: r.height };
+        onOpen();
+      }}
+      onContextMenu={(e) => e.preventDefault()}
+    >
+      <div className="relative w-14 h-14 rounded-lg overflow-hidden bg-base-300/40 shrink-0">
+        {selectMode && (
+          <div
+            className={"absolute top-0.5 right-0.5 w-4 h-4 rounded-full border-2 flex items-center justify-center text-[9px] z-10 " +
+              (selected ? 'bg-primary border-primary text-primary-content' : 'bg-black/40 border-white/70 text-white')}
+            aria-hidden="true"
+          >
+            {selected ? '✓' : ''}
+          </div>
+        )}
+        <BlobImage
+          store={store}
+          fileRef={imageToFileRef(image)}
+          alt={image.name}
+          className="w-full h-full object-cover"
+          thumbnail
+          lazy
+          blur={blurred}
+        />
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="text-sm truncate">{image.name}</div>
+        {meta && <div className="text-[11px] opacity-75 tabular-nums truncate">{meta}</div>}
+      </div>
     </div>
   );
 }
@@ -247,7 +430,16 @@ function FolderCard({
   const lp = useLongPress(onActions);
   return (
     <div
-      className="overflow-hidden rounded-2xl bg-base-200 border border-base-300/70 active:opacity-80"
+      className="relative overflow-hidden rounded-2xl bg-base-200 border border-base-300/70"
+      role="button"
+      tabIndex={0}
+      aria-label={folder.name}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onOpen();
+        }
+      }}
       onTouchStart={lp.onTouchStart}
       onTouchMove={lp.onTouchMove}
       onTouchEnd={lp.onTouchEnd}
@@ -257,6 +449,7 @@ function FolderCard({
       }}
       onContextMenu={(e) => e.preventDefault()}
     >
+      {lp.pressing && <div className="absolute inset-0 bg-black/25 pointer-events-none" aria-hidden="true" />}
       <div className="relative aspect-[16/10] overflow-hidden bg-base-300/40">
         {coverImage ? (
           <BlobImage
@@ -382,16 +575,26 @@ export function MobileApp({
   const [blurredImages, setBlurredImages] = useState<ReadonlySet<string>>(() => loadBlurredImages());
   const [pinnedCovers, setPinnedCovers] = useState<Record<string, string>>(() => loadPinnedCovers());
   const [customRules, setCustomRules] = useState<CustomOrganizeRule[]>(() => loadCustomRules());
+  const [showFileNames, setShowFileNames] = useState<boolean>(() => localStorage.getItem('kanitu.showFileNames') === '1');
+  const [sortMode, setSortMode] = useState<'default' | 'name' | 'date' | 'size'>('default');
+  /** 包含子目录聚合视图（DESIGN.md 4.3）：图片区显示当前目录及其所有子目录的图片。 */
+  const [aggregate, setAggregate] = useState(false);
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>(() => (localStorage.getItem('kanitu.viewMode') === 'list' ? 'list' : 'grid'));
 
   // ===== UI 层状态 =====
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [searchActive, setSearchActive] = useState(false);
+  const [searchInput, setSearchInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [sheet, setSheet] = useState<SheetModel | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
   const [promptState, setPromptState] = useState<PromptState | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [coverPickerFolder, setCoverPickerFolder] = useState<FolderNode | null>(null);
+  // 多选 / 批量操作
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set());
+  const [viewerOrigin, setViewerOrigin] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const [organizePreview, setOrganizePreview] = useState<{ folder: FolderNode; bindings: OrganizeBinding[] } | null>(null);
   const [organizeResult, setOrganizeResult] = useState<OrganizeResult | null>(null);
   const [lastManifest, setLastManifest] = useState<OrganizeManifest | null>(null);
@@ -403,9 +606,19 @@ export function MobileApp({
   const [organizeProgress, setOrganizeProgress] = useState<{ done: number; total: number } | null>(null);
   const [exporting, setExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState<{ done: number; total: number } | null>(null);
+  // 任务取消句柄：导入/导出用 token（原生 cancelTask），整理用 JS 侧标志。
+  const importCancelTokenRef = useRef<string | null>(null);
+  const exportCancelTokenRef = useRef<string | null>(null);
+  const organizeCancelRef = useRef<{ cancelled: boolean } | null>(null);
 
   const snapshotRef = useRef(snapshot);
   snapshotRef.current = snapshot;
+
+  // 搜索防抖：输入停止 180ms 后才更新查询，避免每击一键重算数千张图的过滤。
+  useEffect(() => {
+    const t = window.setTimeout(() => setSearchQuery(searchInput.trim()), 180);
+    return () => window.clearTimeout(t);
+  }, [searchInput]);
 
   const applySnapshot = useCallback((next: LibrarySnapshot) => {
     setSnapshot(next);
@@ -450,9 +663,17 @@ export function MobileApp({
   const searchTerm = searchQuery.trim().toLowerCase();
   const folderImages = useMemo(() => {
     if (!snapshot) return [];
-    const images = directImagesOf(snapshot, currentFolderId);
-    return searchTerm ? images.filter((img) => img.name.toLowerCase().includes(searchTerm)) : images;
-  }, [snapshot, currentFolderId, searchTerm]);
+    let images = directImagesOf(snapshot, currentFolderId);
+    if (searchTerm) images = images.filter((img) => img.name.toLowerCase().includes(searchTerm));
+    if (sortMode !== 'default') {
+      const sorted = [...images];
+      if (sortMode === 'name') sorted.sort((a, b) => a.name.localeCompare(b.name));
+      else if (sortMode === 'date') sorted.sort((a, b) => (b.mtime ?? 0) - (a.mtime ?? 0));
+      else sorted.sort((a, b) => (b.size ?? 0) - (a.size ?? 0));
+      return sorted;
+    }
+    return images;
+  }, [snapshot, currentFolderId, searchTerm, sortMode]);
 
   const childFolders = useMemo(() => {
     if (!snapshot) return [];
@@ -468,12 +689,59 @@ export function MobileApp({
     });
   }, [snapshot, childFolders, pinnedCovers]);
 
-  const viewerIndex = viewerImageId ? folderImages.findIndex((img) => img.id === viewerImageId) : -1;
+  // —— 全局搜索（跨图包）——
+  const searching = searchActive && searchTerm.length > 0;
+  const searchImages = useMemo(() => {
+    if (!snapshot || !searchTerm) return [];
+    return Object.values(snapshot.images).filter((img) => img.name.toLowerCase().includes(searchTerm));
+  }, [snapshot, searchTerm]);
+  const searchFolders = useMemo(() => {
+    if (!snapshot || !searchTerm) return [];
+    return Object.values(snapshot.folders)
+      .filter((f) => f.id !== snapshot.rootId && f.name.toLowerCase().includes(searchTerm))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [snapshot, searchTerm]);
+  const searchFolderCards = useMemo(() => {
+    if (!snapshot) return [];
+    return searchFolders.map((child) => {
+      const cover = pickCover(imagesOf(snapshot, child.id), { preferredId: pinnedCovers[child.id] });
+      return { folder: child, coverImage: cover ? snapshot.images[cover.imageId] : undefined };
+    });
+  }, [snapshot, searchFolders, pinnedCovers]);
+
+  // 聚合视图：当前目录 + 所有子目录的图片（递归收集）。
+  const aggregateImages = useMemo(() => {
+    if (!snapshot) return [];
+    const ids = new Set<string>();
+    const collect = (id: string) => {
+      if (ids.has(id)) return;
+      ids.add(id);
+      for (const f of Object.values(snapshot.folders)) {
+        if (f.parentId === id) collect(f.id);
+      }
+    };
+    collect(currentFolderId);
+    const out: ImageEntry[] = [];
+    for (const id of ids) out.push(...directImagesOf(snapshot, id));
+    return out;
+  }, [snapshot, currentFolderId]);
+
+  /** 实际显示的图片列表：搜索 > 聚合 > 当前目录。 */
+  const displayImages = aggregate && !searching ? aggregateImages : folderImages;
+  const viewerImages = searching ? searchImages : displayImages;
+  const viewerIndex = viewerImageId ? viewerImages.findIndex((img) => img.id === viewerImageId) : -1;
   const viewerOpen = viewerImageId != null && viewerIndex >= 0;
 
   // ===== 返回键混合栈（folder 导航 + overlay 层）=====
+  // 以 history.state 中的栈快照为唯一权威：pushState 写入完整栈快照，popstate
+  // 按快照对账（差量关闭 overlay / 回退文件夹），不再用 consumedPops 计数器——
+  // 它是快速连续返回 / 主动关闭与硬件返回交错时栈错乱的竞态根源。
   const stackRef = useRef<StackEntry[]>([]);
-  const consumedPopsRef = useRef(0);
+
+  const readStackSnapshot = useCallback((): StackEntry[] => {
+    const s = window.history.state as { kanituStack?: unknown } | null;
+    return Array.isArray(s?.kanituStack) ? (s.kanituStack as StackEntry[]) : [];
+  }, []);
 
   const closeOverlayUI = useCallback((layer: OverlayLayer) => {
     switch (layer) {
@@ -505,49 +773,64 @@ export function MobileApp({
       case 'search':
         setSearchActive(false);
         setSearchQuery('');
+        setSearchInput('');
         break;
     }
   }, []);
 
+  const entryEq = (a: StackEntry, b: StackEntry): boolean => {
+    if (a.type === 'folder' && b.type === 'folder') return a.folderId === b.folderId;
+    if (a.type === 'overlay' && b.type === 'overlay') return a.layer === b.layer;
+    return false;
+  };
+
   useEffect(() => {
     const onPop = () => {
-      if (consumedPopsRef.current > 0) {
-        consumedPopsRef.current--;
-        return;
+      const target = readStackSnapshot();
+      const current = stackRef.current;
+      // 快照与当前一致：这是主动关闭触发的 back()，已同步处理过，直接忽略。
+      if (target.length === current.length && target.every((e, i) => entryEq(e, current[i]!))) return;
+      // 目标栈是当前栈去掉若干顶层后的前缀：逐层关闭差异 overlay，并回退文件夹。
+      let i = 0;
+      while (i < current.length && i < target.length && entryEq(current[i]!, target[i]!)) i++;
+      stackRef.current = target;
+      for (let k = i; k < current.length; k++) {
+        const e = current[k]!;
+        if (e.type === 'overlay') closeOverlayUI(e.layer);
       }
-      const entry = stackRef.current.pop();
-      if (!entry) return;
-      if (entry.type === 'folder') {
-        const lastFolder = [...stackRef.current].reverse().find((e) => e.type === 'folder');
-        setSelectedFolderId(lastFolder && lastFolder.type === 'folder' ? lastFolder.folderId : snapshotRef.current?.rootId ?? '');
-      } else {
-        closeOverlayUI(entry.layer);
-      }
+      const topFolder = [...target].reverse().find((e): e is { type: 'folder'; folderId: string } => e.type === 'folder');
+      setSelectedFolderId(topFolder ? topFolder.folderId : snapshotRef.current?.rootId ?? '');
     };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
-  }, [closeOverlayUI]);
+  }, [closeOverlayUI, readStackSnapshot]);
 
   const openOverlay = useCallback((layer: OverlayLayer) => {
-    stackRef.current.push({ type: 'overlay', layer });
-    history.pushState({ kanitu: 'o', layer }, '');
+    const next: StackEntry[] = [...stackRef.current, { type: 'overlay', layer }];
+    stackRef.current = next;
+    window.history.pushState({ kanituStack: next }, '');
   }, []);
 
-  /** 主动关闭栈顶 overlay：同步消费栈 + back，popstate 到来时识别为已消费。 */
+  /** 主动关闭某 overlay：同步更新栈 + 回退对应步数的 history，popstate 对账后自然忽略。 */
   const closeOverlay = useCallback(
     (layer: OverlayLayer) => {
       const stack = stackRef.current;
-      const top = stack[stack.length - 1];
-      if (top && top.type === 'overlay' && top.layer === layer) {
-        stack.pop();
-        consumedPopsRef.current++;
+      const idx = stack
+        .map((e, i) => (e.type === 'overlay' && e.layer === layer ? i : -1))
+        .filter((i) => i >= 0)
+        .pop();
+      if (idx == null) {
         closeOverlayUI(layer);
-        history.back();
-      } else {
-        const i = stack.map((e, idx) => (e.type === 'overlay' && e.layer === layer ? idx : -1)).filter((idx) => idx >= 0).pop();
-        if (i != null) stack.splice(i, 1);
-        closeOverlayUI(layer);
+        return;
       }
+      const next = stack.slice(0, idx);
+      stackRef.current = next;
+      for (let k = idx; k < stack.length; k++) {
+        const e = stack[k]!;
+        if (e.type === 'overlay') closeOverlayUI(e.layer);
+      }
+      const delta = stack.length - next.length;
+      if (delta > 0) window.history.go(-delta);
     },
     [closeOverlayUI],
   );
@@ -558,14 +841,16 @@ export function MobileApp({
       if (!snap) return;
       const target = folderId || snap.rootId;
       if (target === (selectedFolderId || snap.rootId)) return;
-      stackRef.current.push({ type: 'folder', folderId: target });
-      history.pushState({ kanitu: 'f', id: target }, '');
+      const next: StackEntry[] = [...stackRef.current, { type: 'folder', folderId: target }];
+      stackRef.current = next;
+      window.history.pushState({ kanituStack: next }, '');
       setSelectedFolderId(target);
       const folder = snap.folders[target];
       if (folder && folder.childCount > 0) {
         setExpandedFolders((prev) => (prev.has(target) ? prev : new Set(prev).add(target)));
       }
       setSearchQuery('');
+      setSearchInput('');
       setSearchActive(false);
     },
     [selectedFolderId],
@@ -578,9 +863,8 @@ export function MobileApp({
     const stack = stackRef.current;
     const top = stack[stack.length - 1];
     if (top && top.type === 'folder') {
-      stack.pop();
-      consumedPopsRef.current++;
-      history.back();
+      stackRef.current = stack.slice(0, -1);
+      window.history.back();
     }
     setSelectedFolderId(parentId ?? snap?.rootId ?? '');
   }, [selectedFolderId]);
@@ -597,7 +881,7 @@ export function MobileApp({
   const [sectionTops, setSectionTops] = useState({ folder: 0, image: 0 });
 
   const imageCardSize = contentW > 0 ? (contentW - IMAGE_GAP * (IMAGE_COLS - 1)) / IMAGE_COLS : 0;
-  const imageRowHeight = imageCardSize + IMAGE_GAP;
+  const imageRowHeight = imageCardSize + IMAGE_GAP + (showFileNames ? IMAGE_NAME_H : 0);
   const folderCardWidth = contentW > 0 ? (contentW - FOLDER_GAP * (FOLDER_COLS - 1)) / FOLDER_COLS : 0;
   const folderRowHeight = folderCardWidth > 0 ? folderCardWidth * 0.625 + FOLDER_CAPTION_H + FOLDER_GAP : 0;
 
@@ -685,8 +969,10 @@ export function MobileApp({
     return;
   }, [snapshot, store]);
 
-  // 滚动方向预取：下一屏图片优先生成
+  // 滚动方向预取：下一屏图片优先生成（带节流：快速来回滚动只在时间窗内触发一次，
+  // 避免方向一变就重新提交整屏任务，重复取消/重排造成无谓的 IPC 与解码压力）。
   const lastScrollTopRef = useRef(0);
+  const lastDirPrefetchAtRef = useRef(0);
   useEffect(() => {
     if (folderImages.length === 0 || !isPrefetchEnabled() || imageRowHeight <= 0 || viewportH <= 0) return;
     const st = scrollTop;
@@ -694,6 +980,10 @@ export function MobileApp({
     const dir = st > prev ? 'down' : st < prev ? 'up' : null;
     lastScrollTopRef.current = st;
     if (!dir) return;
+    // 节流：距上次方向预取 <150ms 则跳过（下一帧滚动到位后自然恢复触发）。
+    const now = Date.now();
+    if (now - lastDirPrefetchAtRef.current < 150) return;
+    lastDirPrefetchAtRef.current = now;
     const gs = Math.max(0, st - sectionTops.image);
     const screenRows = Math.max(1, Math.ceil(viewportH / imageRowHeight));
     const firstRow = Math.floor(gs / imageRowHeight);
@@ -717,12 +1007,21 @@ export function MobileApp({
   // ===== 业务操作 =====
   const handleImport = useCallback(async () => {
     if (importing) return;
+    const token = `import-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    importCancelTokenRef.current = token;
     setImporting(true);
     setImportProgress({ scanned: 0, copied: 0, skipped: 0 });
     try {
       const task = await importFolder(picker, store, {
+        cancelToken: token,
         onProgress: (p) => setImportProgress({ scanned: p.scanned, copied: p.copied, skipped: p.skipped }),
       });
+      if (task.status === 'canceled') {
+        notify(`导入已取消：已复制 ${task.copiedImageCount} 张`, 'info');
+        setImportReport(task);
+        await refresh();
+        return;
+      }
       setImportReport(task);
       const next = await refresh();
       const topFolder = Object.values(next.folders).find((f) => f.parentId === next.rootId && f.name === task.targetTopFolder);
@@ -736,6 +1035,7 @@ export function MobileApp({
       const msg = String(err);
       if (!/取消/.test(msg)) notify(`导入失败：${msg}`, 'error');
     } finally {
+      importCancelTokenRef.current = null;
       setImporting(false);
       setImportProgress(null);
     }
@@ -757,23 +1057,29 @@ export function MobileApp({
     const snap = snapshotRef.current;
     if (!preview || !snap) return;
     closeOverlay('organize');
+    const flag = { cancelled: false };
+    organizeCancelRef.current = flag;
     setOrganizing(true);
     setOrganizeProgress({ done: 0, total: preview.bindings.length });
     try {
       const result = await applyOrganize(store, snap, preview.folder.relPath, preview.bindings, {
         onProgress: (done, total) => setOrganizeProgress({ done, total }),
+        shouldCancel: () => flag.cancelled,
       });
       setOrganizeResult(result);
       setLastManifest(result.manifest);
       await refresh();
       notify(
-        result.conflicts.length > 0
-          ? `整理完成：移动 ${result.appliedCount} 个文件，${result.conflicts.length} 个冲突`
-          : `整理完成：移动 ${result.appliedCount} 个文件`,
+        result.canceled
+          ? `整理已取消：已移动 ${result.appliedCount} 个文件`
+          : result.conflicts.length > 0
+            ? `整理完成：移动 ${result.appliedCount} 个文件，${result.conflicts.length} 个冲突`
+            : `整理完成：移动 ${result.appliedCount} 个文件`,
       );
     } catch (err) {
       notify(`整理失败：${String(err)}`, 'error');
     } finally {
+      organizeCancelRef.current = null;
       setOrganizing(false);
       setOrganizeProgress(null);
     }
@@ -802,12 +1108,14 @@ export function MobileApp({
   const handleExport = useCallback(
     async (folder: FolderNode) => {
       if (exporting) return;
+      const token = `export-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      exportCancelTokenRef.current = token;
       setExporting(true);
       setExportProgress({ done: 0, total: 0 });
       try {
-        const result = await store.zipLibrary(folder.relPath, (done, total) => setExportProgress({ done, total }));
-        if (result.outputPath) {
-          notify(`已导出 ${result.exportedCount} 张图片`, 'success');
+        const result = await store.zipLibrary(folder.relPath, (done, total) => setExportProgress({ done, total }), token);
+        if (result.canceled) {
+          notify(`导出已取消：已写入 ${result.exportedCount} 张`, 'info');
         } else {
           notify(`已导出 ${result.exportedCount} 张图片`, 'success');
         }
@@ -815,12 +1123,67 @@ export function MobileApp({
         const msg = String(err);
         if (!/取消/.test(msg)) notify(`导出失败：${msg}`, 'error');
       } finally {
+        exportCancelTokenRef.current = null;
         setExporting(false);
         setExportProgress(null);
       }
     },
     [exporting, store, notify],
   );
+
+  const cancelImport = useCallback(() => {
+    const token = importCancelTokenRef.current;
+    if (token) void store.cancelTask?.(token);
+  }, [store]);
+
+  const cancelExport = useCallback(() => {
+    const token = exportCancelTokenRef.current;
+    if (token) void store.cancelTask?.(token);
+  }, [store]);
+
+  const cancelOrganize = useCallback(() => {
+    if (organizeCancelRef.current) organizeCancelRef.current.cancelled = true;
+  }, []);
+
+  // —— 多选 / 批量操作 ——
+  const toggleSelect = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+  const exitSelectMode = useCallback(() => {
+    setSelectMode(false);
+    setSelectedIds(new Set());
+  }, []);
+  const handleEnterSelectMode = useCallback(() => {
+    setSelectedIds(new Set());
+    setSelectMode(true);
+  }, []);
+  const handleSelectAll = useCallback(() => {
+    setSelectedIds(new Set(displayImages.map((img) => img.id)));
+  }, [displayImages]);
+
+  const handleBatchDelete = useCallback(async () => {
+    const targets = displayImages.filter((img) => selectedIds.has(img.id));
+    if (targets.length === 0) return;
+    if (!window.confirm(`删除选中的 ${targets.length} 张图片？`)) return;
+    let ok = 0;
+    for (const img of targets) {
+      try {
+        await deleteImage(store, img);
+        ok++;
+      } catch {
+        // 单个失败继续
+      }
+    }
+    await refresh();
+    exitSelectMode();
+    notify(`已删除 ${ok} 张图片`, 'success');
+  }, [displayImages, selectedIds, store, refresh, exitSelectMode, notify]);
+
 
   const handleDeleteConfirm = useCallback(async () => {
     const target = deleteTarget;
@@ -861,6 +1224,22 @@ export function MobileApp({
           await renameFolder(store, prompt.folder, value);
           await refresh();
           notify(`已重命名为「${value}」`, 'success');
+        } else if (prompt.kind === 'batch-move') {
+          // 批量移动：在当前目录新建子文件夹，把选中的图片移进去。
+          const created = await createSubfolder(store, selectedFolder?.relPath ?? '', value);
+          const targets = folderImages.filter((img) => selectedIds.has(img.id));
+          let moved = 0;
+          for (const img of targets) {
+            try {
+              await store.move({ id: img.fileRefId ?? img.id, name: img.name, kind: 'file' }, created, img.name);
+              moved++;
+            } catch {
+              // 单个移动失败继续
+            }
+          }
+          await refresh();
+          exitSelectMode();
+          notify(`已移动 ${moved} 张到「${value}」`, 'success');
         } else {
           await createSubfolder(store, prompt.folder.relPath, value);
           const next = await refresh();
@@ -872,7 +1251,7 @@ export function MobileApp({
         notify(`操作失败：${String(err)}`, 'error');
       }
     },
-    [promptState, store, refresh, notify, closeOverlay, navigateToFolder],
+    [promptState, store, refresh, notify, closeOverlay, navigateToFolder, selectedFolder, folderImages, selectedIds, exitSelectMode],
   );
 
   const toggleImageBlur = useCallback(
@@ -1002,20 +1381,45 @@ export function MobileApp({
       { label: '导入相册', icon: '⬇️', onSelect: () => void handleImport() },
       { label: '新建子文件夹', icon: '📁', onSelect: () => folder && openPrompt({ kind: 'create-folder', folder }) },
       { label: '整理本目录', icon: '🧹', onSelect: () => folder && openOrganizeFor(folder) },
+      ...(folderImages.length > 0 ? [{ label: '多选', icon: '✅', onSelect: handleEnterSelectMode }] : []),
       ...(lastManifest ? [{ label: '撤销整理', icon: '↩️', onSelect: () => void handleUndoOrganize() }] : []),
       { label: '导出本目录 ZIP', icon: '📦', onSelect: () => folder && void handleExport(folder) },
       { label: '刷新', icon: '🔄', onSelect: () => void refresh().then(() => notify('已刷新', 'success')) },
+      { label: sortMode === 'default' ? '✓ 默认顺序' : '默认顺序', icon: '↩️', onSelect: () => setSortMode('default') },
+      { label: sortMode === 'name' ? '✓ 按名称' : '按名称', icon: '🔤', onSelect: () => setSortMode('name') },
+      { label: sortMode === 'date' ? '✓ 按日期' : '按日期', icon: '🕐', onSelect: () => setSortMode('date') },
+      { label: sortMode === 'size' ? '✓ 按大小' : '按大小', icon: '📐', onSelect: () => setSortMode('size') },
+      { label: aggregate ? '✓ 包含子目录' : '包含子目录', icon: '📚', onSelect: () => setAggregate((v) => !v) },
+      {
+        label: viewMode === 'list' ? '切换为网格视图' : '切换为列表视图',
+        icon: viewMode === 'list' ? '🔳' : '☰',
+        onSelect: () => {
+          const next = viewMode === 'list' ? 'grid' : 'list';
+          setViewMode(next);
+          localStorage.setItem('kanitu.viewMode', next);
+        },
+      },
+      {
+        label: showFileNames ? '隐藏文件名' : '显示文件名',
+        icon: '🏷️',
+        onSelect: () => {
+          const next = !showFileNames;
+          setShowFileNames(next);
+          localStorage.setItem('kanitu.showFileNames', next ? '1' : '0');
+        },
+      },
       ...(importReport ? [{ label: '查看导入报告', icon: '📋', onSelect: () => { setShowReport(true); openOverlay('report'); } }] : []),
       { label: '设置', icon: '⚙️', onSelect: () => { setShowSettings(true); openOverlay('settings'); } },
     ];
     setSheet({ title: folder?.name || '全部相册', actions });
     openOverlay('sheet');
-  }, [selectedFolder, handleImport, openOrganizeFor, lastManifest, handleUndoOrganize, handleExport, refresh, notify, importReport, openOverlay]);
+  }, [selectedFolder, handleImport, openOrganizeFor, lastManifest, handleUndoOrganize, handleExport, refresh, notify, importReport, openOverlay, showFileNames, sortMode, folderImages.length, handleEnterSelectMode]);
 
   // ===== 打开各 UI 层（history 栈配对）=====
   const openViewer = useCallback(
     (image: ImageEntry) => {
       setViewerImageId(image.id);
+      setViewerOrigin(lastImageTapRect);
       openOverlay('viewer');
     },
     [openOverlay],
@@ -1033,6 +1437,12 @@ export function MobileApp({
     },
     [openOverlay],
   );
+
+  const handleBatchMove = useCallback(() => {
+    const targets = displayImages.filter((img) => selectedIds.has(img.id));
+    if (targets.length === 0) return;
+    openPrompt({ kind: 'batch-move', count: targets.length });
+  }, [displayImages, selectedIds, openPrompt]);
 
   const openDelete = useCallback(
     (target: DeleteTarget) => {
@@ -1105,16 +1515,42 @@ export function MobileApp({
               <input
                 autoFocus
                 className="flex-1 bg-transparent outline-none text-[15px] min-w-0"
-                placeholder="搜索当前目录…"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="搜索全部相册…"
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
               />
-              {searchQuery && (
-                <button className="shrink-0 opacity-60" onClick={() => setSearchQuery('')} aria-label="清空">
+              {searchInput && (
+                <button className="shrink-0 opacity-60" onClick={() => setSearchInput('')} aria-label="清空">
                   ✕
                 </button>
               )}
             </div>
+          </div>
+        ) : selectMode ? (
+          <div className="flex items-center px-1 h-14">
+            <button
+              className="w-auto h-11 px-1 flex items-center justify-center shrink-0 text-primary active:opacity-60"
+              onClick={exitSelectMode}
+              aria-label="完成多选"
+            >
+              <svg viewBox="0 0 24 24" className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M5 13l4 4L19 7" />
+              </svg>
+              <span className="text-sm font-medium ml-0.5">完成</span>
+            </button>
+            <div className="flex-1 min-w-0 px-1.5">
+              <div className="text-[17px] font-semibold truncate leading-tight">已选 {selectedIds.size} 张</div>
+              <div className="text-[11px] opacity-60 truncate leading-tight mt-0.5">
+                {selectedIds.size > 0 ? '点击图片可取消选择' : '点击图片选择'}
+              </div>
+            </div>
+            <button
+              className="w-auto h-11 px-3 flex items-center justify-center shrink-0 text-sm font-medium text-primary active:opacity-60"
+              onClick={handleSelectAll}
+              aria-label="全选"
+            >
+              全选
+            </button>
           </div>
         ) : (
           <div className="flex items-center px-1 h-14">
@@ -1133,7 +1569,7 @@ export function MobileApp({
             )}
             <div className="flex-1 min-w-0 px-1.5">
               <div className="text-[17px] font-semibold truncate leading-tight">{title}</div>
-              {subtitle && <div className="text-[11px] opacity-60 truncate leading-tight mt-0.5">{subtitle}</div>}
+              {subtitle && <div className="text-[11px] opacity-75 truncate leading-tight mt-0.5">{subtitle}</div>}
             </div>
             <button className="w-11 h-11 flex items-center justify-center shrink-0 active:opacity-60" onClick={openSearch} aria-label="搜索">
               <svg viewBox="0 0 24 24" className="w-[22px] h-[22px]" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
@@ -1158,7 +1594,94 @@ export function MobileApp({
           <div className="h-full flex items-center justify-center">
             <span className="loading loading-spinner loading-lg text-primary" />
           </div>
-        ) : childFolders.length === 0 && folderImages.length === 0 ? (
+        ) : searching ? (
+          searchFolders.length === 0 && searchImages.length === 0 ? (
+            <div className="h-full flex flex-col items-center justify-center px-10 text-center">
+              <MobileIcon name="🔍" className="w-12 h-12 opacity-60 mb-4" />
+              <div className="text-base font-medium">未找到匹配项</div>
+              <div className="text-sm opacity-60 mt-1">没有与「{searchQuery}」匹配的文件夹或图片</div>
+            </div>
+          ) : (
+            <div className="px-[10px] pt-3" style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 100px)' }}>
+              {searchFolders.length > 0 && (
+                <section className="mb-4">
+                  <h3 className="text-[13px] font-semibold opacity-60 mb-2 px-0.5">
+                    匹配的文件夹 <span className="tabular-nums">{searchFolders.length}</span>
+                  </h3>
+                  <VirtualGrid
+                    items={searchFolderCards}
+                    cols={FOLDER_COLS}
+                    rowHeight={folderRowHeight}
+                    gap={FOLDER_GAP}
+                    scrollTop={scrollTop}
+                    viewportH={viewportH}
+                    sectionTop={sectionTops.folder}
+                    getKey={(c) => c.folder.id}
+                    renderItem={(card) => (
+                      <FolderCard
+                        folder={card.folder}
+                        coverImage={card.coverImage}
+                        store={store}
+                        pinned={pinnedCovers[card.folder.id] != null}
+                        blurred={card.coverImage ? isImageBlurred(card.coverImage.relPath, blurredImages) : false}
+                        onOpen={() => navigateToFolder(card.folder.id)}
+                        onActions={() => openFolderActions(card.folder)}
+                      />
+                    )}
+                  />
+                </section>
+              )}
+              {searchImages.length > 0 && (
+                <section>
+                  <h3 className="text-[13px] font-semibold opacity-60 mb-2 px-0.5">
+                    匹配的图片 <span className="tabular-nums">{searchImages.length}</span>
+                  </h3>
+                  {viewMode === 'list' ? (
+                    <div className="flex flex-col gap-0.5 px-0.5 pb-2">
+                      {searchImages.map((img) => (
+                        <ImageListRow
+                          key={img.id}
+                          image={img}
+                          store={store}
+                          blurred={blurredImages.has(img.relPath)}
+                          selectMode={selectMode}
+                          selected={selectedIds.has(img.id)}
+                          onToggleSelect={toggleSelect}
+                          onOpen={() => openViewer(img)}
+                          onActions={() => openImageActions(img)}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <VirtualGrid
+                      items={searchImages}
+                      cols={IMAGE_COLS}
+                      rowHeight={imageRowHeight}
+                      gap={IMAGE_GAP}
+                      scrollTop={scrollTop}
+                      viewportH={viewportH}
+                      sectionTop={sectionTops.image}
+                      getKey={(img) => img.id}
+                      renderItem={(img) => (
+                        <ImageCard
+                          image={img}
+                          store={store}
+                          blurred={blurredImages.has(img.relPath)}
+                          showName={showFileNames}
+                          selectMode={selectMode}
+                          selected={selectedIds.has(img.id)}
+                          onToggleSelect={toggleSelect}
+                          onOpen={() => openViewer(img)}
+                          onActions={() => openImageActions(img)}
+                        />
+                      )}
+                    />
+                  )}
+                </section>
+              )}
+            </div>
+          )
+        ) : childFolders.length === 0 && displayImages.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center px-10 text-center">
             {searchTerm ? (
               <>
@@ -1168,7 +1691,7 @@ export function MobileApp({
               </>
             ) : (
               <>
-                <div className="text-5xl mb-4">🖼️</div>
+                <MobileIcon name="🖼️" className="w-12 h-12 opacity-60 mb-4" />
                 <div className="text-base font-medium">{isRoot ? '图库还是空的' : '该目录暂无图片'}</div>
                 <div className="text-sm opacity-60 mt-1 mb-6">{isRoot ? '导入照片，开始整理你的图库' : '返回上级或导入新内容'}</div>
                 <button className="px-6 py-3 rounded-full bg-primary text-primary-content font-medium active:scale-95 transition-transform" onClick={() => void handleImport()}>
@@ -1205,38 +1728,87 @@ export function MobileApp({
                 />
               </section>
             )}
-            {folderImages.length > 0 && (
+            {displayImages.length > 0 && (
               <section ref={imageSectionRef}>
                 <h3 className="text-[13px] font-semibold opacity-60 mb-2 px-0.5">
-                  图片 <span className="tabular-nums">{folderImages.length}</span>
+                  {aggregate ? '全部图片（含子目录）' : '图片'} <span className="tabular-nums">{displayImages.length}</span>
                 </h3>
-                <VirtualGrid
-                  items={folderImages}
-                  cols={IMAGE_COLS}
-                  rowHeight={imageRowHeight}
-                  gap={IMAGE_GAP}
-                  scrollTop={scrollTop}
-                  viewportH={viewportH}
-                  sectionTop={sectionTops.image}
-                  getKey={(img) => img.id}
-                  renderItem={(img) => (
-                    <ImageCard
-                      image={img}
-                      store={store}
-                      blurred={blurredImages.has(img.relPath)}
-                      onOpen={() => openViewer(img)}
-                      onActions={() => openImageActions(img)}
-                    />
-                  )}
-                />
+                {viewMode === 'list' ? (
+                  <div className="flex flex-col gap-0.5 px-0.5 pb-2">
+                    {displayImages.map((img) => (
+                      <ImageListRow
+                        key={img.id}
+                        image={img}
+                        store={store}
+                        blurred={blurredImages.has(img.relPath)}
+                        selectMode={selectMode}
+                        selected={selectedIds.has(img.id)}
+                        onToggleSelect={toggleSelect}
+                        onOpen={() => openViewer(img)}
+                        onActions={() => openImageActions(img)}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <VirtualGrid
+                    items={displayImages}
+                    cols={IMAGE_COLS}
+                    rowHeight={imageRowHeight}
+                    gap={IMAGE_GAP}
+                    scrollTop={scrollTop}
+                    viewportH={viewportH}
+                    sectionTop={sectionTops.image}
+                    getKey={(img) => img.id}
+                    renderItem={(img) => (
+                      <ImageCard
+                        image={img}
+                        store={store}
+                        blurred={blurredImages.has(img.relPath)}
+                        showName={showFileNames}
+                        selectMode={selectMode}
+                        selected={selectedIds.has(img.id)}
+                        onToggleSelect={toggleSelect}
+                        onOpen={() => openViewer(img)}
+                        onActions={() => openImageActions(img)}
+                      />
+                    )}
+                  />
+                )}
               </section>
             )}
           </div>
         )}
       </main>
 
+      {/* 批量操作栏 */}
+      {selectMode && !viewerOpen && (
+        <div
+          className="fixed left-3 right-3"
+          style={{ bottom: 'calc(env(safe-area-inset-bottom, 0px) + 16px)', zIndex: Z_BATCH_BAR }}
+        >
+          <div className="bg-base-100 border border-base-300 rounded-2xl shadow-xl px-4 h-12 flex items-center gap-2">
+            <span className="text-sm font-medium tabular-nums shrink-0">{selectedIds.size} 张</span>
+            <div className="flex-1" />
+            <button
+              className="text-sm font-medium px-3 py-1.5 rounded-xl bg-base-200 active:bg-base-300 disabled:opacity-40"
+              disabled={selectedIds.size === 0}
+              onClick={() => void handleBatchMove()}
+            >
+              移动到新文件夹
+            </button>
+            <button
+              className="text-sm font-medium px-3 py-1.5 rounded-xl bg-error/10 text-error active:bg-error/20 disabled:opacity-40"
+              disabled={selectedIds.size === 0}
+              onClick={() => void handleBatchDelete()}
+            >
+              删除
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* 导入 FAB */}
-      {!importing && !viewerOpen && (
+      {!importing && !viewerOpen && !selectMode && (
         <button
           className="fixed z-30 w-14 h-14 rounded-full bg-primary text-primary-content shadow-xl shadow-primary/30 flex items-center justify-center active:scale-90 transition-transform"
           style={{ right: 18, bottom: 'calc(env(safe-area-inset-bottom, 0px) + 22px)' }}
@@ -1251,7 +1823,7 @@ export function MobileApp({
 
       {/* 抽屉 */}
       {drawerOpen && (
-        <div className="fixed inset-0 z-[130]">
+        <div className="fixed inset-0" style={{ zIndex: Z_DRAWER }}>
           <div className="m-drawer-mask absolute inset-0 bg-black/45" onClick={() => closeOverlay('drawer')} />
           <aside className="m-drawer-panel absolute left-0 top-0 bottom-0 w-[84vw] max-w-[340px] bg-base-100 shadow-2xl flex flex-col" style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}>
             <div className="px-4 py-3.5 border-b border-base-300/70 flex items-center gap-2.5 shrink-0">
@@ -1312,9 +1884,10 @@ export function MobileApp({
       {/* 查看器 */}
       {viewerOpen && (
         <MobileViewer
-          images={folderImages}
+          images={viewerImages}
           index={viewerIndex}
           store={store}
+          originRect={viewerOrigin}
           isBlurred={(img) => blurredImages.has(img.relPath)}
           onClose={() => closeOverlay('viewer')}
           onNavigate={(id) => setViewerImageId(id)}
@@ -1381,9 +1954,15 @@ export function MobileApp({
       {promptState && (
         <MobilePromptDialog
           title={
-            promptState.kind === 'rename-image' ? '重命名图片' : promptState.kind === 'rename-folder' ? '重命名相册' : `在「${promptState.folder.name || '全部相册'}」中新建子文件夹`
+            promptState.kind === 'rename-image'
+              ? '重命名图片'
+              : promptState.kind === 'rename-folder'
+                ? '重命名相册'
+                : promptState.kind === 'batch-move'
+                  ? `移动 ${promptState.count} 张图片到新文件夹`
+                  : `在「${promptState.folder.name || '全部相册'}」中新建子文件夹`
           }
-          label={promptState.kind === 'create-folder' ? '文件夹名称' : '新名称'}
+          label={promptState.kind === 'create-folder' || promptState.kind === 'batch-move' ? '文件夹名称' : '新名称'}
           initialValue={
             promptState.kind === 'rename-image'
               ? promptState.image.name
@@ -1391,7 +1970,7 @@ export function MobileApp({
                 ? promptState.folder.name
                 : ''
           }
-          confirmLabel={promptState.kind === 'create-folder' ? '创建' : '保存'}
+          confirmLabel={promptState.kind === 'create-folder' || promptState.kind === 'batch-move' ? '创建' : '保存'}
           onSubmit={(v) => void handlePromptSubmit(v)}
           onCancel={() => closeOverlay('dialog')}
         />
@@ -1399,7 +1978,7 @@ export function MobileApp({
 
       {/* 导入报告 */}
       {showReport && importReport && (
-        <div className="m-dialog-mask fixed inset-0 z-[150] flex items-end justify-center">
+        <div className="m-dialog-mask fixed inset-0 flex items-end justify-center" style={{ zIndex: Z_DIALOG }}>
           <div className="absolute inset-0 bg-black/45" onClick={() => closeOverlay('report')} />
           <div
             className="m-sheet-panel relative bg-base-100 rounded-t-3xl shadow-2xl w-full max-h-[70vh] flex flex-col"
@@ -1443,7 +2022,7 @@ export function MobileApp({
 
       {/* 整理结果 */}
       {organizeResult && (
-        <div className="m-dialog-mask fixed inset-0 z-[150] flex items-center justify-center p-8">
+        <div className="m-dialog-mask fixed inset-0 flex items-center justify-center p-8" style={{ zIndex: Z_DIALOG }}>
           <div className="absolute inset-0 bg-black/45" onClick={() => setOrganizeResult(null)} />
           <div className="m-dialog relative bg-base-100 rounded-3xl shadow-2xl w-full max-w-sm p-5 max-h-[70vh] flex flex-col">
             <h3 className="text-base font-semibold shrink-0">整理结果</h3>
@@ -1474,10 +2053,15 @@ export function MobileApp({
         <MobileProgressCard
           title="正在导入相册…"
           detail={importProgress ? `已扫描 ${importProgress.scanned} · 已复制 ${importProgress.copied} · 跳过 ${importProgress.skipped}` : undefined}
+          onCancel={cancelImport}
         />
       )}
-      {organizing && organizeProgress && <MobileProgressCard title="正在整理…" done={organizeProgress.done} total={organizeProgress.total} />}
-      {exporting && <MobileProgressCard title="正在导出 ZIP…" done={exportProgress?.done} total={exportProgress?.total} />}
+      {organizing && organizeProgress && (
+        <MobileProgressCard title="正在整理…" done={organizeProgress.done} total={organizeProgress.total} onCancel={cancelOrganize} />
+      )}
+      {exporting && (
+        <MobileProgressCard title="正在导出 ZIP…" done={exportProgress?.done} total={exportProgress?.total} onCancel={cancelExport} />
+      )}
 
       {/* Toast */}
       {toast && !viewerOpen && <MobileToast text={toast.text} kind={toast.kind} />}

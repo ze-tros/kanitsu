@@ -36,6 +36,8 @@ export interface OrganizeResult {
   appliedCount: number;
   skippedLowConfidenceCount: number;
   totalEvaluated: number;
+  /** 用户主动取消：只返回已处理的文件，后续绑定未执行。 */
+  canceled?: boolean;
 }
 
 export interface ApplyOrganizeOptions {
@@ -45,6 +47,8 @@ export interface ApplyOrganizeOptions {
   confidenceThreshold?: number;
   /** Called with `(processed, total)` as each binding is evaluated. */
   onProgress?: (done: number, total: number) => void;
+  /** 返回 true 时停止继续整理，已完成的移动保留。 */
+  shouldCancel?: () => boolean;
 }
 
 async function listChildrenArray(store: LibraryStore, folder: FolderRef): Promise<FsEntry[]> {
@@ -175,11 +179,16 @@ export async function applyOrganize(
   const conflicts: OrganizeConflict[] = [];
   let appliedCount = 0;
   let skippedLowConfidenceCount = 0;
+  let cancelled = false;
   const total = bindings.length;
   let processed = 0;
   options.onProgress?.(0, total);
 
   for (const binding of bindings) {
+    if (options.shouldCancel?.()) {
+      cancelled = true;
+      break;
+    }
     processed++;
     options.onProgress?.(processed, total);
     if (binding.confidence < threshold) {
@@ -264,6 +273,7 @@ export async function applyOrganize(
     appliedCount,
     skippedLowConfidenceCount,
     totalEvaluated: bindings.length,
+    canceled: cancelled,
   };
 }
 

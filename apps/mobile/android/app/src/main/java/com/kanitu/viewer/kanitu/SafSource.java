@@ -17,6 +17,7 @@ import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.json.JSONArray;
 
 /** SAF (Storage Access Framework) source tree reader and native importer. */
@@ -121,7 +122,7 @@ public final class SafSource {
     }
 
     /** Native whole-tree copy: SAF source -> albums/<unique top folder>. */
-    public JSObject importTree(String targetTopName, AlbumLibrary albums, ProgressEmitter emitter) throws IOException {
+    public JSObject importTree(String targetTopName, AlbumLibrary albums, ProgressEmitter emitter, AtomicBoolean cancel) throws IOException {
         albums.ensureRoot();
         AndroidEntry top = albums.createUniqueTopFolder(targetTopName);
 
@@ -131,9 +132,10 @@ public final class SafSource {
         final List<JSObject> skippedFiles = new ArrayList<>();
         final List<String> errors = new ArrayList<>();
 
-        walk(rootDocumentId(), new File(top.id), "", scanned, copied, skipped, skippedFiles, errors, albums, emitter);
+        walk(rootDocumentId(), new File(top.id), "", scanned, copied, skipped, skippedFiles, errors, albums, emitter, cancel);
 
         JSObject out = new JSObject();
+        out.put("canceled", cancel != null && cancel.get());
         out.put("targetTopFolder", top.name);
         out.put("scannedFileCount", scanned[0]);
         out.put("copiedImageCount", copied[0]);
@@ -144,14 +146,18 @@ public final class SafSource {
     }
 
     private void walk(String documentId, File dstDir, String relPath, int[] scanned, int[] copied, int[] skipped,
-                      List<JSObject> skippedFiles, List<String> errors, AlbumLibrary albums, ProgressEmitter emitter) throws IOException {
+                      List<JSObject> skippedFiles, List<String> errors, AlbumLibrary albums, ProgressEmitter emitter, AtomicBoolean cancel) throws IOException {
         for (AndroidEntry child : listChildren(documentId)) {
+            // 取消检查：已复制文件保留，直接停止后续复制（下次重试按 size+mtime 跳过）。
+            if (cancel != null && cancel.get()) {
+                return;
+            }
             scanned[0]++;
             String childRel = relPath.isEmpty() ? child.name : relPath + "/" + child.name;
             if (child.kind.equals("folder")) {
                 File sub = new File(dstDir, child.name);
                 sub.mkdirs();
-                walk(child.id, sub, childRel, scanned, copied, skipped, skippedFiles, errors, albums, emitter);
+                walk(child.id, sub, childRel, scanned, copied, skipped, skippedFiles, errors, albums, emitter, cancel);
             } else {
                 String ext = AlbumLibrary.extOf(child.name);
                 if (IMAGE_EXT.contains(ext)) {

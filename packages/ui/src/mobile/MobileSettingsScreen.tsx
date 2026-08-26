@@ -14,6 +14,7 @@ import {
   type LogLevel,
 } from '../debugLog';
 import { applyThemeMode, formatBytes, loadThemeMode, type ThemeMode } from './mobileShared';
+import { Z_SETTINGS } from './zindex';
 
 const LEVEL_LABELS: ReadonlyArray<[LogLevel, string]> = [
   ['debug', '调试'],
@@ -47,7 +48,7 @@ export function MobileSettingsScreen({
   }, [theme]);
 
   return (
-    <div className="fixed inset-0 z-[120] bg-base-100 flex flex-col">
+    <div className="fixed inset-0 bg-base-100 flex flex-col" style={{ zIndex: Z_SETTINGS }}>
       <header
         className="shrink-0 bg-base-100 border-b border-base-300/70 flex items-center gap-1 px-1"
         style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}
