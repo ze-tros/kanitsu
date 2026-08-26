@@ -16,6 +16,8 @@ function normalize(p: string): string {
 }
 
 export default defineConfig({
+  // 相对路径产物：兼容 file:// / 自定义协议 / asar 打包加载。
+  base: './',
   resolve: {
     alias: {
       '@kanitu/core': pkg('core', 'src', 'index.ts'),

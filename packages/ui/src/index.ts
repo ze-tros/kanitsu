@@ -1,4 +1,6 @@
 export * from './BlobImage';
+export * from './CardMotion';
+export * from './fpsMonitor';
 export * from './objectUrlPool';
 export * from './smoothScroll';
 export * from './visibleObserver';

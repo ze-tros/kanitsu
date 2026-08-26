@@ -10,6 +10,22 @@ import archiver from 'archiver';
 import { imageSize } from 'image-size';
 import { logger, readLogTail, setLogLevel } from './logger';
 
+// 应用 bundle 协议：生产构建渲染层以 kanitu-app:// 加载。file:// 下绝对路径会
+// 404、且 type=module 脚本会被 CORS 拦截（白屏）；自定义 scheme 一步规避，
+// 顺带为 SPA 路由/安全边界打底。必须在 app ready 之前注册。
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'kanitu-app',
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+      stream: true,
+    },
+  },
+]);
+
 const IMAGE_EXT = new Set(['jpg', 'jpeg', 'png', 'webp', 'avif', 'bmp', 'gif']);
 
 let mainWindow: BrowserWindow | null = null;
@@ -267,8 +283,10 @@ function createByteLruCache(maxBytes: number): {
 
 /** 网格缩略图缓存（≤1024px JPEG）。 */
 const thumbCache = createByteLruCache(512 * 1024 * 1024);
-/** 单条超过该字节数（多为 GIF 原样大字节）只落磁盘、不进内存缓存，避免挤垮 LRU。 */
-const MAX_MEM_CACHE_ENTRY_BYTES = 512 * 1024;
+/** 单条内存缓存上限。普通缩略图几 KB~几十 KB；worker 生成的大 GIF 动画缩略图
+ *  可能到数百 KB~数 MB，若按旧 512KB 上限则每次都要重读磁盘。提到 4MB，
+ *  配合 512MB 总容量 LRU 兜底。 */
+const MAX_MEM_CACHE_ENTRY_BYTES = 4 * 1024 * 1024;
 /** 小于该字节数的 GIF 原样透传（动画完美且小）；更大的交给 worker 生成动画缩略图。 */
 const GIF_PASSTHROUGH_LIMIT = 256 * 1024;
 
@@ -786,6 +804,56 @@ function registerIpc(): void {
   });
 }
 
+/** 生产构建渲染层产物根目录（apps/web/dist）。 */
+function bundleRoot(): string {
+  return path.join(__dirname, '../../web/dist');
+}
+
+const BUNDLE_MIME: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.map': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.ico': 'image/x-icon',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+  '.ttf': 'font/ttf',
+};
+
+/**
+ * Registers the `kanitu-app://` protocol serving apps/web/dist build output.
+ * 比 loadFile(file://) 稳：统一 scheme 规避绝对路径 404 与 file:// module CORS；
+ * 只允许 dist 目录内文件（防目录穿越）。
+ */
+function registerBundleProtocol(): void {
+  const root = bundleRoot();
+  protocol.handle('kanitu-app', async (request) => {
+    const url = new URL(request.url);
+    let rel = decodeURIComponent(url.pathname).replace(/^\/+/, '');
+    if (!rel) rel = 'index.html';
+    const target = path.resolve(root, rel);
+    if (target !== root && !target.startsWith(root + path.sep)) {
+      return new Response('禁止访问', { status: 403 });
+    }
+    try {
+      const data = await fs.readFile(target);
+      return new Response(new Uint8Array(data.buffer, data.byteOffset, data.byteLength), {
+        headers: { 'content-type': BUNDLE_MIME[path.extname(target).toLowerCase()] ?? 'application/octet-stream' },
+      });
+    } catch {
+      return new Response('未找到', { status: 404 });
+    }
+  });
+}
+
 /**
  * Registers a guarded `kanitu-file://` protocol so the renderer can display the
  * ORIGINAL file: Chromium streams and decodes it in the renderer (no cap, no giant
@@ -861,8 +929,9 @@ function createWindow() {
     const cacheBust = `v=${Date.now()}`;
     void win.loadURL(url.includes('?') ? `${url}&${cacheBust}` : `${url}?${cacheBust}`);
   } else {
-    // In a packaged build this path should point to the web app output.
-    void win.loadFile(path.join(__dirname, '../../web/dist/index.html'));
+    // 生产构建：走 kanitu-app:// 协议（file:// 下绝对路径/模块脚本会白屏）。
+    // 查询串仅用于破缓存，协议处理器按 pathname 服务文件。
+    void win.loadURL(`kanitu-app://bundle/index.html?v=${Date.now()}`);
   }
 }
 
@@ -877,6 +946,7 @@ void app.whenReady().then(() => {
   }
   registerIpc();
   registerViewerProtocol();
+  registerBundleProtocol();
   registerWindowControlIpc();
   createWindow();
   // 后台清理缩略图磁盘缓存（超限时删除最旧）。

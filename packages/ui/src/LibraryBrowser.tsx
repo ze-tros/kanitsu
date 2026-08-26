@@ -1,5 +1,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { useWheelSmoothScroll } from './smoothScroll';
+import { CardMotion } from './CardMotion';
+import { recordScrollFrame } from './fpsMonitor';
 import {
   applyOrganize,
   childrenOf,
@@ -108,7 +110,7 @@ const PRELOAD_MAX_FOLDERS = 16;
 // RecyclerView 的"只实例化可视 ItemView + 缓冲区"同思路）。
 const MIN_CARD_WIDTH = 180; // 与 styles.css .gallery-grid minmax(180px, 1fr) 对齐
 const GRID_GAP = 16; // 与 .gallery-grid gap: 1rem 对齐
-const OVERSCAN_ROWS = 3; // 可视区上下各多挂载的行数（缓冲）
+const OVERSCAN_ROWS = 2; // 可视区上下各多挂载的行数（缓冲）
 
 interface GalleryMetrics {
   cols: number;
@@ -339,8 +341,9 @@ export function LibraryBrowser({
   const scrollSaveFrameRef = useRef<number | null>(null);
   const currentFolderId = selectedFolderId || snapshot?.rootId || '';
   const [scrollTop, setScrollTop] = useState(0);
-  // 滚轮平滑（类手机信息流）：接管 main 的 wheel 事件，rAF 指数缓动逼近目标。
-  useWheelSmoothScroll(mainScrollRef, { lerp: 0.16 });
+  // 滚轮平滑（类手机信息流）：输入活跃期快速跟手 + 松手短惯性收尾。
+  // 默认写帧率 = 显示刷新率（跟手优先）；如需压合成压力可设 writeIntervalMs: 16.7。
+  useWheelSmoothScroll(mainScrollRef, {});
   const [galleryMetrics, setGalleryMetrics] = useState<GalleryMetrics>({
     cols: 1,
     cardHeight: 0,
@@ -371,12 +374,27 @@ export function LibraryBrowser({
   // 发生变化时才 setScrollTop 触发整树重渲——小幅度滚动（仍在同一行内）不重渲，
   // 护住目录多/图多场景的帧率。
   const lastWindowKeyRef = useRef('');
+  const scrollAnimPauseTimerRef = useRef<number | null>(null);
+  // 滚动开始时给主区加 .sk-scrolling（暂停 loading 闪烁动画），停止 ~150ms 恢复。
+  const setScrollingClass = (node: HTMLElement, scrolling: boolean): void => {
+    node.classList.toggle('sk-scrolling', scrolling);
+  };
   const onMainScroll = useCallback(() => {
     const el = mainScrollRef.current;
     if (!el || !currentFolderId) return;
+    setScrollingClass(el, true);
+    if (scrollAnimPauseTimerRef.current != null) window.clearTimeout(scrollAnimPauseTimerRef.current);
+    // 滚动中窗口留得更久一点（400ms）：快速滚动/拖动期间持续挂载的新行
+    // 都会命中 .sk-scrolling → 跳过入场动画，滚动过程卡片保持清晰可见。
+    scrollAnimPauseTimerRef.current = window.setTimeout(() => {
+      scrollAnimPauseTimerRef.current = null;
+      const node = mainScrollRef.current;
+      if (node) setScrollingClass(node, false);
+    }, 400);
     if (scrollSaveFrameRef.current != null) return; // 已排队待写
     scrollSaveFrameRef.current = requestAnimationFrame(() => {
       scrollSaveFrameRef.current = null;
+      const t0 = performance.now();
       const node = mainScrollRef.current;
       if (!node) return;
       const st = node.scrollTop;
@@ -388,6 +406,8 @@ export function LibraryBrowser({
         lastWindowKeyRef.current = key;
         setScrollTop(st);
       }
+      // 上报滚动回调耗时（设置页“调试→帧率与滚动性能”面板）。
+      recordScrollFrame(performance.now() - t0);
     });
   }, [currentFolderId, childFolderCards.length, folderImages.length]);
 
@@ -397,7 +417,11 @@ export function LibraryBrowser({
     if (!main) return;
     const ro = new ResizeObserver(() => setLayoutTick((t) => t + 1));
     ro.observe(main);
-    return () => ro.disconnect();
+    return () => {
+      ro.disconnect();
+      if (scrollAnimPauseTimerRef.current != null) window.clearTimeout(scrollAnimPauseTimerRef.current);
+      main.classList.remove('sk-scrolling');
+    };
   }, []);
 
   // 度量两个虚拟区（子文件夹 / 图片）的列数、真实卡片高度、相对主容器的偏移
@@ -1248,12 +1272,12 @@ export function LibraryBrowser({
                         <div
                           key={row}
                           className="folder-grid"
-                          style={{ position: 'absolute', top: row * rowHeight, left: 0, right: 0 }}
+                          style={{ position: 'absolute', top: row * rowHeight, left: 0, right: 0, willChange: 'transform' }}
                         >
                           {childFolderCards.slice(start, end).map(({ folder, cover }) => (
-                            <div
+                            <CardMotion
                               key={folder.id}
-                              className="card bg-base-200 border border-base-300 shadow hover:shadow-lg hover:scale-[1.02] active:scale-[0.98] transition cursor-pointer overflow-hidden"
+                              className="card bg-base-200 border border-base-300 shadow hover:shadow-lg transition-shadow cursor-pointer overflow-hidden"
                               onClick={() => handleSelectFolder(folder)}
                               onContextMenu={(event) => openContextMenu(event, buildFolderMenu(folder))}
                             >
@@ -1285,7 +1309,7 @@ export function LibraryBrowser({
                                 <span className="text-sm font-medium truncate">{folder.name}</span>
                                 <span className="text-[11px] opacity-60 whitespace-nowrap">{folder.imageCount} 图 / {folder.childCount} 子</span>
                               </figcaption>
-                            </div>
+                            </CardMotion>
                           ))}
                         </div>
                       );
@@ -1341,12 +1365,12 @@ export function LibraryBrowser({
                         <div
                           key={row}
                           className="gallery-grid"
-                          style={{ position: 'absolute', top: row * rowHeight, left: 0, right: 0 }}
+                          style={{ position: 'absolute', top: row * rowHeight, left: 0, right: 0, willChange: 'transform' }}
                         >
                           {folderImages.slice(start, end).map((image) => (
-                            <div
+                            <CardMotion
                               key={image.id}
-                              className="card bg-base-200 border border-base-300 shadow hover:shadow-lg hover:scale-[1.02] active:scale-[0.98] transition cursor-pointer overflow-hidden"
+                              className="card bg-base-200 border border-base-300 shadow hover:shadow-lg transition-shadow cursor-pointer overflow-hidden"
                               onClick={() => setViewerImageId(image.id)}
                               onContextMenu={(event) => openContextMenu(event, buildImageMenu(image))}
                             >
@@ -1364,7 +1388,7 @@ export function LibraryBrowser({
                               <figcaption className="p-3">
                                 <span className="text-xs truncate block">{image.name}</span>
                               </figcaption>
-                            </div>
+                            </CardMotion>
                           ))}
                         </div>
                       );

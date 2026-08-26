@@ -32,8 +32,13 @@ interface ThumbEntry {
 }
 
 const MAX_BYTES = 256 * 1024 * 1024; // 256MB：512px 缩略图约 7–30KB/张，容量封顶即可
-/** 单条超过该字节数（多为 GIF 原样大字节）不进内存缓存，避免挤垮 LRU。 */
-const MAX_SINGLE_BLOB_BYTES = 512 * 1024;
+/**
+ * 单条 Blob 上限。512px JPEG 约 7–30KB；大 GIF（>256KB 原样）由 worker 生成
+ * 的"可动小缩略图"可能到数百 KB~数 MB——若仍按旧 512KB 上限把它们拒之门外，
+ * 滚动回看时这些 GIF 每次都重新 IPC/解码（观察到的"重载的都是 GIF"）。
+ * 提到 4MB，配合总容量 LRU（256MB）兜底，让动画缩略图留在缓存里直接复用。
+ */
+const MAX_SINGLE_BLOB_BYTES = 4 * 1024 * 1024;
 
 // Map 迭代序即 LRU 序（最久未用在前）。
 const entries = new Map<string, ThumbEntry>();

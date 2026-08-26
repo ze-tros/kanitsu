@@ -5,6 +5,7 @@ import { ArrowLeftIcon, NavButton } from './NavButton';
 import { OrganizeRulesManager } from './OrganizeRulesModal';
 import { SidebarResizeHandle } from './SidebarResizeHandle';
 import { getRendererThumbnailStats, clearThumbnailCache, type RendererThumbnailStats } from './thumbnailCache';
+import { startFpsMonitor, stopFpsMonitor, resetFpsMonitor, type FpsStats } from './fpsMonitor';
 import {
   clearDebugLogs,
   getDebugLogs,
@@ -109,6 +110,13 @@ function DebugPanel() {
   const [prefetch, setPrefetch] = useState<boolean>(() => isPrefetchEnabled());
   const [logs, setLogs] = useState<readonly LogEntry[]>(() => getDebugLogs());
   const [mainLogs, setMainLogs] = useState<string[]>([]);
+  const [fps, setFps] = useState<FpsStats | null>(null);
+
+  // 调试面板打开期间运行帧率监测（关闭自动停止，避免常驻开销）。
+  useEffect(() => {
+    startFpsMonitor(setFps);
+    return () => stopFpsMonitor();
+  }, []);
 
   useEffect(() => {
     setLogLevelPref(level);
@@ -143,6 +151,39 @@ function DebugPanel() {
 
   return (
     <div className="flex flex-col gap-4">
+      <section className="rounded-box border border-base-300 bg-base-200/50 p-5">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold">帧率与滚动性能</h3>
+          <button className="btn btn-ghost btn-xs shrink-0" onClick={resetFpsMonitor}>重置</button>
+        </div>
+        <p className="text-xs opacity-60 mb-2">
+          rAF 帧间隔统计（最近 1s）：掉帧 &gt;33.3ms、卡顿帧 &gt;50ms。滚动回调耗时为 JS
+          调度侧开销（窗口计算/状态更新）；渲染/绘画细账以 DevTools Performance 为准。
+        </p>
+        {fps && fps.totalFrames > 0 ? (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-sm">
+            <div className="stat"><span className="stat-title">当前帧率</span><span className="stat-value text-lg text-primary">{fps.fps.toFixed(0)} fps</span></div>
+            <div className="stat"><span className="stat-title">平均帧间隔</span><span className="stat-value text-lg">{fps.avgFrameMs.toFixed(1)} ms</span></div>
+            <div className="stat"><span className="stat-title">p95 帧间隔</span><span className="stat-value text-lg">{fps.p95FrameMs.toFixed(1)} ms</span></div>
+            <div className="stat"><span className="stat-title">最大帧间隔</span><span className="stat-value text-lg">{fps.maxFrameMs.toFixed(0)} ms</span></div>
+            <div className="stat"><span className="stat-title">掉帧(1s)</span><span className={`stat-value text-lg ${fps.dropped > 0 ? 'text-error' : ''}`}>{fps.dropped}</span></div>
+            <div className="stat"><span className="stat-title">卡顿帧(1s)</span><span className={`stat-value text-lg ${fps.jankFrames > 0 ? 'text-error' : ''}`}>{fps.jankFrames}</span></div>
+            <div className="stat"><span className="stat-title">累计掉帧</span><span className="stat-value text-lg">{fps.totalDropped}</span></div>
+            <div className="stat"><span className="stat-title">滚动回调</span><span className="stat-value text-lg">{fps.scrollSamples > 0 ? `${fps.scrollAvgMs.toFixed(1)} ms` : '—'}</span></div>
+            <div className="stat"><span className="stat-title">滚动写入/秒</span><span className="stat-value text-lg">{fps.scrollWrites}</span></div>
+            {fps.scrollSamples > 0 && (
+              <>
+                <div className="stat"><span className="stat-title">滚动回调 p95</span><span className="stat-value text-lg">{fps.scrollP95Ms.toFixed(1)} ms</span></div>
+                <div className="stat"><span className="stat-title">滚动回调峰值</span><span className="stat-value text-lg">{fps.scrollMaxMs.toFixed(1)} ms</span></div>
+                <div className="stat"><span className="stat-title">样本</span><span className="stat-value text-lg">{fps.scrollSamples}</span></div>
+              </>
+            )}
+          </div>
+        ) : (
+          <div className="text-sm opacity-60">采集第一帧中…（滚动几下后查看）</div>
+        )}
+      </section>
+
       <section className="rounded-box border border-base-300 bg-base-200/50 p-5">
         <h2 className="text-base font-semibold mb-3">调试选项</h2>
         <div className="flex flex-col gap-3 text-sm">
