@@ -157,6 +157,31 @@ body {
   gap: 1rem;
 }
 
+/* —— 移动端竖屏适配（Android WebView / 手机浏览器） —— */
+@media (max-width: 1023px) {
+  /* 侧栏抽屉在手机上作为浮层，宽度不超过屏幕 85% */
+  .drawer-side aside {
+    max-width: 85vw;
+  }
+
+  /* 图片/文件夹网格：手机上一行 2 列，卡片更小 */
+  .folder-grid,
+  .gallery-grid {
+    grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+    gap: 0.6rem;
+  }
+
+  /* 内容区收紧内边距，给竖屏更多可用宽度 */
+  .drawer-content main {
+    padding: 0.75rem;
+  }
+
+  /* 顶部面包屑区在手机上留足点击空间，避免按钮挤压 */
+  .navbar {
+    gap: 0.25rem;
+  }
+}
+
 /* Viewer filmstrip thumbnails. */
 .filmstrip-thumb {
   width: 72px;

@@ -10,3 +10,5 @@ apps/desktop/dist/
 *.js.map
 *.d.ts
 .test-build/
+
+.idea/

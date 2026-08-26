@@ -228,7 +228,11 @@ export function LibraryBrowser({
   const [promptValue, setPromptValue] = useState('');
   const [blurredImages, setBlurredImages] = useState<ReadonlySet<string>>(() => loadBlurredImages());
   const [searchQuery, setSearchQuery] = useState('');
-  const [sidebarHidden, setSidebarHidden] = useState(() => localStorage.getItem('kanitu-sidebar-hidden') === '1');
+  const [sidebarHidden, setSidebarHidden] = useState(() => {
+    // 手机竖屏（<1024px）默认收起侧栏；桌面端沿用本地记忆。
+    if (typeof window !== 'undefined' && window.innerWidth < 1024) return true;
+    return localStorage.getItem('kanitu-sidebar-hidden') === '1';
+  });
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     const value = Number(localStorage.getItem('kanitu-sidebar-width'));
     return Number.isFinite(value) && value >= 200 && value <= 480 ? value : 288;
