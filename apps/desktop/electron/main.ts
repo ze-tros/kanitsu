@@ -804,8 +804,13 @@ function registerIpc(): void {
   });
 }
 
-/** 生产构建渲染层产物根目录（apps/web/dist）。 */
+/** 生产构建渲染层产物根目录。
+ *  源码运行：apps/web/dist；打包后：electron-builder extraResources 复制到
+ *  resources/web/dist（见 apps/desktop/package.json 的 build.extraResources）。 */
 function bundleRoot(): string {
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, 'web', 'dist');
+  }
   return path.join(__dirname, '../../web/dist');
 }
 

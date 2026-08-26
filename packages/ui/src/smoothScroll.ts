@@ -31,7 +31,8 @@ export interface WheelSmoothOptions {
  *  - 输入活跃期（滚轮事件到来的 ~70ms 内）：activeLerp 快速逼近，近乎 1:1 跟手，
  *    首帧（≤1 个 vsync）就开始移动；
  *  - 松手后：惯性缓动快速收尾（lerp 0.3 + 2px 吸附即停）。
- * 每秒最多 writeIntervalMs 写一次 scrollTop（默认 0 = 每帧），超过则跳过；
+ * 每 writeIntervalMs 最多写一次 scrollTop（默认 8.3ms = 120Hz；0 = 每帧），超过则跳过；
+ * 写入步长按“距上次写入的时长”计算，避免高刷屏上被跳过帧缩短有效步长；
  * 本地变量跟踪位置，避免每帧读 el.scrollTop 触发强制同步布局。
  */
 export function useWheelSmoothScroll(
@@ -57,7 +58,6 @@ export function useWheelSmoothScroll(
     let target = current;
     let raf = 0;
     let running = false;
-    let lastTime = 0;
     let lastWrite = 0;
     let lastInputAt = 0;
 
@@ -89,13 +89,14 @@ export function useWheelSmoothScroll(
         raf = 0;
         return;
       }
-      const dt = lastTime ? Math.min(64, time - lastTime) : 16.7;
-      lastTime = time;
-      const base = active ? activeLerp : lerp;
-      const factor = 1 - Math.pow(1 - base, dt / 16.7);
-      const next = current + diff * factor;
       if (time - lastWrite >= writeIntervalMs) {
+        // 以“距上次写入”的时长作为步长：高刷屏上即使中间跳过了 rAF，
+        // 也不会把有效步长缩短为单帧间隔，保证 120Hz 写入下速度仍一致。
+        const dt = lastWrite ? Math.min(64, time - lastWrite) : 16.7;
         lastWrite = time;
+        const base = active ? activeLerp : lerp;
+        const factor = 1 - Math.pow(1 - base, dt / 16.7);
+        const next = current + diff * factor;
         el.scrollTop = next;
         current = next;
         recordScrollWrite();
@@ -106,7 +107,6 @@ export function useWheelSmoothScroll(
     const start = (): void => {
       if (running) return;
       running = true;
-      lastTime = 0;
       lastWrite = 0;
       raf = requestAnimationFrame(step);
     };

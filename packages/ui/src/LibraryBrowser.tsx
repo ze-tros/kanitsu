@@ -342,7 +342,8 @@ export function LibraryBrowser({
   const currentFolderId = selectedFolderId || snapshot?.rootId || '';
   const [scrollTop, setScrollTop] = useState(0);
   // 滚轮平滑（类手机信息流）：输入活跃期快速跟手 + 松手短惯性收尾。
-  // 默认写帧率 = 显示刷新率（跟手优先）；如需压合成压力可设 writeIntervalMs: 16.7。
+  // 默认写入限频 8.3ms（120Hz）；如需进一步压合成压力可设 writeIntervalMs: 16.7。
+  // 写入步长按“距上次写入”的时长计算，不会因高刷屏跳过帧而变慢。
   useWheelSmoothScroll(mainScrollRef, {});
   const [galleryMetrics, setGalleryMetrics] = useState<GalleryMetrics>({
     cols: 1,
@@ -375,7 +376,7 @@ export function LibraryBrowser({
   // 护住目录多/图多场景的帧率。
   const lastWindowKeyRef = useRef('');
   const scrollAnimPauseTimerRef = useRef<number | null>(null);
-  // 滚动开始时给主区加 .sk-scrolling（暂停 loading 闪烁动画），停止 ~150ms 恢复。
+  // 滚动开始时给主区加 .sk-scrolling（暂停 loading 闪烁动画），停止 ~400ms 恢复。
   const setScrollingClass = (node: HTMLElement, scrolling: boolean): void => {
     node.classList.toggle('sk-scrolling', scrolling);
   };

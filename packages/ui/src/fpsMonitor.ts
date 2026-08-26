@@ -26,15 +26,15 @@ export interface FpsStats {
   totalFrames: number;
   /** 累计掉帧数。 */
   totalDropped: number;
-  /** 滚动回调样本数。 */
+  /** 最近 1s 的滚动回调样本数。 */
   scrollSamples: number;
-  /** 最近 1s 的 scrollTop 写入次数（应≈60Hz 节流上限）。 */
+  /** 最近 1s 的 scrollTop 写入次数（默认 writeIntervalMs 8.3ms，约 120Hz 上限）。 */
   scrollWrites: number;
-  /** 滚动回调平均耗时（ms）。 */
+  /** 最近 1s 的滚动回调平均耗时（ms）。 */
   scrollAvgMs: number;
-  /** 滚动回调最大耗时（ms）。 */
+  /** 最近 1s 的滚动回调最大耗时（ms）。 */
   scrollMaxMs: number;
-  /** 滚动回调 p95（ms）。 */
+  /** 最近 1s 的滚动回调 p95（ms）。 */
   scrollP95Ms: number;
 }
 
@@ -45,7 +45,7 @@ const MAX_SCROLL_SAMPLES = 200;
 
 /** 最近 1s 的帧间隔样本（t=结束时间戳，gap=间隔 ms）。 */
 const samples: { t: number; gap: number }[] = [];
-const scrollMs: number[] = [];
+const scrollMs: { t: number; ms: number }[] = [];
 const scrollWriteTs: number[] = [];
 
 let rafId = 0;
@@ -68,7 +68,8 @@ function compute(now: number): FpsStats {
   const gaps = samples.map((s) => s.gap);
   const avg = gaps.length > 0 ? gaps.reduce((a, b) => a + b, 0) / gaps.length : 0;
   const sorted = [...gaps].sort((a, b) => a - b);
-  const scrollSorted = [...scrollMs].sort((a, b) => a - b);
+  const scrollVals = scrollMs.filter((s) => now - s.t <= WINDOW_MS).map((s) => s.ms);
+  const scrollSorted = [...scrollVals].sort((a, b) => a - b);
   return {
     fps: avg > 0 ? 1000 / avg : 0,
     avgFrameMs: avg,
@@ -78,8 +79,8 @@ function compute(now: number): FpsStats {
     jankFrames: gaps.filter((g) => g > JANK_MS).length,
     totalFrames,
     totalDropped,
-    scrollSamples: scrollMs.length,
-    scrollAvgMs: scrollMs.length > 0 ? scrollMs.reduce((a, b) => a + b, 0) / scrollMs.length : 0,
+    scrollSamples: scrollVals.length,
+    scrollAvgMs: scrollVals.length > 0 ? scrollVals.reduce((a, b) => a + b, 0) / scrollVals.length : 0,
     scrollMaxMs: scrollSorted.length > 0 ? scrollSorted[scrollSorted.length - 1]! : 0,
     scrollP95Ms: percentile(scrollSorted, 95),
     scrollWrites: scrollWriteTs.filter((t) => now - t <= WINDOW_MS).length,
@@ -140,8 +141,10 @@ export function getFpsStats(): FpsStats {
 
 /** 记录一次滚动回调耗时（LibraryBrowser 的 onScroll rAF 内上报）。 */
 export function recordScrollFrame(ms: number): void {
-  scrollMs.push(ms);
-  if (scrollMs.length > MAX_SCROLL_SAMPLES) scrollMs.shift();
+  const now = performance.now();
+  scrollMs.push({ t: now, ms });
+  while (scrollMs.length > MAX_SCROLL_SAMPLES) scrollMs.shift();
+  while (scrollMs.length > 0 && scrollMs[0]!.t < now - WINDOW_MS) scrollMs.shift();
 }
 
 /** 记录一次 scrollTop 写入（smoothScroll 每帧写入时上报，观测写入频率）。 */

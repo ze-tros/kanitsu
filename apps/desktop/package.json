@@ -3,6 +3,21 @@
   "private": true,
   "version": "0.1.0",
   "main": "dist/main.js",
+  "build": {
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../web/dist",
+        "to": "web/dist"
+      }
+    ]
+  },
   "scripts": {
     "dev": "tsc -p tsconfig.build.json && node scripts/dev.mjs",
     "build": "tsc -p tsconfig.build.json",

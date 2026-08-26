@@ -210,7 +210,7 @@ body {
   0% { transform: translateX(-100%); }
   100% { transform: translateX(100%); }
 }
-/* 滚动期间暂停加载动画（抖动闪烁也更安静），滚动停止 ~150ms 后恢复。 */
+/* 滚动期间暂停加载动画（抖动闪烁也更安静），滚动停止 ~400ms 后恢复。 */
 .sk-scrolling .blob-image-shimmer::before,
 .sk-scrolling .blob-image-spinner::before {
   animation-play-state: paused;
