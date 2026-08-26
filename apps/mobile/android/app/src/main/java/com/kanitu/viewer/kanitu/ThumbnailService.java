@@ -7,6 +7,7 @@ import android.graphics.Canvas;
 import android.graphics.ImageDecoder;
 import android.graphics.Movie;
 import com.squareup.gifencoder.GifEncoder;
+import com.squareup.gifencoder.ImageOptions;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -19,6 +20,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /** Native thumbnail generation + disk cache. */
@@ -241,7 +243,8 @@ public final class ThumbnailService {
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             GifEncoder encoder = new GifEncoder(out, tw, th, 0);
             for (int[] px : frames) {
-                encoder.addImage(px, delayMs);
+                ImageOptions options = new ImageOptions().setDelay(delayMs, TimeUnit.MILLISECONDS);
+                encoder.addImage(px, tw, options);
             }
             encoder.finishEncoding();
             return out.toByteArray();
