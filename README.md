@@ -1,69 +1,74 @@
 # 全能看图王
 
-本地优先的跨平台看图应用。
-
-文档：
-- [设计草案](DESIGN.md)
-- [开发进度与复盘](docs/开发进度与复盘.md)
-- [相册性能优化借鉴（安卓）](docs/安卓相册性能优化借鉴.md)
-- [Android 端设计](docs/Android端设计.md)
-- [移动端 UI 设计](docs/移动端UI设计.md)
+全能看图王（Kanitu）是一款本地优先的跨平台图片管理与查看应用。用户导入文件夹后，应用将图片复制到自己的图包库中，再提供目录浏览、自动整理、封面选择、原图查看和 ZIP 导出。
 
 ## 当前状态
 
-- ✅ Electron 真实导入链路
-- ✅ 多层级目录树（折叠/展开）
-- ✅ 子文件夹卡片 + 智能封面
-- ✅ 直属图片网格 + 缩略图
-- ✅ 导入报告
-- ✅ Electron 大图预览与缩略图内存安全处理（原图经 kanitu-file 协议流式读取）
-- ✅ 命名整理虚拟预览
-- ✅ Pixiv 编号自动分组 + 自定义整理规则（正则/目标目录模板，本地保存）
-- ✅ 命名整理落盘 + 一键撤销
-- ✅ 原图无损查看（缩放/平移/旋转 + 相邻预取）
-- ✅ zip 导出（Electron 保存对话框流式打包 / Web-Memory 下载）
-- ✅ 导出 zip 附带 index.json 索引（目录树 + 图片元数据）
-- ✅ 持久化索引（IndexedDB 缓存，启动增量加载）
-- ✅ 删除相册（删除选中目录及其全部下级）
-- ✅ 看图页键盘导航（↑/↓ 切同级目录并展示其首张图、←/→ 上一/下一张、Esc 关闭看图；目录树/网格无快捷键）
-- ✅ 面包屑导航
-- ✅ 简体中文界面（UI / 弹窗 / 通知 / 系统对话框 / 错误提示全流程中文）
-- ✅ 手动固定封面（图片右键“设为封面”，或图包右键“设置封面…”层次化选图：展示子文件夹可进入挑选/直接用其封面，展示当前目录图片；本地记忆，优先于智能封面）
-- ✅ 右键菜单（图片：查看 / 设封面 / 重命名 / 复制路径 / 删除；图包：打开 / 新建子文件夹 / 展开收起 / 重命名 / 整理 / 导出 / 复制路径 / 删除）
-- ✅ 图片/图包重命名与删除、新建子文件夹（应用内弹框，去除原生 confirm/prompt）
-- ✅ 设置页（通用设置 + 整理规则管理）
-- ✅ 深/浅色主题（跟随系统 + 手动切换记忆）
-- ✅ 侧栏搜索（相册 / 图片按名称实时过滤）
-- ✅ 预览模糊 / 隐私打码（右键菜单“设为隐私预览”：逐图绑定，可单张设置，也可整相册含子文件夹一键设置）
-- ✅ 自建标题栏（最小化 / 最大化 / 关闭，移除原生顶栏）
-- ✅ daisyUI / Tailwind 全面重设计（骨架屏 / 懒加载 / toast / 空态 / 加载动效）
-- ✅ 整理性能优化（目录 / 文件名单缓存，大库提速）+ 整理进度
-- ✅ 缩略图 worker 管线（4 worker · sharp）+ 磁盘持久化缩略图缓存（thumbcache，重启免解码）
-- ✅ 动画 GIF 缩略图（omggif：抽帧/自适应调色板/防残影/循环/采样倍率补偿；小 GIF 原样透传）
-- ✅ 四级优先级缩略图调度 + 启动全库预热（当前目录/子文件夹/封面逐级低优先级预取，可开关）
-- ✅ 查看器快速切换（缩略图占位 → 原图换入，无黑屏；鼠标侧键导航）
-- ✅ 前进/后退导航（浏览器/资源管理器风格）+ 切换目录滚动位置记忆
-- ✅ 设置页调试/缓存：日志等级、预取开关、缓存统计、清除缓存、主进程/渲染端日志
-- ✅ 日志体系（主进程 UTF-8 日志文件 + 渲染端环形缓冲，跨端契约）
-- ✅ Android 原生桥（SAF 导入 / 应用图包库 / ImageDecoder 缩略图 / SAF zip 导出）
-- ✅ Android 全新移动端 UI（`packages/ui/src/mobile/`：App Bar + FAB + 抽屉、长按动作面板、手势查看器（捏合缩放/滑页/下滑关闭）、history 返回键栈、全面屏安全区；桌面端 UI 不变）+ 平台启动检测修复
-- 🚧 安装包打包
+| 平台 | 状态 | 说明 |
+|---|---|---|
+| Windows / Electron | 可开发运行 | 导入、浏览、整理、查看、导出和缩略图缓存已完成；安装包与签名仍需发布验证 |
+| Android / Capacitor | 可安装测试 | SAF 导入、原生图库、缩略图、查看器、导出和触摸 UI 已完成 |
+| Web | 演示模式 | 使用内存文件系统，主要用于 UI 和核心流程开发 |
 
-## 目录
-- apps/web：Vite + React 演示
-- apps/desktop：Electron 主进程/preload + dev 脚本
-- apps/mobile：Capacitor Android 壳（后续）
-- packages/core：类型、路径、扫描、导入服务
-- packages/fs-adapter：文件系统抽象与内存实现/Electron 实现
-- packages/organizer：按命名自动整理
-- packages/cover-picker：智能封面
-- packages/image-pipeline：缩略图管线接口
-- packages/ui：共享 UI 组件
+已实现的主要能力：
+
+- 多层目录、面包屑、搜索、排序、聚合视图、网格与列表视图。
+- 命名规则整理预览、落盘、冲突处理和一键撤销。
+- 智能封面、手动固定封面、预览模糊和批量操作。
+- 原图查看、缩放、平移、旋转、键盘或触摸导航、缩略图渐进加载。
+- 原生快速导入、持久化索引、有界缩略图调度和磁盘缓存。
+- ZIP 流式导出，保留目录结构并附带 `index.json`。
+
+## 项目结构
+
+```text
+apps/
+  web/             Vite / React 入口
+  desktop/         Electron 主进程、preload 和打包配置
+  mobile/          Capacitor Android 壳与原生插件
+packages/
+  core/            领域类型、扫描、导入、整理和持久化索引
+  fs-adapter/      Web、Electron、Android 文件系统适配器
+  organizer/       命名解析与整理规则
+  cover-picker/    封面评分
+  image-pipeline/  图片处理接口
+  ui/              桌面与移动端 React UI
+docs/
+  开发进度与复盘.md
+  Android端设计.md
+```
 
 ## 开发
+
+要求：Node.js、npm；Android 构建还需要 JDK 和 Android SDK。
+
 ```bash
 npm install
-npm run dev:web     # Web 演示
-npm run dev:desktop # Electron 开发
-npm run typecheck   # 类型检查
+npm run dev:web
+npm run dev:desktop
+npm run typecheck
+npm test --workspaces --if-present
+npm run build:web
+npm run build:mobile
 ```
+
+桌面安装包：
+
+```bash
+npm run pack -w @kanitu/desktop
+```
+
+Android debug APK：
+
+```powershell
+cd apps/mobile/android
+.\gradlew.bat assembleDebug
+```
+
+## 文档
+
+- [产品与架构设计](DESIGN.md)
+- [开发进度与复盘](docs/开发进度与复盘.md)
+- [Android 平台实现](docs/Android端设计.md)
+
+文档描述稳定约束和当前状态；具体接口与参数以源码和类型定义为准。
