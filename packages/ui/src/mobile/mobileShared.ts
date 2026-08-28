@@ -7,6 +7,10 @@ export {
   windowRowsFor,
   clampWindow,
   OVERSCAN_ROWS,
+  type GalleryMetrics,
+} from '../virtualWindow';
+
+export {
   loadPinnedCovers,
   savePinnedCovers,
   loadBlurredImages,
@@ -15,7 +19,6 @@ export {
   skippedReasonLabel,
   conflictReasonLabel,
   prefetchOriginal,
-  type GalleryMetrics,
 } from '../LibraryBrowser';
 
 /** 图片网格：3 列方形卡片（相册标准密度），卡片间距。 */

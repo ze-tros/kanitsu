@@ -2,6 +2,8 @@ import { useEffect, type RefObject } from 'react';
 import { recordScrollWrite } from './fpsMonitor';
 
 export interface WheelSmoothOptions {
+  /** 是否绑定滚轮行为。全屏子页面打开时可临时停用并在返回后重新绑定。 */
+  enabled?: boolean;
   /** 松手/惯性阶段的每 16.7ms 逼近比例（0~1）。默认 0.3（~60ms 收尾）。 */
   lerp?: number;
   /** 输入活跃阶段的每 16.7ms 逼近比例（0~1）。默认 0.5（跟手但不生硬）。 */
@@ -39,6 +41,7 @@ export function useWheelSmoothScroll(
   elRef: RefObject<HTMLElement | null>,
   options: WheelSmoothOptions = {},
 ): void {
+  const enabled = options.enabled ?? true;
   const lerp = options.lerp ?? 0.3;
   const activeLerp = options.activeLerp ?? 0.5;
   const lineHeight = options.lineHeight ?? 33;
@@ -47,6 +50,7 @@ export function useWheelSmoothScroll(
   const inputActiveMs = options.inputActiveMs ?? 70;
 
   useEffect(() => {
+    if (!enabled) return;
     const el = elRef.current;
     if (!el) return;
     if (typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
@@ -139,5 +143,5 @@ export function useWheelSmoothScroll(
       el.removeEventListener('scroll', onScroll);
       if (raf) cancelAnimationFrame(raf);
     };
-  }, [elRef, lerp, activeLerp, lineHeight, writeIntervalMs, arriveEps, inputActiveMs]);
+  }, [elRef, enabled, lerp, activeLerp, lineHeight, writeIntervalMs, arriveEps, inputActiveMs]);
 }

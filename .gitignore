@@ -12,3 +12,7 @@ apps/desktop/dist/
 .test-build/
 
 .idea/
+
+# Local agent tooling
+.agents/
+skills-lock.json

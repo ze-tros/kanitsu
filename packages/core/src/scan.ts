@@ -60,21 +60,73 @@ export async function scanLibrary(store: LibraryStore): Promise<LibrarySnapshot>
   return { rootId, folders, images, fingerprint };
 }
 
+interface SnapshotLookup {
+  childrenByParent: Map<string, FolderNode[]>;
+  directImagesByFolder: Map<string, ImageEntry[]>;
+  allImagesByFolder: Map<string, ImageEntry[]>;
+}
+
+// LibrarySnapshot instances are replaced after every scan/mutation. A WeakMap therefore keeps
+// one lookup per live snapshot without requiring explicit invalidation or retaining old libraries.
+const snapshotLookups = new WeakMap<LibrarySnapshot, SnapshotLookup>();
+
+function lookupFor(snapshot: LibrarySnapshot): SnapshotLookup {
+  const cached = snapshotLookups.get(snapshot);
+  if (cached) return cached;
+
+  const lookup: SnapshotLookup = {
+    childrenByParent: new Map(),
+    directImagesByFolder: new Map(),
+    allImagesByFolder: new Map(),
+  };
+  for (const folder of Object.values(snapshot.folders)) {
+    if (folder.parentId === null) continue;
+    const siblings = lookup.childrenByParent.get(folder.parentId) ?? [];
+    siblings.push(folder);
+    lookup.childrenByParent.set(folder.parentId, siblings);
+  }
+  for (const image of Object.values(snapshot.images)) {
+    const direct = lookup.directImagesByFolder.get(image.folderId) ?? [];
+    direct.push(image);
+    lookup.directImagesByFolder.set(image.folderId, direct);
+  }
+  for (const images of lookup.directImagesByFolder.values()) {
+    images.sort((a, b) => a.relPath.localeCompare(b.relPath));
+  }
+  snapshotLookups.set(snapshot, lookup);
+  return lookup;
+}
+
+function indexedImagesOf(
+  lookup: SnapshotLookup,
+  folderId: string,
+  visiting: Set<string>,
+): ImageEntry[] {
+  const cached = lookup.allImagesByFolder.get(folderId);
+  if (cached) return cached;
+  if (visiting.has(folderId)) return [];
+  visiting.add(folderId);
+
+  const images = [...(lookup.directImagesByFolder.get(folderId) ?? [])];
+  for (const child of lookup.childrenByParent.get(folderId) ?? []) {
+    images.push(...indexedImagesOf(lookup, child.id, visiting));
+  }
+  visiting.delete(folderId);
+  images.sort((a, b) => a.relPath.localeCompare(b.relPath));
+  lookup.allImagesByFolder.set(folderId, images);
+  return images;
+}
+
 export function childrenOf(snapshot: LibrarySnapshot, folderId: string): FolderNode[] {
-  return Object.values(snapshot.folders).filter((f) => f.parentId === folderId);
+  return [...(lookupFor(snapshot).childrenByParent.get(folderId) ?? [])];
 }
 
 /** Returns only images directly inside a folder. */
 export function directImagesOf(snapshot: LibrarySnapshot, folderId: string): ImageEntry[] {
-  return Object.values(snapshot.images)
-    .filter((i) => i.folderId === folderId)
-    .sort((a, b) => a.relPath.localeCompare(b.relPath));
+  return [...(lookupFor(snapshot).directImagesByFolder.get(folderId) ?? [])];
 }
 
 /** Returns images of a folder. Parent folders include images from all descendant folders. */
 export function imagesOf(snapshot: LibrarySnapshot, folderId: string): ImageEntry[] {
-  const direct = directImagesOf(snapshot, folderId);
-  const childFolders = childrenOf(snapshot, folderId);
-  const nested = childFolders.flatMap((child) => imagesOf(snapshot, child.id));
-  return [...direct, ...nested].sort((a, b) => a.relPath.localeCompare(b.relPath));
+  return [...indexedImagesOf(lookupFor(snapshot), folderId, new Set())];
 }

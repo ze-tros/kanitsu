@@ -12,9 +12,11 @@
         "react-dom": "^18.3.1"
     },
     "scripts": {
-        "typecheck": "tsc -p tsconfig.json"
+        "typecheck": "tsc -p tsconfig.json",
+        "test": "esbuild test/thumbnailCache.test.ts --bundle --platform=node --format=esm --outfile=.test-build/thumbnailCache.test.mjs && esbuild test/virtualWindow.test.ts --bundle --platform=node --format=esm --outfile=.test-build/virtualWindow.test.mjs && node .test-build/thumbnailCache.test.mjs && node .test-build/virtualWindow.test.mjs"
     },
     "dependencies": {
+        "@phosphor-icons/react": "^2.1.10",
         "motion": "^13.1.1"
     }
 }

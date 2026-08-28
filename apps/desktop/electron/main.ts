@@ -283,25 +283,24 @@ function createByteLruCache(maxBytes: number): {
 
 /** 网格缩略图缓存（≤1024px JPEG）。 */
 const thumbCache = createByteLruCache(512 * 1024 * 1024);
-/** 单条内存缓存上限。普通缩略图几 KB~几十 KB；worker 生成的大 GIF 动画缩略图
- *  可能到数百 KB~数 MB，若按旧 512KB 上限则每次都要重读磁盘。提到 4MB，
- *  配合 512MB 总容量 LRU 兜底。 */
+/** 单条内存缓存上限。普通缩略图通常只有数十 KB，4MB 仅作异常输出兜底；
+ *  总量仍由 512MB LRU 上限控制。 */
 const MAX_MEM_CACHE_ENTRY_BYTES = 4 * 1024 * 1024;
-/** 小于该字节数的 GIF 原样透传（动画完美且小）；更大的交给 worker 生成动画缩略图。 */
-const GIF_PASSTHROUGH_LIMIT = 256 * 1024;
+// 缩略图输出策略版本。v2 将 GIF 网格预览改为静态首帧 JPEG，
+// 避免大量卡片同时动画解码和合成。
+const THUMB_CACHE_VERSION = 2;
 
 function putThumbCache(cacheKey: string, data: Uint8Array): void {
   if (data.byteLength <= MAX_MEM_CACHE_ENTRY_BYTES) thumbCache.put(cacheKey, data);
 }
 
 function thumbCacheKey(file: DesktopFsEntry, targetSize: number): string {
-  return `${file.id}\u0000${file.mtime ?? 0}\u0000${file.size ?? 0}\u0000${targetSize}`;
+  return `${file.id}\u0000${file.mtime ?? 0}\u0000${file.size ?? 0}\u0000${targetSize}\u0000v${THUMB_CACHE_VERSION}`;
 }
 
 // —— 缩略图磁盘持久化缓存 ——
 // 内存缓存随应用重启清空；缩略图落盘到 userData/thumbcache（按文件
 // mtime/size/尺寸/版本 做 SHA1 键），重启后直接读盘返回，免去重新解码。
-const THUMB_DISK_VERSION = 1;
 const THUMB_DISK_MAX_FILES = 20000;
 const THUMB_DISK_MAX_BYTES = 1536 * 1024 * 1024; // 1.5GB
 
@@ -310,7 +309,7 @@ function thumbCacheDir(): string {
 }
 
 function thumbDiskKey(file: DesktopFsEntry, targetSize: number): string {
-  const raw = `${file.id}\u0000${file.mtime ?? 0}\u0000${file.size ?? 0}\u0000${targetSize}\u0000v${THUMB_DISK_VERSION}`;
+  const raw = `${file.id}\u0000${file.mtime ?? 0}\u0000${file.size ?? 0}\u0000${targetSize}\u0000v${THUMB_CACHE_VERSION}`;
   return createHash('sha1').update(raw).digest('hex');
 }
 
@@ -369,15 +368,19 @@ const THUMB_JOB_TIMEOUT_MS = 8000;
 const THUMB_PRIORITIES = 5;
 
 interface ThumbnailRequest {
+  cacheKey: string;
   file: DesktopFsEntry;
   targetSize: number;
   priority: number;
+  promise: Promise<Uint8Array>;
   resolve: (data: Uint8Array) => void;
   reject: (err: Error) => void;
 }
 
 /** 优先级桶数组：下标小者优先（0 可见 > 1 滚动方向 > 2 当前目录 > 3 子文件夹 > 4 全库）。 */
 const thumbnailQueues: ThumbnailRequest[][] = Array.from({ length: THUMB_PRIORITIES }, () => []);
+/** 同一实际缓存键只保留一个排队中/处理中的 worker 请求，所有调用方共享其 Promise。 */
+const pendingThumbnailRequests = new Map<string, ThumbnailRequest>();
 const workerPool: (Worker | null)[] = [];
 const busyWorkers = new Set<Worker>();
 const inFlightJobs = new Map<
@@ -489,15 +492,51 @@ function enqueueThumbnail(file: DesktopFsEntry, targetSize: number, priority: nu
   const cacheKey = thumbCacheKey(file, targetSize);
   const cached = thumbCache.get(cacheKey);
   if (cached) return Promise.resolve(cached);
-  return new Promise<Uint8Array>((resolve, reject) => {
-    const level = Math.max(0, Math.min(THUMB_PRIORITIES - 1, priority));
-    const request: ThumbnailRequest = { file, targetSize, priority: level, resolve, reject };
-    // 按优先级入桶（0 可见 > 1 滚动方向预取 > 2 当前目录 > 3 子文件夹 > 4 全库预热），
-    // 取任务时总是从高优先级桶开始，保证正在看的图不被预取洪峰拖慢。
-    thumbnailQueues[level]!.push(request);
-    for (let i = 0; i < THUMB_WORKER_COUNT; i++) ensureThumbnailWorker(i);
-    pumpThumbnailQueue();
+  const level = Math.max(0, Math.min(THUMB_PRIORITIES - 1, priority));
+  const pending = pendingThumbnailRequests.get(cacheKey);
+  if (pending) {
+    // 只迁移仍在桶中的请求；已经交给 worker 的任务直接共享，不能重复解码。
+    if (level < pending.priority) {
+      const currentQueue = thumbnailQueues[pending.priority]!;
+      const queuedIndex = currentQueue.indexOf(pending);
+      if (queuedIndex >= 0) {
+        currentQueue.splice(queuedIndex, 1);
+        pending.priority = level;
+        thumbnailQueues[level]!.push(pending);
+        pumpThumbnailQueue();
+      }
+    }
+    return pending.promise;
+  }
+
+  let resolvePromise!: (data: Uint8Array) => void;
+  let rejectPromise!: (err: Error) => void;
+  const promise = new Promise<Uint8Array>((resolve, reject) => {
+    resolvePromise = resolve;
+    rejectPromise = reject;
   });
+  const request: ThumbnailRequest = {
+    cacheKey,
+    file,
+    targetSize,
+    priority: level,
+    promise,
+    resolve: (data) => {
+      if (pendingThumbnailRequests.get(cacheKey) === request) pendingThumbnailRequests.delete(cacheKey);
+      resolvePromise(data);
+    },
+    reject: (err) => {
+      if (pendingThumbnailRequests.get(cacheKey) === request) pendingThumbnailRequests.delete(cacheKey);
+      rejectPromise(err);
+    },
+  };
+  pendingThumbnailRequests.set(cacheKey, request);
+  // 按优先级入桶（0 可见 > 1 滚动方向预取 > 2 当前目录 > 3 子文件夹 > 4 全库预热），
+  // 取任务时总是从高优先级桶开始，保证正在看的图不被预取洪峰拖慢。
+  thumbnailQueues[level]!.push(request);
+  for (let i = 0; i < THUMB_WORKER_COUNT; i++) ensureThumbnailWorker(i);
+  pumpThumbnailQueue();
+  return promise;
 }
 
 /** 主进程 nativeImage 同步回退路径（webp/avif/未知格式或 worker 失败时）。 */
@@ -546,13 +585,13 @@ function registerIpc(): void {
   ipcMain.handle('library:getRoot', async (): Promise<DesktopFsEntry> => {
     const root = getLibraryRoot();
     await ensureDir(root);
-    return entryFor(root, '全部相册');
+    return entryFor(root, '全部图包');
   });
 
   ipcMain.handle('library:ensureRoot', async (): Promise<DesktopFsEntry> => {
     const root = getLibraryRoot();
     await ensureDir(root);
-    return entryFor(root, '全部相册');
+    return entryFor(root, '全部图包');
   });
 
   ipcMain.handle('library:fingerprint', async (): Promise<string> => {
@@ -628,15 +667,9 @@ function registerIpc(): void {
     }
 
     const ext = path.extname(file.id).toLowerCase().slice(1);
-    // GIF：小图原样透传（保持原动画，瞬时）；大图由 worker 生成“可动且小”的
-    // 动画 GIF 缩略图（omggif 抽帧缩放重编码），不再让数 MB 大字节挤挤垮缓存。
+    // GIF 在网格中只生成静态首帧 JPEG。同时解码数十个动画会占用渲染线程并
+    // 放大 GC；打开查看器时仍读取原文件，不影响 GIF 播放。
     if (ext === 'gif') {
-      const raw = new Uint8Array(await fs.readFile(file.id));
-      if (raw.byteLength <= GIF_PASSTHROUGH_LIMIT) {
-        putThumbCache(cacheKey, raw);
-        void writeThumbToDisk(diskKey, raw);
-        return raw;
-      }
       try {
         const data = await enqueueThumbnail(file, targetSize, level);
         putThumbCache(cacheKey, data);
@@ -644,9 +677,12 @@ function registerIpc(): void {
         return data;
       } catch (err) {
         if (level > 0) throw err;
-        logger.warn('gif', `动画缩略图失败，回退原样：${path.basename(file.id)} (${String(err)})`);
-        void writeThumbToDisk(diskKey, raw);
-        return raw;
+        logger.warn('gif', `静态首帧生成失败，回退主进程解码：${path.basename(file.id)} (${String(err)})`);
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        const data = generateThumbnailBytesNative(file, targetSize);
+        putThumbCache(cacheKey, data);
+        void writeThumbToDisk(diskKey, data);
+        return data;
       }
     }
 
@@ -762,10 +798,10 @@ function registerIpc(): void {
     const norm = String(targetRelPath || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
     const sourceDir = norm ? path.join(libraryRoot, ...norm.split('/')) : libraryRoot;
     assertInsideLibrary(sourceDir);
-    const baseName = norm ? path.basename(norm) : '相册';
+    const baseName = norm ? path.basename(norm) : '图包';
 
     const { canceled, filePath } = await dialog.showSaveDialog({
-      title: '导出相册为 ZIP',
+      title: '导出图包为 ZIP',
       defaultPath: path.join(app.getPath('desktop'), `${baseName}.zip`),
       filters: [{ name: 'ZIP', extensions: ['zip'] }],
     });

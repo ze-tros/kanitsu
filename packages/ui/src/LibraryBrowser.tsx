@@ -1,6 +1,53 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
-import { useWheelSmoothScroll } from './smoothScroll';
-import { CardMotion } from './CardMotion';
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+} from 'react';
+import {
+  ArrowClockwise,
+  ArrowLeft,
+  ArrowRight,
+  ArrowUp,
+  ArrowsOut,
+  CaretRight,
+  Check,
+  Copy,
+  Export,
+  Eye,
+  EyeSlash,
+  FileZip,
+  Folder,
+  FolderOpen,
+  FolderPlus,
+  GearSix,
+  HardDrive,
+  House,
+  ImagesSquare,
+  ImageSquare,
+  Info,
+  LockSimple,
+  MagicWand,
+  MagnifyingGlass,
+  Minus,
+  Moon,
+  PencilSimple,
+  Plus,
+  PushPin,
+  Rows,
+  SidebarSimple,
+  SortAscending,
+  SquaresFour,
+  Sun,
+  Trash,
+  UploadSimple,
+  X,
+} from '@phosphor-icons/react';
 import { recordScrollFrame } from './fpsMonitor';
 import {
   applyOrganize,
@@ -29,7 +76,6 @@ import {
 } from '../../core/src/index';
 import type { ImportSourcePicker, LibraryStore } from '../../fs-adapter/src/types';
 import type { FileRef } from '../../fs-adapter/src/types';
-import type { KanituDesktopBridge } from '../../fs-adapter/src/electron';
 import { organizeByFolder, type CustomOrganizeRule } from '../../organizer/src/index';
 import { pickCover } from '../../cover-picker/src/index';
 import { BlobImage } from './BlobImage';
@@ -40,6 +86,7 @@ import {
   THUMB_PRIORITY_DIRECTIONAL,
   THUMB_PRIORITY_SUBFOLDER,
   THUMB_PRIORITY_WARMUP,
+  setThumbnailPreloadPaused,
 } from './thumbnailCache';
 import { getLogLevelPref, isPrefetchEnabled, logDebug } from './debugLog';
 import {
@@ -57,9 +104,62 @@ import { ContextMenu, type ContextMenuItem, type ContextMenuModel } from './Cont
 import { CoverPickerModal } from './CoverPickerModal';
 import { loadCustomRules, saveCustomRules } from './OrganizeRulesModal';
 import { OrganizePreview } from './OrganizePreview';
-import { ArrowLeftIcon, ArrowRightIcon, FolderUpIcon, HomeIcon, NavButton, NavIconButton, PanelLeftIcon, SettingsIcon } from './NavButton';
 import { SidebarResizeHandle } from './SidebarResizeHandle';
-import { SettingsPage } from './SettingsPage';
+import { SettingsPage, type AccentOption, type ThemeOption } from './SettingsPage';
+import { DesktopWindowControls } from './DesktopWindowControls';
+import {
+  OVERSCAN_ROWS,
+  VIRTUAL_WINDOW_STEP_ROWS,
+  clampWindow,
+  stableWindowRowsFor,
+  virtualSurfaceHeight,
+  windowRowsFor,
+  type GalleryMetrics,
+} from './virtualWindow';
+
+export {
+  OVERSCAN_ROWS,
+  VIRTUAL_WINDOW_STEP_ROWS,
+  clampWindow,
+  stableWindowRowsFor,
+  virtualSurfaceHeight,
+  windowRowsFor,
+} from './virtualWindow';
+export type { GalleryMetrics } from './virtualWindow';
+
+type ViewMode = 'grid' | 'list';
+type SortMode = 'name' | 'size' | 'modified';
+
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+  if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${bytes} B`;
+}
+
+function formatModifiedTime(value: number): string {
+  if (!value) return '未知';
+  return new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(value);
+}
+
+function imageFileRef(image: ImageEntry): FileRef {
+  return {
+    id: image.fileRefId ?? image.id,
+    name: image.name,
+    kind: 'file',
+    mtime: image.mtime,
+    size: image.size,
+    width: image.width,
+    height: image.height,
+  };
+}
 
 export function skippedReasonLabel(reason: ImportSkippedFile['reason']): string {
   switch (reason) {
@@ -111,52 +211,15 @@ const PRELOAD_MAX_FOLDERS = 16;
 // 网格常量随视口变化：桌面 180px/16px；移动端（<1024px）130px/10px。
 // 与 styles.css 的移动端媒体查询成对对齐：保证虚拟化计算的列数 == CSS 实际渲染列数，
 // 避免"JS 按 N 列切片、CSS 却渲染 M 列"导致的卡片变窄/错位/滚动高度失真。
-function gridUnits() {
+const LIST_FOLDER_CARD_HEIGHT = 88;
+const LIST_IMAGE_CARD_HEIGHT = 72;
+
+function gridUnits(viewMode: ViewMode) {
+  if (viewMode === 'list') return { minCard: 0, gap: 6, fixedCols: 1 };
   const mobile = typeof window !== 'undefined' && window.innerWidth < 1024;
-  return mobile ? { minCard: 130, gap: 10 } : { minCard: 180, gap: 16 };
+  if (mobile) return { minCard: 130, gap: 10, fixedCols: undefined };
+  return { minCard: 180, gap: 16, fixedCols: undefined };
 }
-export const OVERSCAN_ROWS = 2; // 可视区上下各多挂载的行数（缓冲）
-
-export interface GalleryMetrics {
-  cols: number;
-  cardHeight: number;
-  rowHeight: number;
-  /** 该 section 相对主滚动容器内容的顶部偏移（滚动无关）。 */
-  galleryTop: number;
-  /** 主滚动容器可视高度。 */
-  viewportH: number;
-}
-
-/** 通用虚拟窗口计算：按滚动位置返回某区应挂载的首/末行（含上下缓冲）。 */
-export function windowRowsFor(
-  m: GalleryMetrics,
-  scrollTop: number,
-  itemCount: number,
-): { first: number; last: number } {
-  if (m.rowHeight <= 0 || m.cols <= 0 || itemCount <= 0) return { first: 0, last: 0 };
-  const totalRows = Math.ceil(itemCount / m.cols);
-  const gs = Math.max(0, scrollTop - m.galleryTop);
-  const first = Math.max(0, Math.floor(gs / m.rowHeight) - OVERSCAN_ROWS);
-  const last = Math.min(totalRows, Math.ceil((gs + m.viewportH) / m.rowHeight) + OVERSCAN_ROWS);
-  return { first, last };
-}
-
-/**
- * 行窗口防抖：小步移动（滚动位置恰在行边界附近的抖动）限制为每帧 ±1 行，
- * 大跳变（切目录 / 快速滚动跨多行）直接跟随。防止首尾行反复挂/卸载造成的
- * “滚动一下跳动两次”。渲染期写 ref 为受控写法：仅用于跨帧记忆窗口。
- */
-export function clampWindow(
-  prev: { first: number; last: number },
-  next: { first: number; last: number },
-): { first: number; last: number } {
-  if (Math.abs(next.first - prev.first) > 2 || Math.abs(next.last - prev.last) > 2) return next;
-  return {
-    first: Math.min(Math.max(next.first, prev.first - 1), prev.first + 1),
-    last: Math.min(Math.max(next.last, prev.last - 1), prev.last + 1),
-  };
-}
-
 export function loadPinnedCovers(): Record<string, string> {
   try {
     const raw = localStorage.getItem(PINNED_COVERS_KEY);
@@ -220,6 +283,7 @@ export function LibraryBrowser({
   const [exporting, setExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState<{ done: number; total: number } | null>(null);
   const [importReport, setImportReport] = useState<ImportTask | null>(null);
+  const [showImportReport, setShowImportReport] = useState(false);
   const [expandedFolders, setExpandedFolders] = useState<ReadonlySet<string>>(new Set());
   const [deleteTarget, setDeleteTarget] = useState<{ kind: 'folder'; folder: FolderNode } | { kind: 'image'; image: ImageEntry } | null>(null);
   const [promptState, setPromptState] = useState<{
@@ -233,6 +297,25 @@ export function LibraryBrowser({
   const [promptValue, setPromptValue] = useState('');
   const [blurredImages, setBlurredImages] = useState<ReadonlySet<string>>(() => loadBlurredImages());
   const [searchQuery, setSearchQuery] = useState('');
+  const [theme, setTheme] = useState<ThemeOption>(() => {
+    const saved = localStorage.getItem('kanitu-theme');
+    if (saved === 'light' || saved === 'dark') return saved;
+    return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  });
+  const [accent, setAccent] = useState<AccentOption>(() => {
+    const saved = localStorage.getItem('kanitu-accent');
+    return saved === 'coral' || saved === 'amber' || saved === 'graphite' ? saved : 'cobalt';
+  });
+  const [viewMode, setViewMode] = useState<ViewMode>(() =>
+    localStorage.getItem('kanitu-view-mode') === 'list' ? 'list' : 'grid',
+  );
+  const [inspectorOpen, setInspectorOpen] = useState(() =>
+    localStorage.getItem('kanitu-inspector-open') === '1',
+  );
+  const [sortMode, setSortMode] = useState<SortMode>('name');
+  const [showNames, setShowNames] = useState(true);
+  const [selectedImageIds, setSelectedImageIds] = useState<ReadonlySet<string>>(new Set());
+  const lastSelectedImageRef = useRef<string | null>(null);
   const [sidebarHidden, setSidebarHidden] = useState(() => {
     // 手机竖屏（<1024px）默认收起侧栏；桌面端沿用本地记忆。
     if (typeof window !== 'undefined' && window.innerWidth < 1024) return true;
@@ -240,10 +323,11 @@ export function LibraryBrowser({
   });
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     const value = Number(localStorage.getItem('kanitu-sidebar-width'));
-    return Number.isFinite(value) && value >= 200 && value <= 480 ? value : 288;
+    return Number.isFinite(value) && value >= 200 ? Math.min(value, 360) : 288;
   });
   const [customRules, setCustomRules] = useState<CustomOrganizeRule[]>(() => loadCustomRules());
   const [showSettings, setShowSettings] = useState(false);
+  const settingsButtonRef = useRef<HTMLButtonElement>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuModel | null>(null);
   const [pinnedCovers, setPinnedCovers] = useState<Record<string, string>>(() => loadPinnedCovers());
   const [coverPickerFolder, setCoverPickerFolder] = useState<FolderNode | null>(null);
@@ -298,6 +382,23 @@ export function LibraryBrowser({
     }
   }, [sidebarWidth]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem('kanitu-view-mode', viewMode);
+      localStorage.setItem('kanitu-inspector-open', inspectorOpen ? '1' : '0');
+    } catch {
+      // Ignore storage errors.
+    }
+  }, [inspectorOpen, viewMode]);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    document.documentElement.dataset.accent = accent;
+    document.documentElement.style.colorScheme = theme;
+    localStorage.setItem('kanitu-theme', theme);
+    localStorage.setItem('kanitu-accent', accent);
+  }, [accent, theme]);
+
   // Startup: load the cached index (no full re-scan). Fallback scans + persists.
   useEffect(() => {
     void (async () => {
@@ -323,23 +424,50 @@ export function LibraryBrowser({
   const folderImages = useMemo(() => {
     if (!snapshot) return [];
     const id = selectedFolderId || snapshot.rootId;
+    if (id === snapshot.rootId) return [];
     const images = directImagesOf(snapshot, id);
-    return searchTerm ? images.filter((img) => img.name.toLowerCase().includes(searchTerm)) : images;
-  }, [snapshot, selectedFolderId, searchTerm]);
+    const filtered = searchTerm ? images.filter((img) => img.name.toLowerCase().includes(searchTerm)) : images;
+    return [...filtered].sort((a, b) => {
+      if (sortMode === 'size') return b.size - a.size;
+      if (sortMode === 'modified') return b.mtime - a.mtime;
+      return a.name.localeCompare(b.name, 'zh-CN');
+    });
+  }, [snapshot, selectedFolderId, searchTerm, sortMode]);
 
   const childFolders = useMemo(() => {
     if (!snapshot) return [];
     const id = selectedFolderId || snapshot.rootId;
-    const folders = childrenOf(snapshot, id).sort((a, b) => a.name.localeCompare(b.name));
-    return searchTerm ? folders.filter((f) => f.name.toLowerCase().includes(searchTerm)) : folders;
-  }, [snapshot, selectedFolderId, searchTerm]);
+    const folders = childrenOf(snapshot, id);
+    const filtered = searchTerm ? folders.filter((f) => f.name.toLowerCase().includes(searchTerm)) : folders;
+    if (sortMode === 'name') return [...filtered].sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'));
+    const stats = new Map<string, { bytes: number; latestModified: number }>();
+    filtered.forEach((folder) => {
+      const images = imagesOf(snapshot, folder.id);
+      stats.set(folder.id, {
+        bytes: images.reduce((sum, image) => sum + image.size, 0),
+        latestModified: images.reduce((latest, image) => Math.max(latest, image.mtime), 0),
+      });
+    });
+    return [...filtered].sort((a, b) => {
+      const aStats = stats.get(a.id)!;
+      const bStats = stats.get(b.id)!;
+      return sortMode === 'size'
+        ? bStats.bytes - aStats.bytes
+        : bStats.latestModified - aStats.latestModified;
+    });
+  }, [snapshot, selectedFolderId, searchTerm, sortMode]);
 
   const childFolderCards = useMemo(() => {
     if (!snapshot) return [];
-    return childFolders.map((child) => ({
-      folder: child,
-      cover: pickCover(imagesOf(snapshot, child.id), { preferredId: pinnedCovers[child.id] }),
-    }));
+    return childFolders.map((child) => {
+      const images = imagesOf(snapshot, child.id);
+      const cover = pickCover(images, { preferredId: pinnedCovers[child.id] });
+      const covers = [
+        ...(cover ? [snapshot.images[cover.imageId]] : []),
+        ...images.filter((image) => image.id !== cover?.imageId),
+      ].filter((image): image is ImageEntry => Boolean(image)).slice(0, 3);
+      return { folder: child, covers };
+    });
   }, [snapshot, childFolders, pinnedCovers]);
 
   // —— 内容区滚动位置记忆 + 图片网格虚拟化（P2）+ 滚动方向预取（P3）——
@@ -349,11 +477,8 @@ export function LibraryBrowser({
   const scrollPositionsRef = useRef(new Map<string, number>());
   const scrollSaveFrameRef = useRef<number | null>(null);
   const currentFolderId = selectedFolderId || snapshot?.rootId || '';
+  const currentFolderIdRef = useRef(currentFolderId);
   const [scrollTop, setScrollTop] = useState(0);
-  // 滚轮平滑（类手机信息流）：输入活跃期快速跟手 + 松手短惯性收尾。
-  // 默认写入限频 8.3ms（120Hz）；如需进一步压合成压力可设 writeIntervalMs: 16.7。
-  // 写入步长按“距上次写入”的时长计算，不会因高刷屏跳过帧而变慢。
-  useWheelSmoothScroll(mainScrollRef, {});
   const [galleryMetrics, setGalleryMetrics] = useState<GalleryMetrics>({
     cols: 1,
     cardHeight: 0,
@@ -362,7 +487,7 @@ export function LibraryBrowser({
     viewportH: 0,
   });
   const galleryMetricsRef = useRef<GalleryMetrics>(galleryMetrics);
-  const gallerySectionRef = useRef<HTMLElement | null>(null);
+  const gallerySurfaceRef = useRef<HTMLDivElement | null>(null);
   const probeCardRef = useRef<HTMLDivElement | null>(null);
   // 子文件夹区同样虚拟化（目录多时文件夹卡片也是全量渲染的卡顿源）。
   const [folderMetrics, setFolderMetrics] = useState<GalleryMetrics>({
@@ -373,45 +498,49 @@ export function LibraryBrowser({
     viewportH: 0,
   });
   const folderMetricsRef = useRef<GalleryMetrics>(folderMetrics);
-  const folderSectionRef = useRef<HTMLElement | null>(null);
+  const folderSurfaceRef = useRef<HTMLDivElement | null>(null);
   const folderProbeCardRef = useRef<HTMLDivElement | null>(null);
-  // 跨帧记忆两区的行窗口（配合 clampWindow 防抖）。
-  const folderWindowRef = useRef({ first: 0, last: 0 });
-  const galleryWindowRef = useRef({ first: 0, last: 0 });
   const [layoutTick, setLayoutTick] = useState(0);
+  const geometryStableRef = useRef(false);
+  const restoredFolderRef = useRef<string | null>(null);
+  const restoredMainRef = useRef<HTMLElement | null>(null);
 
   // 滚动时（rAF 节流）记录该目录的滚动位置；只在虚拟窗口（文件夹/图片两区）
   // 发生变化时才 setScrollTop 触发整树重渲——小幅度滚动（仍在同一行内）不重渲，
   // 护住目录多/图多场景的帧率。
   const lastWindowKeyRef = useRef('');
   const scrollAnimPauseTimerRef = useRef<number | null>(null);
-  // 滚动开始时给主区加 .sk-scrolling（暂停 loading 闪烁动画），停止 ~400ms 恢复。
+  const nativeScrollEndRef = useRef(false);
+  // 滚动开始时给主区加 .sk-scrolling；优先用 scrollend 恢复，旧内核用短延时兜底。
   const setScrollingClass = (node: HTMLElement, scrolling: boolean): void => {
     node.classList.toggle('sk-scrolling', scrolling);
+    setThumbnailPreloadPaused(scrolling);
   };
   const onMainScroll = useCallback(() => {
     const el = mainScrollRef.current;
     if (!el || !currentFolderId) return;
+    const scrolledFolderId = currentFolderId;
     setScrollingClass(el, true);
-    if (scrollAnimPauseTimerRef.current != null) window.clearTimeout(scrollAnimPauseTimerRef.current);
-    // 滚动中窗口留得更久一点（400ms）：快速滚动/拖动期间持续挂载的新行
-    // 都会命中 .sk-scrolling → 跳过入场动画，滚动过程卡片保持清晰可见。
-    scrollAnimPauseTimerRef.current = window.setTimeout(() => {
-      scrollAnimPauseTimerRef.current = null;
-      const node = mainScrollRef.current;
-      if (node) setScrollingClass(node, false);
-    }, 400);
+    if (!nativeScrollEndRef.current) {
+      if (scrollAnimPauseTimerRef.current != null) window.clearTimeout(scrollAnimPauseTimerRef.current);
+      scrollAnimPauseTimerRef.current = window.setTimeout(() => {
+        scrollAnimPauseTimerRef.current = null;
+        const node = mainScrollRef.current;
+        if (node) setScrollingClass(node, false);
+      }, 180);
+    }
     if (scrollSaveFrameRef.current != null) return; // 已排队待写
     scrollSaveFrameRef.current = requestAnimationFrame(() => {
       scrollSaveFrameRef.current = null;
       const t0 = performance.now();
+      if (currentFolderIdRef.current !== scrolledFolderId) return;
       const node = mainScrollRef.current;
       if (!node) return;
       const st = node.scrollTop;
-      scrollPositionsRef.current.set(currentFolderId, st); // 位置记忆始终更新
-      const fw = windowRowsFor(folderMetricsRef.current, st, childFolderCards.length);
-      const gw = windowRowsFor(galleryMetricsRef.current, st, folderImages.length);
-      const key = `${fw.first}:${fw.last}|${gw.first}:${gw.last}`;
+      scrollPositionsRef.current.set(scrolledFolderId, st); // 位置记忆始终更新
+      const fw = stableWindowRowsFor(folderMetricsRef.current, st, childFolderCards.length);
+      const gw = stableWindowRowsFor(galleryMetricsRef.current, st, folderImages.length);
+      const key = `${scrolledFolderId}|${viewMode}|${fw.first}:${fw.last}|${gw.first}:${gw.last}`;
       if (key !== lastWindowKeyRef.current) {
         lastWindowKeyRef.current = key;
         setScrollTop(st);
@@ -419,43 +548,73 @@ export function LibraryBrowser({
       // 上报滚动回调耗时（设置页“调试→帧率与滚动性能”面板）。
       recordScrollFrame(performance.now() - t0);
     });
-  }, [currentFolderId, childFolderCards.length, folderImages.length]);
+  }, [currentFolderId, childFolderCards.length, folderImages.length, viewMode]);
+
+  useLayoutEffect(() => {
+    currentFolderIdRef.current = currentFolderId;
+  }, [currentFolderId]);
 
   // 主滚动容器尺寸变化（窗口缩放 / 侧栏调宽）时重新度量。
   useEffect(() => {
+    if (showSettings) return;
     const main = mainScrollRef.current;
     if (!main) return;
+    nativeScrollEndRef.current = 'onscrollend' in main;
+    const finishScrolling = (): void => setScrollingClass(main, false);
+    if (nativeScrollEndRef.current) main.addEventListener('scrollend', finishScrolling);
     const ro = new ResizeObserver(() => setLayoutTick((t) => t + 1));
     ro.observe(main);
     return () => {
       ro.disconnect();
-      if (scrollAnimPauseTimerRef.current != null) window.clearTimeout(scrollAnimPauseTimerRef.current);
+      if (nativeScrollEndRef.current) main.removeEventListener('scrollend', finishScrolling);
+      nativeScrollEndRef.current = false;
+      if (scrollSaveFrameRef.current != null) {
+        cancelAnimationFrame(scrollSaveFrameRef.current);
+        scrollSaveFrameRef.current = null;
+      }
+      if (scrollAnimPauseTimerRef.current != null) {
+        window.clearTimeout(scrollAnimPauseTimerRef.current);
+        scrollAnimPauseTimerRef.current = null;
+      }
       main.classList.remove('sk-scrolling');
+      setThumbnailPreloadPaused(false);
     };
-  }, []);
+  }, [showSettings]);
 
-  // 度量两个虚拟区（子文件夹 / 图片）的列数、真实卡片高度、相对主容器的偏移
-  // 与视口高度。各自用同构探测卡量高度（含 figcaption/边框），行高无累积漂移；
-  // 文件夹卡片与图片卡片 caption 高度不同，因此分开度量。
+  // 度量两个虚拟表面（子图包 / 图片）的列数、卡片高度、真实内容偏移与视口高度。
+  // 网格媒体高度由当前列宽直接计算，探测卡只负责标题区高度，避免视图切换时读取到
+  // 上一帧列数对应的探测宽度；列表则使用与 CSS 一致的固定行高。子图包几何改变后
+  // 会再收敛一次，因为它会推移后方图片表面的内容坐标。
   useLayoutEffect(() => {
     const main = mainScrollRef.current;
     if (!main) return;
+    geometryStableRef.current = false;
+    const snapPixel = (value: number): number => Math.round(value * 64) / 64;
     const measure = (
-      section: HTMLElement | null,
+      surface: HTMLDivElement | null,
       probe: HTMLDivElement | null,
+      listCardHeight: number,
       fallbackCaptionH: number,
+      mediaAspect: number,
     ): GalleryMetrics => {
-      if (!section) {
+      if (!surface) {
         return { cols: 1, cardHeight: 0, rowHeight: 0, galleryTop: 0, viewportH: 0 };
       }
-      const sectionW = section.clientWidth;
-      const { minCard, gap } = gridUnits();
-      const cols = Math.max(1, Math.floor((sectionW + gap) / (minCard + gap)));
+      const sectionW = surface.clientWidth;
+      const { minCard, gap, fixedCols } = gridUnits(viewMode);
+      const cols = fixedCols ?? Math.max(1, Math.floor((sectionW + gap) / (minCard + gap)));
       const estCardW = (sectionW - gap * (cols - 1)) / cols;
-      const cardHeight = probe?.offsetHeight || estCardW * 0.75 + fallbackCaptionH;
-      const rowHeight = cardHeight + gap;
-      const offset =
-        section.getBoundingClientRect().top - main.getBoundingClientRect().top + main.scrollTop;
+      const media = probe?.querySelector<HTMLElement>('.desktop-package-cover, .desktop-photo-frame');
+      const measuredCaptionH = probe && media
+        ? Math.max(0, probe.offsetHeight - media.offsetHeight)
+        : fallbackCaptionH;
+      const cardHeight = snapPixel(viewMode === 'list'
+        ? listCardHeight
+        : estCardW * mediaAspect + measuredCaptionH);
+      const rowHeight = snapPixel(cardHeight + gap);
+      const offset = snapPixel(
+        surface.getBoundingClientRect().top - main.getBoundingClientRect().top + main.scrollTop,
+      );
       return { cols, cardHeight, rowHeight, galleryTop: offset, viewportH: main.clientHeight };
     };
     const same = (a: GalleryMetrics, b: GalleryMetrics): boolean =>
@@ -464,28 +623,61 @@ export function LibraryBrowser({
       a.rowHeight === b.rowHeight &&
       a.galleryTop === b.galleryTop &&
       a.viewportH === b.viewportH;
-    const nextFolder = measure(folderSectionRef.current, folderProbeCardRef.current, 46);
-    const nextGallery = measure(gallerySectionRef.current, probeCardRef.current, 42);
-    setFolderMetrics((prev) => (same(prev, nextFolder) ? prev : nextFolder));
-    setGalleryMetrics((prev) => (same(prev, nextGallery) ? prev : nextGallery));
-  }, [folderImages.length, childFolderCards.length, searchQuery, selectedFolderId, snapshot, sidebarHidden, sidebarWidth, layoutTick]);
+    const nextFolder = measure(
+      folderSurfaceRef.current,
+      folderProbeCardRef.current,
+      LIST_FOLDER_CARD_HEIGHT,
+      46,
+      10.5 / 16,
+    );
+    const nextGallery = measure(
+      gallerySurfaceRef.current,
+      probeCardRef.current,
+      LIST_IMAGE_CARD_HEIGHT,
+      42,
+      3 / 4,
+    );
+    const folderChanged = !same(folderMetrics, nextFolder);
+    const galleryChanged = !same(galleryMetrics, nextGallery);
+    geometryStableRef.current = !folderChanged && !galleryChanged;
+    if (folderChanged) setFolderMetrics(nextFolder);
+    if (galleryChanged) setGalleryMetrics(nextGallery);
+  }, [folderImages.length, childFolderCards.length, searchQuery, selectedFolderId, snapshot, sidebarHidden, sidebarWidth, layoutTick, viewMode, showNames, showSettings, inspectorOpen, folderMetrics, galleryMetrics]);
 
   // 最新度量同步到 ref：滚动窗口计算/方向预取在 rAF/effect 里读取，避免陈旧值。
-  useEffect(() => {
+  useLayoutEffect(() => {
     galleryMetricsRef.current = galleryMetrics;
     folderMetricsRef.current = folderMetrics;
   }, [galleryMetrics, folderMetrics]);
 
-  // 切换目录后恢复该目录上次浏览位置（首次进入为顶部）。主区启用了
-  // scroll-smooth，恢复动作为“柔和滑回”；但要等各 section 的虚拟化度量就绪
-  // （行高准确、内容高度真实）再执行，否则平滑滚动会在内容还没撑高时先被
-  // 钳到 0，出现“先跳顶再滑回”的抽搐。
+  const lastScrollTopRef = useRef(0);
+  const lastDirectionalKeyRef = useRef('');
+  const directionalTokenRef = useRef<{ cancelled: boolean } | null>(null);
+
+  // 切换目录或主区重新挂载后恢复一次历史位置。视图/尺寸变化时不重写
+  // 旧像素坐标，只读取浏览器 clamp 后的实际位置并同步虚拟窗口。
   useLayoutEffect(() => {
     const el = mainScrollRef.current;
     if (!el) return;
+    if (!geometryStableRef.current) return;
     if (childFolderCards.length > 0 && folderMetrics.rowHeight <= 0) return;
     if (folderImages.length > 0 && galleryMetrics.rowHeight <= 0) return;
-    el.scrollTop = scrollPositionsRef.current.get(currentFolderId) ?? 0;
+    const needsRestore = restoredFolderRef.current !== currentFolderId || restoredMainRef.current !== el;
+    if (needsRestore) {
+      el.scrollTop = scrollPositionsRef.current.get(currentFolderId) ?? 0;
+      restoredFolderRef.current = currentFolderId;
+      restoredMainRef.current = el;
+    }
+    const actualTop = el.scrollTop;
+    scrollPositionsRef.current.set(currentFolderId, actualTop);
+    const folderWindow = stableWindowRowsFor(folderMetrics, actualTop, childFolderCards.length);
+    const galleryWindow = stableWindowRowsFor(galleryMetrics, actualTop, folderImages.length);
+    lastWindowKeyRef.current = `${currentFolderId}|${viewMode}|${folderWindow.first}:${folderWindow.last}|${galleryWindow.first}:${galleryWindow.last}`;
+    lastScrollTopRef.current = actualTop;
+    lastDirectionalKeyRef.current = '';
+    if (directionalTokenRef.current) directionalTokenRef.current.cancelled = true;
+    directionalTokenRef.current = null;
+    setScrollTop((current) => (current === actualTop ? current : actualTop));
   }, [
     selectedFolderId,
     snapshot,
@@ -494,15 +686,14 @@ export function LibraryBrowser({
     currentFolderId,
     childFolderCards.length,
     folderImages.length,
+    showSettings,
+    viewMode,
+    layoutTick,
   ]);
 
   // —— 滚动方向预取（P3）：按方向把“下一屏”缩略图以优先级 1 排入 worker，
   // 抢在整目录后台预热（优先级 2）之前生成，快速滚动时白格明显减少。
   // 与安卓 RecyclerView 的 prefetch（滚动时预解码下一屏）同思路。 ——
-  const lastScrollTopRef = useRef(0);
-  const lastDirectionalKeyRef = useRef('');
-  const directionalTokenRef = useRef<{ cancelled: boolean } | null>(null);
-
   useEffect(() => {
     if (folderImages.length === 0 || !isPrefetchEnabled()) return;
     const st = scrollTop;
@@ -574,11 +765,10 @@ export function LibraryBrowser({
     };
   }, [snapshot, childFolders, store]);
 
-  // 当前目录的其余图片（优先级 1）：不仅仅加载“点击过/可见”的图，整个目录的
-// 缩略图都按顺序排入 worker 后台生成。可见请求仍最高优先级插队在前；预取
-// 命中后，滚动到任意位置都直接出图（配合磁盘缓存，重启后同样免解码）。
+  // 当前图包使用独立的优先级 2。切换图包时，这批请求会把同键的全库预热
+  // 从优先级 4 提升；主进程按缓存键合并任务，因此只迁移队列位置，不重复解码。
   useEffect(() => {
-    if (!snapshot) return;
+    if (!snapshot || !isPrefetchEnabled()) return;
     const token = { cancelled: false };
     const targets: FileRef[] = folderImages.map((img) => ({
       id: img.fileRefId ?? img.id,
@@ -588,37 +778,46 @@ export function LibraryBrowser({
       size: img.size,
     }));
     if (targets.length === 0) return;
-    if (!isPrefetchEnabled()) return; // 设置页“调试→预取开关”可关闭
     preloadThumbnails(store, targets, {
+      concurrency: 2,
       priority: THUMB_PRIORITY_CURRENT_DIR,
-      // 并发 2 → 4（与主进程 worker 数对齐）：5000 张的整目录预取等待时间减半；
-      // 可见请求会按需升级插队，因此稍高的并发不会拖慢正在显示的图。
-      concurrency: 4,
+      recheck: true,
       shouldStop: () => token.cancelled,
     });
-    logDebug('prefetch', `当前目录预取 P1：${folderImages.length} 张 → ${selectedFolder?.name ?? '根'}`);
+    logDebug('prefetch', `当前图包预取：${targets.length} 张`);
     return () => {
       token.cancelled = true;
     };
   }, [snapshot, selectedFolderId, folderImages, store]);
 
-  // 启动即全库低优先级预热（优先级 3）：打开应用后就按“当前目录（初始为根目录）
-  // 优先 → 其余随后”的顺序，把整个图库的缩略图排入 worker 后台生成，可见的图
-  // 仍最高优先级插队。已生成的条目落盘（userData/thumbcache），重启直接读盘。
-  // 仅随快照变化（刷新/导入后）重启预热，切换目录不中断。
+  // 全库缩略图在应用空闲后以最低优先级生成并载入会话缓存。滚动开始时调度器会
+  // 暂停这一级任务，只保留可见项和下一屏预取；停止滚动后从原位置继续。即使
+  // 渲染端 LRU 后续淘汰了较早的 Blob，Electron 磁盘缓存仍保留已编码缩略图，
+  // 再次浏览只需读取缓存，不会现场解码原图。
   useEffect(() => {
-    if (!snapshot) return;
+    if (!snapshot || !isPrefetchEnabled()) return;
     const token = { cancelled: false };
-    const folderImageIds = new Set(directImagesOf(snapshot, snapshot.rootId).map((img) => img.id));
-    const all = Object.values(snapshot.images);
-    const ordered: FileRef[] = [
-      ...all.filter((img) => folderImageIds.has(img.id)),
-      ...all.filter((img) => !folderImageIds.has(img.id)),
-    ].map((img) => ({ id: img.fileRefId ?? img.id, name: img.name, kind: 'file', mtime: img.mtime, size: img.size }));
-    if (ordered.length === 0) return;
-    if (!isPrefetchEnabled()) return; // 设置页“调试→预取开关”可关闭
-    preloadThumbnails(store, ordered, { priority: THUMB_PRIORITY_WARMUP, shouldStop: () => token.cancelled });
-    logDebug('prefetch', `全库预热 P3：${ordered.length} 张（当前目录 ${folderImageIds.size} 张优先）`);
+    const targets: FileRef[] = Object.values(snapshot.images).map((img) => ({
+      id: img.fileRefId ?? img.id,
+      name: img.name,
+      kind: 'file',
+      mtime: img.mtime,
+      size: img.size,
+    }));
+    if (targets.length === 0) return;
+    const start = (): void => {
+      preloadThumbnails(store, targets, {
+        concurrency: 2,
+        priority: THUMB_PRIORITY_WARMUP,
+        shouldStop: () => token.cancelled,
+      });
+      logDebug('prefetch', `全库空闲预热：${targets.length} 张`);
+    };
+    if (typeof requestIdleCallback === 'function') {
+      requestIdleCallback(start, { timeout: 2000 });
+    } else {
+      window.setTimeout(start, 250);
+    }
     return () => {
       token.cancelled = true;
     };
@@ -629,13 +828,26 @@ export function LibraryBrowser({
   const selectedParentFolder = selectedFolder?.parentId ? snapshot?.folders[selectedFolder.parentId] ?? null : null;
   const runtimeLabel =
     (window as { kanituDesktop?: { platform?: string } }).kanituDesktop?.platform === 'electron'
-      ? 'Electron 模式 v0.5 · daisyUI 5'
-      : 'Web 模式 v0.5 · daisyUI 5';
+      ? 'Electron 本地图库'
+      : 'Web 演示图库';
   const isRootSelected = !selectedFolderId || selectedFolderId === snapshot?.rootId;
+  const selectedImages = useMemo(
+    () => folderImages.filter((image) => selectedImageIds.has(image.id)),
+    [folderImages, selectedImageIds],
+  );
+  const allLibraryImages = useMemo(() => (snapshot ? Object.values(snapshot.images) : []), [snapshot]);
+  const libraryBytes = useMemo(
+    () => allLibraryImages.reduce((sum, image) => sum + image.size, 0),
+    [allLibraryImages],
+  );
   // 文件夹级模糊状态：统计当前相册（含所有子文件夹）里逐图标记的数量。
   const folderAllImages = useMemo(
     () => (snapshot && selectedFolder ? imagesOf(snapshot, selectedFolder.id) : []),
     [snapshot, selectedFolder],
+  );
+  const folderBytes = useMemo(
+    () => folderAllImages.reduce((sum, image) => sum + image.size, 0),
+    [folderAllImages],
   );
   const blurredInFolderCount = useMemo(
     () => folderAllImages.reduce((n, img) => n + (blurredImages.has(img.relPath) ? 1 : 0), 0),
@@ -655,10 +867,14 @@ export function LibraryBrowser({
   }, [snapshot, selectedFolder]);
 
   const cover = useMemo(() => {
-    if (!selectedFolder || !snapshot) return null;
-    const images = imagesOf(snapshot, selectedFolder.id);
-    return pickCover(images, { preferredId: pinnedCovers[selectedFolder.id] });
-  }, [snapshot, selectedFolder, pinnedCovers]);
+    if (!inspectorOpen || !selectedFolder || !snapshot) return null;
+    return pickCover(folderAllImages, { preferredId: pinnedCovers[selectedFolder.id] });
+  }, [folderAllImages, inspectorOpen, snapshot, selectedFolder, pinnedCovers]);
+
+  useEffect(() => {
+    setSelectedImageIds(new Set());
+    lastSelectedImageRef.current = null;
+  }, [currentFolderId, searchQuery]);
 
   const toggleFolder = useCallback((id: string) => {
     setExpandedFolders((prev) => {
@@ -675,6 +891,15 @@ export function LibraryBrowser({
   // 仅切换选中目录（不含任何历史记录逻辑，供前进/后退与普通导航复用）。
   const selectFolderRaw = useCallback(
     (folderId: string) => {
+      const outgoingId = currentFolderIdRef.current;
+      const main = mainScrollRef.current;
+      if (main && outgoingId) scrollPositionsRef.current.set(outgoingId, main.scrollTop);
+      if (scrollSaveFrameRef.current != null) {
+        cancelAnimationFrame(scrollSaveFrameRef.current);
+        scrollSaveFrameRef.current = null;
+      }
+      // 立即使已排队的旧目录 rAF 失效，不等下一次 layout effect。
+      currentFolderIdRef.current = folderId;
       setSelectedFolderId(folderId);
       const folder = snapshot?.folders[folderId];
       if (folder && folder.childCount > 0) {
@@ -717,6 +942,7 @@ export function LibraryBrowser({
   // 当作页面历史导航的行为（主进程 will-navigate 也会兜底阻止整页刷新）。
   useEffect(() => {
     const navigateByMouseButton = (button: number) => {
+      if (showSettings) return;
       const active = document.activeElement;
       if (
         active &&
@@ -752,7 +978,7 @@ export function LibraryBrowser({
       window.removeEventListener('mouseup', onSideButton);
       window.removeEventListener('auxclick', onSideButton);
     };
-  }, [viewerImageId, folderImages, handleNavBack, handleNavForward]);
+  }, [viewerImageId, folderImages, handleNavBack, handleNavForward, showSettings]);
 
   const handleGoUp = useCallback(() => {
     if (!snapshot || !selectedFolder?.parentId) return;
@@ -763,6 +989,75 @@ export function LibraryBrowser({
   const handleGoRoot = useCallback(() => {
     if (rootFolder) handleSelectFolder(rootFolder);
   }, [rootFolder, handleSelectFolder]);
+
+  const selectImage = useCallback((
+    image: ImageEntry,
+    checked: boolean,
+    shiftKey: boolean,
+  ) => {
+    setSelectedImageIds((current) => {
+      if (shiftKey && lastSelectedImageRef.current) {
+        const anchor = folderImages.findIndex((item) => item.id === lastSelectedImageRef.current);
+        const target = folderImages.findIndex((item) => item.id === image.id);
+        if (anchor >= 0 && target >= 0) {
+          const [start, end] = anchor < target ? [anchor, target] : [target, anchor];
+          const next = new Set(current);
+          folderImages.slice(start, end + 1).forEach((item) => {
+            if (checked) next.add(item.id);
+            else next.delete(item.id);
+          });
+          lastSelectedImageRef.current = image.id;
+          return next;
+        }
+      }
+      lastSelectedImageRef.current = image.id;
+      const next = new Set(current);
+      if (checked) next.add(image.id);
+      else next.delete(image.id);
+      return next;
+    });
+  }, [folderImages]);
+
+  const selectAllImages = useCallback(() => {
+    setSelectedImageIds(new Set(folderImages.map((image) => image.id)));
+  }, [folderImages]);
+
+  const clearImageSelection = useCallback(() => {
+    setSelectedImageIds(new Set());
+    lastSelectedImageRef.current = null;
+  }, []);
+
+  const toggleSelectedBlur = useCallback(() => {
+    if (selectedImages.length === 0) return;
+    const allBlurred = selectedImages.every((image) => blurredImages.has(image.relPath));
+    setBlurredImages((current) => {
+      const next = new Set(current);
+      selectedImages.forEach((image) => {
+        if (allBlurred) next.delete(image.relPath);
+        else next.add(image.relPath);
+      });
+      saveBlurredImages(next);
+      return next;
+    });
+    notify(allBlurred ? '已取消所选图片的隐私预览。' : '已为所选图片开启隐私预览。');
+  }, [blurredImages, notify, selectedImages]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (showSettings) return;
+      if (event.defaultPrevented || document.querySelector('.context-menu, .modal.modal-open')) return;
+      const target = event.target as HTMLElement | null;
+      const typing = target?.matches('input, textarea, select, [contenteditable="true"]') ?? false;
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a' && !typing && !viewerImageId) {
+        event.preventDefault();
+        selectAllImages();
+      } else if (event.key === 'Escape' && selectedImageIds.size > 0 && !viewerImageId) {
+        clearImageSelection();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [clearImageSelection, selectAllImages, selectedImageIds.size, viewerImageId, showSettings]);
 
   // In the viewer: switch to a sibling folder (same level) and show its first image.
   const handleViewerSwitchSibling = useCallback(
@@ -791,12 +1086,13 @@ export function LibraryBrowser({
           notify(`导入中：已扫描 ${p.scanned}，已复制 ${p.copied}，已跳过 ${p.skipped}`),
       });
       setImportReport(task);
+      setShowImportReport(true);
       const next = await refresh();
       const importedTopFolder = Object.values(next.folders).find(
         (folder) => folder.parentId === next.rootId && folder.name === task.targetTopFolder,
       );
       if (importedTopFolder) {
-        setSelectedFolderId(importedTopFolder.id);
+        selectFolderRaw(importedTopFolder.id);
         setExpandedFolders((prev) => {
           const nextSet = new Set(prev);
           nextSet.add(importedTopFolder.id);
@@ -817,7 +1113,7 @@ export function LibraryBrowser({
 
   const openOrganizePreviewFor = (folder: FolderNode) => {
     if (!snapshot || !folder) return;
-    setSelectedFolderId(folder.id);
+    selectFolderRaw(folder.id);
     setOrganizePreview(organizeByFolder(imagesOf(snapshot, folder.id), { customRules }));
     setOrganizeResult(null);
     setOrganizeProgress(null);
@@ -889,7 +1185,7 @@ export function LibraryBrowser({
       });
       setExportProgress(null);
       if (result.kind === 'blob' && result.blob) {
-        const base = folder.relPath ? folder.relPath.split('/').pop() : '相册';
+        const base = folder.relPath ? folder.relPath.split('/').pop() : '全部图包';
         downloadBlob(result.blob, `${base}.zip`);
         notify(`已导出 ${result.exportedCount} 张图片为 ZIP。`);
       } else if (result.outputPath) {
@@ -918,7 +1214,7 @@ export function LibraryBrowser({
     try {
       await deleteLibraryFolder(store, folder.relPath);
       await refresh();
-      if (parentId) setSelectedFolderId(parentId);
+      if (parentId) selectFolderRaw(parentId);
       notify(`已删除“${name}”。`);
     } catch (err) {
       notify(`删除失败：${String(err)}`);
@@ -983,7 +1279,7 @@ export function LibraryBrowser({
       savePinnedCovers(next);
       return next;
     });
-    notify(imageId ? `已将“${imageName ?? '该图片'}”设为相册封面。` : '已取消固定封面。');
+    notify(imageId ? `已将“${imageName ?? '该图片'}”设为图包封面。` : '已取消固定封面。');
   }, [notify]);
 
   const handleRenameImage = (image: ImageEntry) => {
@@ -1049,7 +1345,7 @@ export function LibraryBrowser({
       const next = await refresh();
       const created = Object.values(next.folders).find((item) => item.relPath === createdRel);
       if (created) {
-        setSelectedFolderId(created.id);
+        selectFolderRaw(created.id);
         setExpandedFolders((prev) => {
           const nextSet = new Set(prev);
           nextSet.add(folder.id);
@@ -1163,166 +1459,174 @@ export function LibraryBrowser({
     return items;
   };
 
+  const buildFolderMenuRef = useRef(buildFolderMenu);
+  buildFolderMenuRef.current = buildFolderMenu;
+  const handleFolderContextMenu = useCallback((event: ReactMouseEvent, folder: FolderNode) => {
+    openContextMenu(event, buildFolderMenuRef.current(folder));
+  }, [openContextMenu]);
+
   const viewerImages = folderImages;
-  const viewerIndex = viewerImages.findIndex((img) => img.id === viewerImageId);
+  const viewerIndex = viewerImageId ? viewerImages.findIndex((img) => img.id === viewerImageId) : -1;
   const isEmptyLibrary = childFolderCards.length === 0 && folderImages.length === 0;
 
+  useEffect(() => {
+    if (viewerImageId && viewerIndex < 0) setViewerImageId(null);
+  }, [viewerImageId, viewerIndex]);
+
+  const workspaceTitle = isRootSelected ? '全部图包' : selectedFolder?.name ?? '图包';
+  const workspaceMeta = isRootSelected
+    ? `${childFolders.length} 个图包 · ${allLibraryImages.length} 个文件 · ${formatBytes(libraryBytes)}`
+    : `${selectedFolder?.directImageCount ?? 0} 张直属图片 · ${selectedFolder?.childCount ?? 0} 个子图包 · ${formatBytes(folderBytes)}`;
+
+  if (showSettings) {
+    return (
+      <div
+        className="desktop-library app-shell h-screen"
+        data-view={viewMode}
+        data-sidebar={sidebarHidden ? 'closed' : 'open'}
+        data-inspector={inspectorOpen ? 'open' : 'closed'}
+      >
+        <SettingsPage
+          rules={customRules}
+          onChange={handleCustomRulesChange}
+          onBack={() => {
+            setShowSettings(false);
+            requestAnimationFrame(() => settingsButtonRef.current?.focus());
+          }}
+          runtimeLabel={runtimeLabel}
+          sidebarWidth={sidebarWidth}
+          onSidebarWidthChange={setSidebarWidth}
+          theme={theme}
+          accent={accent}
+          onThemeChange={setTheme}
+          onAccentChange={setAccent}
+        />
+      </div>
+    );
+  }
+
   return (
-    <div className="app-shell flex h-screen flex-col">
-      <TitleBar />
-      <div className={'drawer flex-1 min-h-0' + (sidebarHidden ? '' : ' lg:drawer-open')}>
+    <div
+      className="desktop-library app-shell flex h-screen flex-col"
+      data-view={viewMode}
+      data-sidebar={sidebarHidden ? 'closed' : 'open'}
+      data-inspector={inspectorOpen ? 'open' : 'closed'}
+    >
+      <TitleBar
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+        searchPlaceholder={isRootSelected ? '搜索图包' : '搜索当前图包'}
+        theme={theme}
+        onThemeChange={setTheme}
+        busy={busy}
+        onImport={() => void handleAdd()}
+      />
+      <div className={'drawer desktop-drawer flex-1 min-h-0' + (sidebarHidden ? '' : ' is-sidebar-open')}>
         <input id="app-drawer" type="checkbox" className="drawer-toggle" checked={!sidebarHidden} onChange={(event) => setSidebarHidden(!event.target.checked)} />
 
-      <div className="drawer-content flex flex-col min-h-0">
-        <div className="navbar bg-base-200 border-b border-base-300 px-4 gap-2 sticky top-0 z-10">
-          <div className="flex-none lg:hidden">
-            <label htmlFor="app-drawer" className="btn btn-square btn-ghost" aria-label="打开侧边栏">☰</label>
-          </div>
-          <div className="flex-none flex items-center gap-1">
-            <NavIconButton
-              onClick={() => setSidebarHidden((value) => !value)}
-              className="hidden lg:inline-flex"
-              title={sidebarHidden ? '显示侧边栏' : '隐藏侧边栏'}
-            >
-              <PanelLeftIcon />
-            </NavIconButton>
-            <NavIconButton onClick={handleNavBack} disabled={!canGoBack(nav)} title="后退">
-              <ArrowLeftIcon />
-            </NavIconButton>
-            <NavIconButton onClick={handleNavForward} disabled={!canGoForward(nav)} title="前进">
-              <ArrowRightIcon />
-            </NavIconButton>
-            <NavIconButton onClick={handleGoUp} disabled={!selectedParentFolder} title="上一级目录">
-              <FolderUpIcon />
-            </NavIconButton>
-            <NavIconButton onClick={handleGoRoot} disabled={isRootSelected} active={isRootSelected} title="全部相册">
-              <HomeIcon />
-            </NavIconButton>
-          </div>
-          <div className="flex-1 min-w-0">
-            <nav className="breadcrumbs text-sm" aria-label="面包屑">
-              <ul>
-                {crumbs.map((crumb, i) => (
-                  <li key={crumb.id} className={i === crumbs.length - 1 ? 'font-semibold' : ''}>
-                    {i < crumbs.length - 1 ? (
-                      <a className="link link-hover" onClick={() => handleSelectFolder(crumb)}>{crumb.name}</a>
-                    ) : (
-                      <span>{crumb.name}</span>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </nav>
-          </div>
-          <div className="flex-none">
-            <ThemeToggle />
-          </div>
-        </div>
-
-        <div className="bg-base-100 px-4 lg:px-8 py-3 flex flex-col gap-3 lg:flex-row lg:items-end justify-between">
-          <div className="min-w-0">
-            <div className="min-w-0">
-              <h2 className="text-2xl font-bold min-w-0">{selectedFolder?.name ?? '全部相册'}</h2>
-              {(selectedFolder || cover) && (
-                <div className="mt-1 text-sm opacity-70 flex flex-wrap gap-x-4 gap-y-1">
-                  {selectedFolder && (
-                    <span>{selectedFolder.imageCount} 图片 / {selectedFolder.childCount} 子目录</span>
-                  )}
-                  {blurredInFolderCount > 0 && (
-                    <span>隐私预览 {blurredInFolderCount} 张</span>
-                  )}
-                  {cover && (
-                    <span>
-                      封面：{snapshot?.images[cover.imageId]?.name ?? cover.imageId}
-                      {selectedFolder && pinnedCovers[selectedFolder.id] != null && '（已固定）'}
+      <div className="drawer-content desktop-content-shell min-h-0">
+        <section className="desktop-workspace">
+          <header className="desktop-workspace-header">
+            <div className="desktop-workspace-nav">
+              <div className="desktop-history-actions">
+                <DesktopIconButton label={sidebarHidden ? '显示侧栏' : '隐藏侧栏'} onClick={() => setSidebarHidden((value) => !value)}>
+                  <SidebarSimple size={17} />
+                </DesktopIconButton>
+                <DesktopIconButton label="后退" disabled={!canGoBack(nav)} onClick={handleNavBack}><ArrowLeft size={16} /></DesktopIconButton>
+                <DesktopIconButton label="前进" disabled={!canGoForward(nav)} onClick={handleNavForward}><ArrowRight size={16} /></DesktopIconButton>
+                <DesktopIconButton label="上一级图包" disabled={!selectedParentFolder} onClick={handleGoUp}><ArrowUp size={16} /></DesktopIconButton>
+              </div>
+              <nav className="desktop-breadcrumbs" aria-label="面包屑">
+                {crumbs.map((crumb, index) => {
+                  const label = index === 0 ? '全部图包' : crumb.name;
+                  const current = index === crumbs.length - 1;
+                  return (
+                    <span key={crumb.id} className="desktop-breadcrumb-item">
+                      {current ? <strong>{label}</strong> : <button type="button" onClick={() => handleSelectFolder(crumb)}>{label}</button>}
+                      {!current && <CaretRight size={11} />}
                     </span>
-                  )}
-                </div>
-              )}
+                  );
+                })}
+              </nav>
             </div>
-          </div>
-          <div className="flex flex-none shrink-0 flex-wrap justify-start lg:justify-end gap-2">
-            <button className="btn btn-primary btn-sm" disabled={busy} onClick={handleAdd}>导入相册</button>
-            <button className="btn btn-ghost btn-sm" disabled={!selectedFolder} onClick={() => void refresh()}>刷新</button>
-            <button className="btn btn-ghost btn-sm" disabled={!selectedFolder} onClick={openOrganizePreview}>整理</button>
-            <button className="btn btn-ghost btn-sm" disabled={!lastManifest || busy} onClick={handleUndoOrganize}>撤销</button>
-            <button className="btn btn-ghost btn-sm" disabled={!selectedFolder || busy || exporting} onClick={handleExport}>
-              {exporting ? '导出中…' : '导出 ZIP'}
-            </button>
-            <button className="btn btn-error btn-sm btn-outline" disabled={!selectedFolder || !selectedFolder.relPath || busy || exporting} onClick={requestDelete}>删除</button>
-            {importReport && <button className="btn btn-ghost btn-sm" onClick={() => setImportReport(importReport)}>报告</button>}
-          </div>
-        </div>
+            <div className="desktop-workspace-title-row">
+              <div className="desktop-workspace-title">
+                <h1>{workspaceTitle}</h1>
+                <span>{workspaceMeta}</span>
+              </div>
+              <div className="desktop-view-controls">
+                <label className="desktop-sort-control">
+                  <SortAscending size={15} />
+                  <select value={sortMode} onChange={(event) => setSortMode(event.target.value as SortMode)} aria-label="排序方式">
+                    <option value="name">名称</option>
+                    <option value="modified">最近修改</option>
+                    <option value="size">占用空间</option>
+                  </select>
+                </label>
+                <div className="desktop-segmented-control" role="group" aria-label="视图方式">
+                  <button type="button" className={viewMode === 'grid' ? 'is-active' : ''} aria-label="平铺视图" aria-pressed={viewMode === 'grid'} title="平铺视图" onClick={() => setViewMode('grid')}><SquaresFour size={16} /></button>
+                  <button type="button" className={viewMode === 'list' ? 'is-active' : ''} aria-label="列表视图" aria-pressed={viewMode === 'list'} title="列表视图" onClick={() => setViewMode('list')}><Rows size={16} /></button>
+                </div>
+                {viewMode === 'grid' && <DesktopIconButton label={showNames ? '隐藏文件名' : '显示文件名'} active={showNames} onClick={() => setShowNames((value) => !value)}><Info size={16} /></DesktopIconButton>}
+                <DesktopIconButton label={inspectorOpen ? '收起检查器' : '显示检查器'} active={inspectorOpen} onClick={() => setInspectorOpen((value) => !value)}><SidebarSimple size={17} /></DesktopIconButton>
+              </div>
+            </div>
+          </header>
 
-        <main className={'flex-1 overflow-y-auto p-5 lg:p-8 [overflow-anchor:none]' + (isEmptyLibrary ? ' flex flex-col' : '')} ref={mainScrollRef} onScroll={onMainScroll}>
+        <main className={'desktop-media-canvas [overflow-anchor:none]' + (isEmptyLibrary ? ' is-empty' : '')} ref={mainScrollRef} onScroll={onMainScroll}>
           {childFolderCards.length > 0 && (
-            <section className="mb-8" ref={folderSectionRef}>
-              <h3 className="text-sm font-semibold opacity-70 mb-3">子文件夹</h3>
+            <section className="desktop-content-section">
+              {!isRootSelected && <h2 className="desktop-section-heading">子图包</h2>}
               {/* 文件夹区虚拟化（同图片区）：目录多时只挂载可视行 ± 缓冲，DOM 稳定 */}
               {(() => {
-                const { cols, rowHeight, galleryTop, viewportH } = folderMetrics;
-                const gridGap = gridUnits().gap;
+                const { cols, rowHeight } = folderMetrics;
+                const gridGap = gridUnits(viewMode).gap;
                 const totalRows = cols > 0 ? Math.ceil(childFolderCards.length / cols) : 0;
                 if (totalRows === 0) return null;
-                const gs = Math.max(0, scrollTop - galleryTop);
-                const firstRow =
-                  rowHeight > 0 ? Math.max(0, Math.floor(gs / rowHeight) - OVERSCAN_ROWS) : 0;
-                const lastRow =
-                  rowHeight > 0
-                    ? Math.min(totalRows, Math.ceil((gs + viewportH) / rowHeight) + OVERSCAN_ROWS)
-                    : Math.min(totalRows, 1);
-                // 防抖：边界每帧最多移动 1 行，消除行边界处的挂/卸载抖动。
-                const win = clampWindow(folderWindowRef.current, { first: firstRow, last: lastRow });
-                folderWindowRef.current = win;
+                const win = stableWindowRowsFor(folderMetrics, scrollTop, childFolderCards.length);
                 const rows: number[] = [];
                 for (let r = win.first; r < win.last; r++) rows.push(r);
                 return (
-                  <div style={{ position: 'relative', height: Math.max(1, totalRows * rowHeight) }}>
+                  <div ref={folderSurfaceRef} className="desktop-virtual-surface" style={{ position: 'relative', height: Math.max(1, virtualSurfaceHeight(folderMetrics, childFolderCards.length)) }}>
                     {rows.map((row) => {
                       const start = row * cols;
                       const end = Math.min(childFolderCards.length, start + cols);
                       return (
                         <div
                           key={row}
-                          className="folder-grid"
-                          style={{ position: 'absolute', top: row * rowHeight, left: 0, right: 0, willChange: 'transform', gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gap: `${gridGap}px` }}
+                          className="folder-grid desktop-virtual-row"
+                          style={{ position: 'absolute', top: row * rowHeight, left: 0, right: 0, gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gap: `${gridGap}px` }}
                         >
-                          {childFolderCards.slice(start, end).map(({ folder, cover }) => (
-                            <CardMotion
+                          {childFolderCards.slice(start, end).map(({ folder, covers }) => (
+                            <div
                               key={folder.id}
-                              className="card bg-base-200 border border-base-300 shadow hover:shadow-lg transition-shadow cursor-pointer overflow-hidden"
-                              onClick={() => handleSelectFolder(folder)}
+                              className="desktop-package-card"
                               onContextMenu={(event) => openContextMenu(event, buildFolderMenu(folder))}
                             >
-                              <figure className="aspect-[4/3] overflow-hidden relative">
-                                {cover ? (
-                                  <BlobImage
-                                    store={store}
-                                    fileRef={{
-                                      id: snapshot?.images[cover.imageId]?.fileRefId ?? cover.imageId,
-                                      name: snapshot?.images[cover.imageId]?.name ?? '',
-                                      kind: 'file',
-                                      mtime: snapshot?.images[cover.imageId]?.mtime,
-                                      size: snapshot?.images[cover.imageId]?.size,
-                                    }}
-                                    alt={folder.name}
-                                    className="w-full h-full object-cover"
-                                    thumbnail
-                                    lazy
-                                    blur={isImageBlurred(snapshot?.images[cover.imageId]?.relPath, blurredImages)}
-                                  />
-                                ) : (
-                                  <div className="w-full h-full flex items-center justify-center opacity-60 text-sm">无图片</div>
-                                )}
-                                {pinnedCovers[folder.id] != null && (
-                                  <span className="absolute top-2 left-2 z-10 badge badge-primary badge-sm shadow">⭐ 已固定</span>
-                                )}
-                              </figure>
-                              <figcaption className="p-3 flex items-center justify-between gap-2">
-                                <span className="text-sm font-medium truncate">{folder.name}</span>
-                                <span className="text-[11px] opacity-60 whitespace-nowrap">{folder.imageCount} 图 / {folder.childCount} 子</span>
-                              </figcaption>
-                            </CardMotion>
+                              <button type="button" className="desktop-package-target" onClick={() => handleSelectFolder(folder)} aria-label={`打开图包${folder.name}`}>
+                                <span className={`desktop-package-cover cover-count-${covers.length}`} aria-hidden="true">
+                                  {covers.map((image) => (
+                                    <BlobImage
+                                      key={image.id}
+                                      store={store}
+                                      fileRef={imageFileRef(image)}
+                                      alt={`${folder.name}封面`}
+                                      className="desktop-package-cover-image"
+                                      thumbnail
+                                      lazy
+                                      blur={isImageBlurred(image.relPath, blurredImages)}
+                                    />
+                                  ))}
+                                  {covers.length === 0 && <span className="desktop-package-empty"><ImagesSquare size={30} weight="duotone" /></span>}
+                                  {pinnedCovers[folder.id] != null && <span className="desktop-cover-pin"><PushPin size={12} weight="fill" />固定封面</span>}
+                                </span>
+                                <span className="desktop-package-body">
+                                  <span className="desktop-package-title"><strong>{folder.name}</strong><CaretRight size={15} weight="bold" /></span>
+                                  <span className="desktop-package-meta">{folder.imageCount.toLocaleString('zh-CN')} 张图片 · {folder.childCount} 个子图包</span>
+                                  <span className="desktop-package-path">{folder.relPath || '本地图库'}</span>
+                                </span>
+                              </button>
+                            </div>
                           ))}
                         </div>
                       );
@@ -1333,12 +1637,13 @@ export function LibraryBrowser({
                       style={{ position: 'absolute', left: 0, right: 0, top: 0, visibility: 'hidden', pointerEvents: 'none' }}
                     >
                       <div className="folder-grid" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gap: `${gridGap}px` }}>
-                        <div ref={folderProbeCardRef} className="card bg-base-200 border border-base-300 shadow overflow-hidden">
-                          <figure className="aspect-[4/3] overflow-hidden relative" />
-                          <figcaption className="p-3 flex items-center justify-between gap-2">
-                            <span className="text-sm font-medium truncate">测</span>
-                            <span className="text-[11px] opacity-60 whitespace-nowrap">0 图 / 0 子</span>
-                          </figcaption>
+                        <div ref={folderProbeCardRef} className="desktop-package-card">
+                          <div className="desktop-package-cover" />
+                          <div className="desktop-package-body">
+                            <span className="desktop-package-title"><strong>测</strong></span>
+                            <span className="desktop-package-meta">0 张图片 · 0 个子图包</span>
+                            <span className="desktop-package-path">路径</span>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -1349,60 +1654,78 @@ export function LibraryBrowser({
           )}
 
           {folderImages.length > 0 && (
-            <section className="mb-8" ref={gallerySectionRef}>
-              <h3 className="text-sm font-semibold opacity-70 mb-3">图片</h3>
+            <section className="desktop-content-section">
+              {childFolderCards.length > 0 && <h2 className="desktop-section-heading">图片</h2>}
               {/* 虚拟化网格（P2）：只挂载可视区 ± 缓冲的行，其余行由绝对定位撑起总高，
                   从"全量 DOM"变为"固定几十张"，滚动时只替换窗口内的行。 */}
               {(() => {
-                const { cols, rowHeight, galleryTop, viewportH } = galleryMetrics;
-                const gridGap = gridUnits().gap;
+                const { cols, rowHeight } = galleryMetrics;
+                const gridGap = gridUnits(viewMode).gap;
                 const totalRows = cols > 0 ? Math.ceil(folderImages.length / cols) : 0;
                 if (totalRows === 0) return null;
-                const gs = Math.max(0, scrollTop - galleryTop);
-                const firstRow =
-                  rowHeight > 0 ? Math.max(0, Math.floor(gs / rowHeight) - OVERSCAN_ROWS) : 0;
-                const lastRow =
-                  rowHeight > 0
-                    ? Math.min(totalRows, Math.ceil((gs + viewportH) / rowHeight) + OVERSCAN_ROWS)
-                    : Math.min(totalRows, 1);
-                // 防抖：边界每帧最多移动 1 行，消除行边界处的挂/卸载抖动。
-                const win = clampWindow(galleryWindowRef.current, { first: firstRow, last: lastRow });
-                galleryWindowRef.current = win;
+                const win = stableWindowRowsFor(galleryMetrics, scrollTop, folderImages.length);
                 const rows: number[] = [];
                 for (let r = win.first; r < win.last; r++) rows.push(r);
                 return (
-                  <div style={{ position: 'relative', height: Math.max(1, totalRows * rowHeight) }}>
+                  <div ref={gallerySurfaceRef} className="desktop-virtual-surface" style={{ position: 'relative', height: Math.max(1, virtualSurfaceHeight(galleryMetrics, folderImages.length)) }}>
                     {rows.map((row) => {
                       const start = row * cols;
                       const end = Math.min(folderImages.length, start + cols);
                       return (
                         <div
                           key={row}
-                          className="gallery-grid"
-                          style={{ position: 'absolute', top: row * rowHeight, left: 0, right: 0, willChange: 'transform', gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gap: `${gridGap}px` }}
+                          className="gallery-grid desktop-virtual-row"
+                          style={{ position: 'absolute', top: row * rowHeight, left: 0, right: 0, gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gap: `${gridGap}px` }}
                         >
                           {folderImages.slice(start, end).map((image) => (
-                            <CardMotion
+                            <div
                               key={image.id}
-                              className="card bg-base-200 border border-base-300 shadow hover:shadow-lg transition-shadow cursor-pointer overflow-hidden"
-                              onClick={() => setViewerImageId(image.id)}
+                              className={`desktop-photo-card ${selectedImageIds.has(image.id) ? 'is-selected' : ''}`}
                               onContextMenu={(event) => openContextMenu(event, buildImageMenu(image))}
                             >
-                              <figure className="aspect-[4/3] overflow-hidden relative">
+                              <button
+                                type="button"
+                                className="desktop-photo-target"
+                                aria-label={`查看${image.name}`}
+                                onClick={() => setViewerImageId(image.id)}
+                              >
+                              <span className={`desktop-photo-frame ${blurredImages.has(image.relPath) ? 'is-private' : ''}`}>
                                 <BlobImage
                                   store={store}
-                                  fileRef={{ id: image.fileRefId ?? image.id, name: image.name, kind: 'file', mtime: image.mtime, size: image.size }}
+                                  fileRef={imageFileRef(image)}
                                   alt={image.name}
-                                  className="w-full h-full object-cover"
+                                  className="desktop-photo-image"
                                   thumbnail
                                   lazy
                                   blur={blurredImages.has(image.relPath)}
                                 />
-                              </figure>
-                              <figcaption className="p-3">
-                                <span className="text-xs truncate block">{image.name}</span>
-                              </figcaption>
-                            </CardMotion>
+                                {blurredImages.has(image.relPath) && <span className="desktop-privacy-mark" aria-label="隐私预览已开启"><LockSimple size={13} weight="fill" /></span>}
+                              </span>
+                              {(showNames || viewMode === 'list') && (
+                                <span className="desktop-photo-caption">
+                                  <span className="desktop-photo-name" title={image.name}>{image.name}</span>
+                                  <span className="desktop-photo-meta">{image.width && image.height ? `${image.width} × ${image.height}` : image.ext.toUpperCase()}</span>
+                                  <span className="desktop-photo-size">{formatBytes(image.size)}</span>
+                                </span>
+                              )}
+                              </button>
+                              <label className="desktop-selection-control" title={`选择${image.name}`}>
+                                <input
+                                  type="checkbox"
+                                  className="desktop-selection-input"
+                                  aria-label={`选择${image.name}`}
+                                  checked={selectedImageIds.has(image.id)}
+                                  onChange={(event) => {
+                                    const nativeEvent = event.nativeEvent as MouseEvent;
+                                    selectImage(image, event.currentTarget.checked, nativeEvent.shiftKey === true);
+                                  }}
+                                  onClick={(event) => event.stopPropagation()}
+                                />
+                                <span className="desktop-selection-mark" aria-hidden="true">
+                                  {selectedImageIds.has(image.id) && <Check size={13} weight="bold" />}
+                                </span>
+                              </label>
+                            </div>
                           ))}
                         </div>
                       );
@@ -1414,11 +1737,9 @@ export function LibraryBrowser({
                       style={{ position: 'absolute', left: 0, right: 0, top: 0, visibility: 'hidden', pointerEvents: 'none' }}
                     >
                       <div className="gallery-grid" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gap: `${gridGap}px` }}>
-                        <div ref={probeCardRef} className="card bg-base-200 border border-base-300 shadow overflow-hidden">
-                          <figure className="aspect-[4/3] overflow-hidden relative" />
-                          <figcaption className="p-3">
-                            <span className="text-xs truncate block">测</span>
-                          </figcaption>
+                        <div ref={probeCardRef} className="desktop-photo-card">
+                          <div className="desktop-photo-frame" />
+                          {(showNames || viewMode === 'list') && <div className="desktop-photo-caption"><span className="desktop-photo-name">测</span></div>}
                         </div>
                       </div>
                     </div>
@@ -1429,55 +1750,97 @@ export function LibraryBrowser({
           )}
 
           {childFolderCards.length === 0 && folderImages.length === 0 && (
-            <div className="flex flex-1 flex-col items-center justify-center border-2 border-dashed border-base-300 rounded-2xl p-8 text-center">
-              <p className="text-4xl mb-3">{searchTerm ? '⍰' : '◻'}</p>
-              <div className="text-lg font-medium mb-1">{searchTerm ? '未找到匹配结果' : '该目录暂无图片'}</div>
-              <p className="text-sm opacity-70 mb-4">{searchTerm ? `没有与“${searchQuery}”匹配的相册或图片` : '导入照片，开始整理你的图库'}</p>
-              {!searchTerm && <button className="btn btn-primary" disabled={busy} onClick={handleAdd}>导入图片</button>}
+            <div className="desktop-empty-state">
+              <span className="desktop-empty-icon">{searchTerm ? <MagnifyingGlass size={26} /> : isRootSelected ? <ImagesSquare size={26} /> : <ImageSquare size={26} />}</span>
+              <h2>{searchTerm ? '没有匹配结果' : isRootSelected ? '尚未导入图包' : '该图包暂无内容'}</h2>
+              <p>{searchTerm ? `没有名称包含“${searchQuery}”的图包或文件。` : isRootSelected ? '从本地文件夹导入第一个图包。' : '导入文件，或新建子图包继续整理。'}</p>
+              {searchTerm ? (
+                <button className="desktop-button secondary" type="button" onClick={() => setSearchQuery('')}>清除搜索</button>
+              ) : (
+                <button className="desktop-button primary" type="button" disabled={busy} onClick={() => void handleAdd()}><UploadSimple size={16} />导入图包</button>
+              )}
             </div>
           )}
         </main>
+        </section>
 
+        {inspectorOpen && (
+          <DesktopInspector
+            store={store}
+            folder={selectedFolder}
+            rootSelected={isRootSelected}
+            childFolderCount={childFolders.length}
+            folderImages={folderAllImages}
+            selectedImages={selectedImages}
+            coverImage={cover ? snapshot?.images[cover.imageId] ?? null : null}
+            pinnedCovers={pinnedCovers}
+            blurredImages={blurredImages}
+            busy={busy}
+            exporting={exporting}
+            canUndo={Boolean(lastManifest)}
+            onClose={() => setInspectorOpen(false)}
+            onClearSelection={clearImageSelection}
+            onOpenImage={(image) => setViewerImageId(image.id)}
+            onToggleSelectedBlur={toggleSelectedBlur}
+            onToggleImageBlur={toggleImageBlur}
+            onPinImage={(image) => pinCover(image.folderId, pinnedCovers[image.folderId] === image.id ? null : image.id, image.name)}
+            onRenameImage={handleRenameImage}
+            onCopyImagePath={(image) => void copyPath(image.relPath)}
+            onDeleteImage={requestDeleteImage}
+            onRefresh={() => void refresh()}
+            onOrganize={openOrganizePreview}
+            onUndo={() => void handleUndoOrganize()}
+            onExport={() => void handleExport()}
+            onCreateFolder={() => selectedFolder && handleCreateSubfolder(selectedFolder)}
+            onPickCover={() => selectedFolder && setCoverPickerFolder(selectedFolder)}
+            onToggleFolderBlur={() => selectedFolder && toggleFolderBlur(selectedFolder)}
+            onRenameFolder={() => selectedFolder && handleRenameFolder(selectedFolder)}
+            onDeleteFolder={requestDelete}
+          />
+        )}
       </div>
 
-      <div className="drawer-side">
-        <label htmlFor="app-drawer" className="drawer-overlay"></label>
-        <aside className="bg-base-200 h-full flex flex-col relative shrink-0" style={{ width: sidebarWidth }}>
-          <SidebarResizeHandle width={sidebarWidth} onResize={setSidebarWidth} />
-          <div className="p-4 pb-0 flex-1 min-h-0 overflow-y-auto flex flex-col gap-4">
-            <div className="px-1">
-            <label className="input input-sm w-full flex items-center gap-2 bg-base-100 border-base-300">
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 opacity-60"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
-              <input
-                type="text"
-                className="grow"
-                placeholder="搜索相册 / 图片…"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
-              {searchQuery && (
-                <button className="btn btn-ghost btn-xs btn-square" title="清除搜索" onClick={() => setSearchQuery('')}>✕</button>
-              )}
-            </label>
+      <div className="drawer-side desktop-drawer-side">
+        <label htmlFor="app-drawer" className="drawer-overlay" aria-label="关闭图包导航"></label>
+        <aside className="desktop-sidebar" style={{ width: sidebarWidth }} aria-label="图包导航">
+          <SidebarResizeHandle width={sidebarWidth} onResize={setSidebarWidth} max={360} />
+          <div className="desktop-sidebar-heading">
+            <div><span>本地图库</span><strong>我的图包</strong></div>
+            <DesktopIconButton label="新建子图包" disabled={!selectedFolder} onClick={() => selectedFolder && handleCreateSubfolder(selectedFolder)}><FolderPlus size={16} /></DesktopIconButton>
           </div>
-
-          {rootFolder && (
-            <div>
-              <div className="menu-title text-xs opacity-60 px-1 mt-1">快捷</div>
-              <div
-                className={`flex items-center gap-2 rounded-lg py-1.5 pl-1 pr-2 cursor-pointer ${isRootSelected ? 'bg-primary/15 text-primary' : 'hover:bg-base-300/60'}`}
+          <nav className="desktop-sidebar-primary" aria-label="主要功能">
+            {rootFolder && (
+              <button
+                type="button"
+                className={`desktop-sidebar-nav-item ${isRootSelected ? 'is-active' : ''}`}
                 onClick={() => handleSelectFolder(rootFolder)}
                 onContextMenu={(event) => openContextMenu(event, buildFolderMenu(rootFolder))}
               >
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 flex-shrink-0"><path d="M3 10.5L12 3l9 7.5V21H3z"/></svg>
-                <span className="truncate">全部相册</span>
-                {rootFolder.imageCount > 0 && <span className={`badge badge-sm ml-auto ${isRootSelected ? 'badge-primary' : 'badge-ghost'}`}>{rootFolder.imageCount}</span>}
-              </div>
-            </div>
-          )}
-
-          <div className="menu-title text-xs opacity-60 px-1 mt-1">目录树</div>
-          {snapshot && (
+                <ImagesSquare size={18} weight="duotone" /><span>全部图包</span><strong>{rootFolder.childCount}</strong>
+              </button>
+            )}
+            <button type="button" className="desktop-sidebar-nav-item" disabled={!selectedFolder} onClick={openOrganizePreview}>
+              <MagicWand size={18} /><span>智能整理</span><CaretRight size={13} />
+            </button>
+            <button type="button" className="desktop-sidebar-nav-item" disabled={!selectedFolder || busy} onClick={() => void refresh()}>
+              <ArrowClockwise size={18} /><span>刷新图库</span><CaretRight size={13} />
+            </button>
+            {lastManifest && (
+              <button type="button" className="desktop-sidebar-nav-item" disabled={busy} onClick={() => void handleUndoOrganize()}>
+                <ArrowClockwise size={18} /><span>撤销上次整理</span><CaretRight size={13} />
+              </button>
+            )}
+            <button type="button" className={`desktop-sidebar-nav-item ${busy ? 'has-activity' : ''}`} disabled={busy} onClick={() => void handleAdd()}>
+              <UploadSimple size={18} /><span>{busy ? '正在导入' : '导入图包'}</span>{busy ? <span className="desktop-nav-activity" /> : <CaretRight size={13} />}
+            </button>
+            {importReport && (
+              <button type="button" className="desktop-sidebar-nav-item" onClick={() => setShowImportReport(true)}>
+                <Info size={18} /><span>导入报告</span><CaretRight size={13} />
+              </button>
+            )}
+          </nav>
+          <div className="desktop-panel-label">图包目录</div>
+          {snapshot ? (
             <FolderTree
               snapshot={snapshot}
               folderId={snapshot.rootId}
@@ -1485,36 +1848,35 @@ export function LibraryBrowser({
               onSelect={handleSelectFolder}
               expandedFolders={expandedFolders}
               onToggleFolder={toggleFolder}
-              onFolderContextMenu={(event, folder) => openContextMenu(event, buildFolderMenu(folder))}
-              depth={0}
+              onFolderContextMenu={handleFolderContextMenu}
             />
+          ) : (
+            <div className="desktop-folder-tree-scroll" />
           )}
-
+          <div className="desktop-storage-status">
+            <div><HardDrive size={16} /><span>图库占用</span><strong>{formatBytes(libraryBytes)}</strong></div>
+            <p>{allLibraryImages.length.toLocaleString('zh-CN')} 个本地文件</p>
           </div>
-          <div className="p-4 pt-3 border-t border-base-300 shrink-0 flex flex-col gap-2 text-sm bg-base-200">
-            {importReport && (
-              <NavButton onClick={() => setImportReport(importReport)} className="w-full">
-                <span>导入报告</span>
-              </NavButton>
-            )}
-            <NavButton onClick={() => setShowSettings(true)} className="w-full" title="设置">
-              <SettingsIcon />
-              <span>设置</span>
-            </NavButton>
-            <div className="text-xs opacity-60 px-1">{runtimeLabel}</div>
-          </div>
+          <button ref={settingsButtonRef} type="button" className="desktop-sidebar-settings" onClick={() => setShowSettings(true)}><GearSix size={17} /><span>界面与性能</span><CaretRight size={13} /></button>
+          <div className="desktop-runtime-label">{runtimeLabel}</div>
         </aside>
       </div>
 
-      {showSettings && (
-        <SettingsPage
-          rules={customRules}
-          onChange={handleCustomRulesChange}
-          onBack={() => setShowSettings(false)}
-          runtimeLabel={runtimeLabel}
-          sidebarWidth={sidebarWidth}
-          onSidebarWidthChange={setSidebarWidth}
-        />
+      {selectedImages.length > 0 && (
+        <div className="desktop-selection-toolbar" role="toolbar" aria-label="所选图片操作">
+          <strong>{selectedImages.length} 张已选择</strong>
+          <span className="desktop-selection-divider" />
+          <button type="button" onClick={selectAllImages}>全选当前结果</button>
+          <button type="button" onClick={toggleSelectedBlur}>{selectedImages.every((image) => blurredImages.has(image.relPath)) ? <Eye size={16} /> : <EyeSlash size={16} />}隐私预览</button>
+          {selectedImages.length === 1 && (
+            <>
+              <button type="button" onClick={() => setViewerImageId(selectedImages[0]!.id)}><ArrowsOut size={16} />打开</button>
+              <button type="button" onClick={() => pinCover(selectedImages[0]!.folderId, selectedImages[0]!.id, selectedImages[0]!.name)}><PushPin size={16} />设为封面</button>
+              <button type="button" className="is-danger" onClick={() => requestDeleteImage(selectedImages[0]!)}><Trash size={16} />删除</button>
+            </>
+          )}
+          <button type="button" className="desktop-toolbar-close" aria-label="清除选择" onClick={clearImageSelection}><X size={15} /></button>
+        </div>
       )}
 
       {organizePreview && (
@@ -1578,7 +1940,7 @@ export function LibraryBrowser({
         </div>
       )}
 
-      {importReport && (
+      {importReport && showImportReport && (
         <div className="modal modal-open">
           <div className="modal-box max-w-3xl flex flex-col max-h-[80vh]">
             <h3 className="font-bold text-lg shrink-0">导入报告</h3>
@@ -1622,7 +1984,7 @@ export function LibraryBrowser({
                 </div>
               )}
             </div>
-            <div className="modal-action shrink-0"><button className="btn btn-ghost" onClick={() => setImportReport(null)}>关闭</button></div>
+            <div className="modal-action shrink-0"><button className="btn btn-ghost" onClick={() => setShowImportReport(false)}>关闭</button></div>
           </div>
         </div>
       )}
@@ -1701,9 +2063,318 @@ export function LibraryBrowser({
   );
 }
 
-// 侧栏目录树：浅比较 memo。LibraryBrowser 每帧滚动都会重渲外壳，但树的
-// props（snapshot/选中目录/展开集/回调）在滚动期间稳定，memo 让整棵树跳过
-// 每帧 Reconciliation——文件夹越多收益越大。
+function DesktopIconButton({
+  label,
+  children,
+  onClick,
+  disabled = false,
+  active = false,
+}: {
+  label: string;
+  children: ReactNode;
+  onClick: () => void;
+  disabled?: boolean;
+  active?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      className={`desktop-icon-button ${active ? 'is-active' : ''}`}
+      aria-label={label}
+      aria-pressed={active || undefined}
+      title={label}
+      disabled={disabled}
+      onClick={onClick}
+    >
+      {children}
+    </button>
+  );
+}
+
+function DesktopInspector({
+  store,
+  folder,
+  rootSelected,
+  childFolderCount,
+  folderImages,
+  selectedImages,
+  coverImage,
+  pinnedCovers,
+  blurredImages,
+  busy,
+  exporting,
+  canUndo,
+  onClose,
+  onClearSelection,
+  onOpenImage,
+  onToggleSelectedBlur,
+  onToggleImageBlur,
+  onPinImage,
+  onRenameImage,
+  onCopyImagePath,
+  onDeleteImage,
+  onRefresh,
+  onOrganize,
+  onUndo,
+  onExport,
+  onCreateFolder,
+  onPickCover,
+  onToggleFolderBlur,
+  onRenameFolder,
+  onDeleteFolder,
+}: {
+  store: LibraryStore;
+  folder: FolderNode | null;
+  rootSelected: boolean;
+  childFolderCount: number;
+  folderImages: ImageEntry[];
+  selectedImages: ImageEntry[];
+  coverImage: ImageEntry | null;
+  pinnedCovers: Record<string, string>;
+  blurredImages: ReadonlySet<string>;
+  busy: boolean;
+  exporting: boolean;
+  canUndo: boolean;
+  onClose: () => void;
+  onClearSelection: () => void;
+  onOpenImage: (image: ImageEntry) => void;
+  onToggleSelectedBlur: () => void;
+  onToggleImageBlur: (image: ImageEntry) => void;
+  onPinImage: (image: ImageEntry) => void;
+  onRenameImage: (image: ImageEntry) => void;
+  onCopyImagePath: (image: ImageEntry) => void;
+  onDeleteImage: (image: ImageEntry) => void;
+  onRefresh: () => void;
+  onOrganize: () => void;
+  onUndo: () => void;
+  onExport: () => void;
+  onCreateFolder: () => void;
+  onPickCover: () => void;
+  onToggleFolderBlur: () => void;
+  onRenameFolder: () => void;
+  onDeleteFolder: () => void;
+}) {
+  const { folderBytes, latestModified, formatSummary, blurredCount } = useMemo(() => ({
+    folderBytes: folderImages.reduce((sum, image) => sum + image.size, 0),
+    latestModified: folderImages.reduce((value, image) => Math.max(value, image.mtime), 0),
+    formatSummary: [...new Set(folderImages.map((image) => image.ext.replace(/^\./, '').toUpperCase()).filter(Boolean))].slice(0, 4).join(' · ') || '暂无文件',
+    blurredCount: folderImages.reduce((count, image) => count + (blurredImages.has(image.relPath) ? 1 : 0), 0),
+  }), [blurredImages, folderImages]);
+
+  if (selectedImages.length > 1) {
+    const selectedBytes = selectedImages.reduce((sum, image) => sum + image.size, 0);
+    const selectedFormats = [...new Set(selectedImages.map((image) => image.ext.replace(/^\./, '').toUpperCase()))].join(' · ');
+    return (
+      <aside className="desktop-inspector" aria-label="批量检查器">
+        <header className="desktop-inspector-header">
+          <div><span>批量选择</span><h2>{selectedImages.length} 张图片</h2></div>
+          <span className="desktop-inspector-header-actions">
+            <DesktopIconButton label="清除选择" onClick={onClearSelection}><X size={16} /></DesktopIconButton>
+            <DesktopIconButton label="收起检查器" onClick={onClose}><SidebarSimple size={16} /></DesktopIconButton>
+          </span>
+        </header>
+        <div className="desktop-selection-preview" aria-hidden="true">
+          {selectedImages.slice(0, 3).map((image, index) => (
+            <span key={image.id} style={{ transform: `translateX(${index * -13}px) rotate(${index * 2 - 2}deg)` }}>
+              <BlobImage store={store} fileRef={imageFileRef(image)} alt={image.name} className="desktop-selection-preview-image" thumbnail lazy />
+            </span>
+          ))}
+        </div>
+        <section className="desktop-inspector-section desktop-data-list">
+          <div><span>合计大小</span><strong>{formatBytes(selectedBytes)}</strong></div>
+          <div><span>包含格式</span><strong>{selectedFormats}</strong></div>
+          <div><span>所在图包</span><strong>{folder?.name ?? '未知'}</strong></div>
+        </section>
+        <section className="desktop-inspector-section">
+          <h3>批量操作</h3>
+          <button type="button" className="desktop-action-row" onClick={onToggleSelectedBlur}><EyeSlash size={17} /><span>切换隐私预览</span><CaretRight size={13} /></button>
+          <button type="button" className="desktop-action-row" onClick={onClearSelection}><X size={17} /><span>清除选择</span><CaretRight size={13} /></button>
+        </section>
+      </aside>
+    );
+  }
+
+  if (selectedImages.length === 1) {
+    const image = selectedImages[0]!;
+    const blurred = blurredImages.has(image.relPath);
+    const pinned = pinnedCovers[image.folderId] === image.id;
+    return (
+      <aside className="desktop-inspector" aria-label="图片检查器">
+        <header className="desktop-inspector-header">
+          <div><span>图片信息</span><h2 title={image.name}>{image.name}</h2></div>
+          <span className="desktop-inspector-header-actions">
+            <DesktopIconButton label="清除选择" onClick={onClearSelection}><X size={16} /></DesktopIconButton>
+            <DesktopIconButton label="收起检查器" onClick={onClose}><SidebarSimple size={16} /></DesktopIconButton>
+          </span>
+        </header>
+        <div className={`desktop-inspector-image ${blurred ? 'is-private' : ''}`}>
+          <BlobImage store={store} fileRef={imageFileRef(image)} alt={image.name} className="desktop-inspector-image-content" thumbnail blur={blurred} />
+        </div>
+        <div className="desktop-inspector-quick-actions">
+          <button type="button" onClick={() => onOpenImage(image)}><ArrowsOut size={16} />打开</button>
+          <button type="button" onClick={() => onPinImage(image)}><PushPin size={16} />{pinned ? '取消封面' : '设为封面'}</button>
+          <button type="button" onClick={() => onToggleImageBlur(image)}>{blurred ? <Eye size={16} /> : <EyeSlash size={16} />}{blurred ? '显示预览' : '隐私预览'}</button>
+        </div>
+        <section className="desktop-inspector-section desktop-data-list">
+          <h3>文件</h3>
+          <div><span>格式</span><strong>{image.ext.replace(/^\./, '').toUpperCase() || '未知'}</strong></div>
+          <div><span>尺寸</span><strong>{image.width && image.height ? `${image.width} × ${image.height}` : '未知'}</strong></div>
+          <div><span>大小</span><strong>{formatBytes(image.size)}</strong></div>
+          <div><span>文件修改</span><strong>{formatModifiedTime(image.mtime)}</strong></div>
+          <div className="is-stacked"><span>所在路径</span><strong title={image.relPath}>{image.relPath}</strong></div>
+        </section>
+        <section className="desktop-inspector-section">
+          <button type="button" className="desktop-action-row" onClick={() => onRenameImage(image)}><PencilSimple size={17} /><span>重命名</span><CaretRight size={13} /></button>
+          <button type="button" className="desktop-action-row" onClick={() => onCopyImagePath(image)}><Copy size={17} /><span>复制路径</span><CaretRight size={13} /></button>
+          <button type="button" className="desktop-action-row is-danger" onClick={() => onDeleteImage(image)}><Trash size={17} /><span>删除图片</span><CaretRight size={13} /></button>
+        </section>
+      </aside>
+    );
+  }
+
+  return (
+    <aside className="desktop-inspector" aria-label="图包检查器">
+      <header className="desktop-inspector-header">
+        <div><span>{rootSelected ? '图包总览' : '当前图包'}</span><h2>{rootSelected ? '全部图包' : folder?.name ?? '图包'}</h2></div>
+        <span className="desktop-inspector-header-actions">
+          <DesktopIconButton label="刷新图库" disabled={!folder || busy} onClick={onRefresh}><ArrowClockwise size={16} /></DesktopIconButton>
+          <DesktopIconButton label="收起检查器" onClick={onClose}><SidebarSimple size={16} /></DesktopIconButton>
+        </span>
+      </header>
+      <div className="desktop-inspector-cover">
+        {coverImage ? (
+          <BlobImage store={store} fileRef={imageFileRef(coverImage)} alt={rootSelected ? '全部图包封面' : `${folder?.name ?? '图包'}封面`} className="desktop-inspector-cover-image" thumbnail lazy blur={blurredImages.has(coverImage.relPath)} />
+        ) : (
+          <span><ImagesSquare size={30} weight="duotone" /></span>
+        )}
+      </div>
+      <section className="desktop-inspector-summary">
+        <div><strong>{rootSelected ? childFolderCount : folder?.imageCount ?? 0}</strong><span>{rootSelected ? '图包' : '图片'}</span></div>
+        <div><strong>{rootSelected ? folderImages.length : folder?.childCount ?? 0}</strong><span>{rootSelected ? '文件' : '子图包'}</span></div>
+        <div><strong>{formatBytes(folderBytes)}</strong><span>占用</span></div>
+      </section>
+      <section className="desktop-inspector-section desktop-organize-callout">
+        <span className="desktop-callout-icon"><MagicWand size={18} weight="duotone" /></span>
+        <h3>按文件名整理当前图包</h3>
+        <p>所有变更会先预览，确认后才写入本地副本。</p>
+        <button type="button" className="desktop-text-action" disabled={!folder || busy} onClick={onOrganize}>审阅整理建议 <ArrowRight size={14} /></button>
+      </section>
+      <section className="desktop-inspector-section desktop-data-list">
+        <h3>{rootSelected ? '图库状态' : '图包状态'}</h3>
+        <div className="is-stacked"><span>所在路径</span><strong title={folder?.relPath || '本地图库'}>{folder?.relPath || '本地图库'}</strong></div>
+        <div><span>包含格式</span><strong>{formatSummary}</strong></div>
+        <div><span>文件修改</span><strong>{formatModifiedTime(latestModified)}</strong></div>
+        <div><span>隐私预览</span><strong>{blurredCount} 张</strong></div>
+      </section>
+      <section className="desktop-inspector-section">
+        <h3>图包操作</h3>
+        <button type="button" className="desktop-action-row" disabled={!folder || busy} onClick={onCreateFolder}><FolderPlus size={17} /><span>新建子图包</span><CaretRight size={13} /></button>
+        {!rootSelected && <button type="button" className="desktop-action-row" disabled={folderImages.length === 0 || busy} onClick={onPickCover}><PushPin size={17} /><span>设置封面</span><CaretRight size={13} /></button>}
+        <button type="button" className="desktop-action-row" disabled={folderImages.length === 0 || busy} onClick={onToggleFolderBlur}><EyeSlash size={17} /><span>切换隐私预览</span><CaretRight size={13} /></button>
+        <button type="button" className="desktop-action-row" disabled={!folder || busy || exporting} onClick={onExport}><FileZip size={17} /><span>{exporting ? '正在导出' : '导出 ZIP'}</span><CaretRight size={13} /></button>
+        {canUndo && <button type="button" className="desktop-action-row" disabled={busy} onClick={onUndo}><ArrowClockwise size={17} /><span>撤销上次整理</span><CaretRight size={13} /></button>}
+        {!rootSelected && <button type="button" className="desktop-action-row" disabled={busy} onClick={onRenameFolder}><PencilSimple size={17} /><span>重命名图包</span><CaretRight size={13} /></button>}
+        {!rootSelected && <button type="button" className="desktop-action-row is-danger" disabled={busy} onClick={onDeleteFolder}><Trash size={17} /><span>删除图包</span><CaretRight size={13} /></button>}
+      </section>
+    </aside>
+  );
+}
+
+const FOLDER_TREE_ROW_HEIGHT = 31;
+const FOLDER_TREE_OVERSCAN_ROWS = 8;
+const FOLDER_TREE_WINDOW_BLOCK_ROWS = 8;
+const FOLDER_TREE_INITIAL_ROWS = 32;
+
+type FolderTreeRow = {
+  folder: FolderNode;
+  depth: number;
+  positionInSet: number;
+  setSize: number;
+};
+
+type FolderTreeWindow = {
+  first: number;
+  last: number;
+};
+
+function buildFolderChildren(snapshot: LibrarySnapshot): ReadonlyMap<string, readonly FolderNode[]> {
+  const children = new Map<string, FolderNode[]>();
+  for (const folder of Object.values(snapshot.folders)) {
+    if (!folder.parentId) continue;
+    const siblings = children.get(folder.parentId);
+    if (siblings) {
+      siblings.push(folder);
+    } else {
+      children.set(folder.parentId, [folder]);
+    }
+  }
+  for (const siblings of children.values()) {
+    siblings.sort((a, b) => a.name.localeCompare(b.name));
+  }
+  return children;
+}
+
+function flattenFolderTree(
+  folderId: string,
+  children: ReadonlyMap<string, readonly FolderNode[]>,
+  expandedFolders: ReadonlySet<string>,
+): FolderTreeRow[] {
+  const rows: FolderTreeRow[] = [];
+  const stack: FolderTreeRow[] = [];
+  const rootChildren = children.get(folderId) ?? [];
+
+  for (let index = rootChildren.length - 1; index >= 0; index -= 1) {
+    stack.push({
+      folder: rootChildren[index]!,
+      depth: 0,
+      positionInSet: index + 1,
+      setSize: rootChildren.length,
+    });
+  }
+
+  while (stack.length > 0) {
+    const row = stack.pop()!;
+    rows.push(row);
+    if (!expandedFolders.has(row.folder.id)) continue;
+
+    const nestedChildren = children.get(row.folder.id) ?? [];
+    for (let index = nestedChildren.length - 1; index >= 0; index -= 1) {
+      stack.push({
+        folder: nestedChildren[index]!,
+        depth: row.depth + 1,
+        positionInSet: index + 1,
+        setSize: nestedChildren.length,
+      });
+    }
+  }
+
+  return rows;
+}
+
+function folderTreeWindowFor(rowCount: number, scrollTop: number, viewportHeight: number): FolderTreeWindow {
+  if (rowCount <= 0) return { first: 0, last: 0 };
+
+  const visibleRows = Math.max(1, Math.ceil(Math.max(0, viewportHeight) / FOLDER_TREE_ROW_HEIGHT));
+  const maxVisibleStart = Math.max(0, rowCount - visibleRows);
+  const visibleStart = Math.min(
+    maxVisibleStart,
+    Math.max(0, Math.floor(Math.max(0, scrollTop) / FOLDER_TREE_ROW_HEIGHT)),
+  );
+  const firstCandidate = Math.max(0, visibleStart - FOLDER_TREE_OVERSCAN_ROWS);
+  const first = Math.floor(firstCandidate / FOLDER_TREE_WINDOW_BLOCK_ROWS) * FOLDER_TREE_WINDOW_BLOCK_ROWS;
+  const lastCandidate = Math.min(
+    rowCount,
+    visibleStart + visibleRows + FOLDER_TREE_OVERSCAN_ROWS,
+  );
+  const last = Math.min(
+    rowCount,
+    Math.ceil(lastCandidate / FOLDER_TREE_WINDOW_BLOCK_ROWS) * FOLDER_TREE_WINDOW_BLOCK_ROWS,
+  );
+  return { first, last };
+}
+
+// 展开目录先扩平为固定高度行，再按滚动位置分块窗口化。滚动时只有
+// 这个 memo 子树会更新，且每跨越一个分块才更换 DOM 行。
 const FolderTree = memo(function FolderTree({
   snapshot,
   folderId,
@@ -1712,7 +2383,6 @@ const FolderTree = memo(function FolderTree({
   expandedFolders,
   onToggleFolder,
   onFolderContextMenu,
-  depth,
 }: {
   snapshot: LibrarySnapshot;
   folderId: string;
@@ -1721,130 +2391,178 @@ const FolderTree = memo(function FolderTree({
   expandedFolders: ReadonlySet<string>;
   onToggleFolder: (id: string) => void;
   onFolderContextMenu: (event: ReactMouseEvent, folder: FolderNode) => void;
-  depth: number;
 }) {
-  const children = childrenOf(snapshot, folderId).sort((a, b) => a.name.localeCompare(b.name));
-  if (children.length === 0) return null;
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const scrollFrameRef = useRef<number | null>(null);
+  const children = useMemo(() => buildFolderChildren(snapshot), [snapshot]);
+  const rows = useMemo(
+    () => flattenFolderTree(folderId, children, expandedFolders),
+    [children, expandedFolders, folderId],
+  );
+  const rowCountRef = useRef(rows.length);
+  rowCountRef.current = rows.length;
+  const [windowRows, setWindowRows] = useState<FolderTreeWindow>({
+    first: 0,
+    last: Math.min(rows.length, FOLDER_TREE_INITIAL_ROWS),
+  });
+
+  const updateWindow = useCallback(() => {
+    const node = scrollRef.current;
+    if (!node) return;
+    const next = folderTreeWindowFor(rowCountRef.current, node.scrollTop, node.clientHeight);
+    setWindowRows((current) => (
+      current.first === next.first && current.last === next.last ? current : next
+    ));
+  }, []);
+
+  const onScroll = useCallback(() => {
+    if (scrollFrameRef.current != null) return;
+    scrollFrameRef.current = requestAnimationFrame(() => {
+      scrollFrameRef.current = null;
+      updateWindow();
+    });
+  }, [updateWindow]);
+
+  useLayoutEffect(() => {
+    updateWindow();
+  }, [rows.length, updateWindow]);
+
+  useEffect(() => {
+    const node = scrollRef.current;
+    if (!node) return;
+    const observer = new ResizeObserver(updateWindow);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [updateWindow]);
+
+  useEffect(() => () => {
+    if (scrollFrameRef.current != null) cancelAnimationFrame(scrollFrameRef.current);
+  }, []);
+
   return (
-    <ul className="flex flex-col gap-0.5" style={{ marginLeft: depth === 0 ? 0 : 12 }}>
-      {children.map((folder) => {
-        const childFolders = childrenOf(snapshot, folder.id);
-        const hasChildren = childFolders.length > 0;
-        const expanded = expandedFolders.has(folder.id);
-        const active = folder.id === selectedFolderId;
-        return (
-          <li key={folder.id}>
-            <div
-              className={`flex items-center rounded-lg ${active ? 'bg-primary/15 text-primary' : 'hover:bg-base-300/60'}`}
-              onContextMenu={(event) => onFolderContextMenu(event, folder)}
+    <div ref={scrollRef} className="desktop-folder-tree-scroll" onScroll={onScroll}>
+      <ul
+        className="desktop-tree-list desktop-tree-virtual-surface"
+        style={{ height: rows.length * FOLDER_TREE_ROW_HEIGHT }}
+        role="tree"
+        aria-label="图包目录"
+      >
+        {rows.slice(windowRows.first, windowRows.last).map((row, windowIndex) => {
+          const { folder, depth, positionInSet, setSize } = row;
+          const hasChildren = folder.childCount > 0;
+          const expanded = expandedFolders.has(folder.id);
+          const active = folder.id === selectedFolderId;
+          const rowIndex = windowRows.first + windowIndex;
+          return (
+            <li
+              key={folder.id}
+              className="desktop-tree-virtual-row"
+              style={{ top: rowIndex * FOLDER_TREE_ROW_HEIGHT }}
+              role="treeitem"
+              aria-level={depth + 1}
+              aria-posinset={positionInSet}
+              aria-setsize={setSize}
+              aria-selected={active}
+              aria-expanded={hasChildren ? expanded : undefined}
             >
-              <button
-                className={`chevron-btn ${hasChildren ? '' : 'invisible'} ${expanded ? 'expanded' : ''}`}
-                disabled={!hasChildren}
-                aria-label={hasChildren ? (expanded ? '收起' : '展开') : undefined}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (hasChildren) onToggleFolder(folder.id);
-                }}
+              <div
+                className={`desktop-tree-row ${active ? 'is-active' : ''}`}
+                style={{ paddingLeft: 6 + depth * 14 }}
+                onContextMenu={(event) => onFolderContextMenu(event, folder)}
               >
-                <svg className="chevron-icon" viewBox="0 0 12 12" width="12" height="12" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M3.5 2.2L8.5 6l-5 3.8z" fill="currentColor" />
-                </svg>
-              </button>
-              <button className="flex-1 min-w-0 text-left flex items-center justify-between gap-2 py-1.5 pr-2" onClick={() => onSelect(folder)}>
-                <span className="truncate">{folder.name}</span>
-                <span className={`badge badge-sm ${active ? 'badge-primary' : 'badge-ghost'}`}>{folder.imageCount}</span>
-              </button>
-            </div>
-            {hasChildren && expanded && (
-              <FolderTree
-                snapshot={snapshot}
-                folderId={folder.id}
-                selectedFolderId={selectedFolderId}
-                onSelect={onSelect}
-                expandedFolders={expandedFolders}
-                onToggleFolder={onToggleFolder}
-                onFolderContextMenu={onFolderContextMenu}
-                depth={depth + 1}
-              />
-            )}
-          </li>
-        );
-      })}
-    </ul>
+                <button
+                  type="button"
+                  className={`chevron-btn ${hasChildren ? '' : 'invisible'} ${expanded ? 'expanded' : ''}`}
+                  disabled={!hasChildren}
+                  aria-label={hasChildren ? `${expanded ? '收起' : '展开'} ${folder.name}` : undefined}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (hasChildren) onToggleFolder(folder.id);
+                  }}
+                >
+                  <svg className="chevron-icon" viewBox="0 0 12 12" width="12" height="12" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M3.5 2.2L8.5 6l-5 3.8z" fill="currentColor" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  className="desktop-tree-target"
+                  aria-label={`${folder.name}，${folder.imageCount.toLocaleString('zh-CN')} 张图片`}
+                  aria-current={active ? 'page' : undefined}
+                  onClick={() => onSelect(folder)}
+                >
+                  {active ? <FolderOpen size={16} weight="fill" /> : <Folder size={16} weight="duotone" />}
+                  <span className="desktop-tree-name">{folder.name}</span>
+                  <span className="desktop-tree-count">{folder.imageCount.toLocaleString('zh-CN')}</span>
+                </button>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
   );
 });
 
-function TitleBar() {
-  const bridge = (window as { kanituDesktop?: KanituDesktopBridge }).kanituDesktop;
-  const isElectron = bridge?.platform === 'electron';
-  const [maximized, setMaximized] = useState(false);
-
-  useEffect(() => {
-    if (!isElectron) return;
-    let alive = true;
-    void bridge?.isWindowMaximized?.().then((m) => {
-      if (alive) setMaximized(m);
-    });
-    const off = bridge?.onWindowMaximizedChanged?.((m) => setMaximized(m));
-    return () => {
-      alive = false;
-      off?.();
-    };
-  }, [isElectron, bridge]);
-
-  const toggleMaximize = () => {
-    if (!isElectron) return;
-    void bridge?.maximizeWindowToggle?.().then((m) => setMaximized(m));
-  };
-
-  if (!isElectron) return null;
-
+function TitleBar({
+  searchQuery,
+  onSearchChange,
+  searchPlaceholder,
+  theme,
+  onThemeChange,
+  busy,
+  onImport,
+}: {
+  searchQuery: string;
+  onSearchChange: (value: string) => void;
+  searchPlaceholder: string;
+  theme: ThemeOption;
+  onThemeChange: (value: ThemeOption) => void;
+  busy: boolean;
+  onImport: () => void;
+}) {
   return (
-    <div
-      className={`app-titlebar flex items-center justify-between h-12 px-3 shrink-0 select-none bg-base-200 border-b border-base-300 ${isElectron ? 'titlebar-drag' : ''}`}
-    >
-      <div className="flex items-center gap-2.5 min-w-0 pl-1">
-        <span className="w-7 h-7 rounded-lg bg-gradient-to-br from-sky-500 to-violet-500 flex items-center justify-center text-white text-base">◉</span>
-        <span className="text-base font-semibold truncate">全能看图王</span>
-      </div>
-      {isElectron && (
-        <div className="titlebar-no-drag flex items-center gap-0.5">
-          <button className="btn btn-ghost btn-square btn-sm" title="最小化" onClick={() => void bridge?.minimizeWindow?.()}>
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10" className="w-3.5 h-3.5" fill="currentColor"><rect x="1" y="4.5" width="8" height="1"/></svg>
-          </button>
-          <button className="btn btn-ghost btn-square btn-sm" title={maximized ? '还原' : '最大化'} onClick={toggleMaximize}>
-            {maximized ? (
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.2"><rect x="1.5" y="3" width="5.5" height="5.5"/><path d="M3 1.5h5.5V7"/></svg>
-            ) : (
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.2"><rect x="1.5" y="1.5" width="7" height="7"/></svg>
-            )}
-          </button>
-          <button className="btn btn-ghost btn-square btn-sm hover:bg-red-500 hover:text-white" title="关闭" onClick={() => void bridge?.closeWindow?.()}>
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.2"><path d="M1.5 1.5l7 7M8.5 1.5l-7 7"/></svg>
-          </button>
+    <header className={`app-titlebar ${window.kanituDesktop?.platform === 'electron' ? 'titlebar-drag' : ''}`}>
+      <div className="desktop-brand-lockup" aria-label="全能看图王">
+        <span className="desktop-brand-mark" aria-hidden="true"><span /><span /></span>
+        <div>
+          <strong>全能看图王</strong>
+          <span>本地图包工作台</span>
         </div>
-      )}
-    </div>
-  );
-}
+      </div>
 
-function ThemeToggle() {
-  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
-    const saved = localStorage.getItem('kanitu-theme');
-    if (saved === 'light' || saved === 'dark') return saved;
-    return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
-  });
-  useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme);
-    localStorage.setItem('kanitu-theme', theme);
-  }, [theme]);
-  return (
-    <label className="swap swap-rotate btn btn-ghost btn-square btn-sm" title="切换主题">
-      <input type="checkbox" checked={theme === 'light'} onChange={(e) => setTheme(e.target.checked ? 'light' : 'dark')} />
-      <svg className="swap-off fill-current w-5 h-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 3v2M12 19v2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M3 12h2M19 12h2M5.6 18.4L7 17M17 7l1.4-1.4M12 7a5 5 0 010 10z"/></svg>
-      <svg className="swap-on fill-current w-5 h-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1111.2 3 7 7 0 0021 12.8z"/></svg>
-    </label>
+      <label className="desktop-global-search titlebar-no-drag">
+        <MagnifyingGlass size={16} aria-hidden="true" />
+        <input
+          type="search"
+          value={searchQuery}
+          onChange={(event) => onSearchChange(event.target.value)}
+          placeholder={searchPlaceholder}
+          aria-label={searchPlaceholder}
+        />
+        {searchQuery ? (
+          <button type="button" aria-label="清除搜索" title="清除搜索" onClick={() => onSearchChange('')}>
+            <X size={14} />
+          </button>
+        ) : (
+          <span className="desktop-search-spacer" aria-hidden="true" />
+        )}
+      </label>
+
+      <div className="desktop-titlebar-actions titlebar-no-drag">
+        <DesktopIconButton
+          label={theme === 'dark' ? '切换到浅色模式' : '切换到深色模式'}
+          onClick={() => onThemeChange(theme === 'dark' ? 'light' : 'dark')}
+        >
+          {theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}
+        </DesktopIconButton>
+        <button type="button" className="desktop-button primary desktop-import-button" disabled={busy} onClick={onImport}>
+          <UploadSimple size={16} />
+          <span>{busy ? '正在导入' : '导入图包'}</span>
+        </button>
+        <DesktopWindowControls />
+      </div>
+    </header>
   );
 }
 
@@ -1909,7 +2627,10 @@ export function prefetchOriginal(url: string, estWidth?: number, estHeight?: num
     return;
   }
   // 预估内存超限则不预解码，避免压垮内存。
-  if (ORIGINAL_POOL_BYTES + estimatedImageBytes(estWidth, estHeight) > ORIGINAL_POOL_MAX_BYTES * 2) return;
+  if (ORIGINAL_POOL_BYTES + estimatedImageBytes(estWidth, estHeight) > ORIGINAL_POOL_MAX_BYTES * 2) {
+    releasePooledUrl(url);
+    return;
+  }
   const img = new Image();
   img.decoding = 'async';
   img.onload = () => originalPoolPut(url, img);
@@ -1919,6 +2640,176 @@ export function prefetchOriginal(url: string, estWidth?: number, estHeight?: num
   };
   img.src = url;
 }
+
+const VIEWER_FILMSTRIP_ITEM_WIDTH = 64;
+const VIEWER_FILMSTRIP_GAP = 6;
+const VIEWER_FILMSTRIP_PADDING = 14;
+const VIEWER_FILMSTRIP_STRIDE = VIEWER_FILMSTRIP_ITEM_WIDTH + VIEWER_FILMSTRIP_GAP;
+const VIEWER_FILMSTRIP_OVERSCAN = 8;
+
+type ViewerFilmstripWindow = { first: number; last: number };
+
+function viewerFilmstripContentWidth(itemCount: number): number {
+  if (itemCount <= 0) return 0;
+  return itemCount * VIEWER_FILMSTRIP_ITEM_WIDTH + (itemCount - 1) * VIEWER_FILMSTRIP_GAP;
+}
+
+function viewerFilmstripWindowFor(
+  itemCount: number,
+  scrollLeft: number,
+  viewportWidth: number,
+): ViewerFilmstripWindow {
+  if (itemCount <= 0) return { first: 0, last: 0 };
+  const surfaceLeft = Math.max(0, scrollLeft - VIEWER_FILMSTRIP_PADDING);
+  const firstVisible = Math.min(itemCount - 1, Math.floor(surfaceLeft / VIEWER_FILMSTRIP_STRIDE));
+  const visibleCount = Math.max(1, Math.ceil(Math.max(0, viewportWidth) / VIEWER_FILMSTRIP_STRIDE) + 1);
+  return {
+    first: Math.max(0, firstVisible - VIEWER_FILMSTRIP_OVERSCAN),
+    last: Math.min(itemCount, firstVisible + visibleCount + VIEWER_FILMSTRIP_OVERSCAN),
+  };
+}
+
+const ViewerFilmstripItem = memo(function ViewerFilmstripItem({
+  image,
+  itemIndex,
+  itemCount,
+  active,
+  store,
+  onNavigate,
+}: {
+  image: ImageEntry;
+  itemIndex: number;
+  itemCount: number;
+  active: boolean;
+  store: LibraryStore;
+  onNavigate: (id: string) => void;
+}) {
+  const fileRef = useMemo(() => imageFileRef(image), [image]);
+  return (
+    <button
+      type="button"
+      className={active ? 'is-active' : ''}
+      style={{ left: itemIndex * VIEWER_FILMSTRIP_STRIDE }}
+      aria-label={`查看${image.name}`}
+      aria-current={active ? 'true' : undefined}
+      aria-posinset={itemIndex + 1}
+      aria-setsize={itemCount}
+      onClick={() => onNavigate(image.id)}
+    >
+      <BlobImage store={store} fileRef={fileRef} alt="" className="viewer-filmstrip-image" thumbnail lazy />
+    </button>
+  );
+});
+
+const ViewerFilmstrip = memo(function ViewerFilmstrip({
+  images,
+  activeIndex,
+  store,
+  onNavigate,
+}: {
+  images: readonly ImageEntry[];
+  activeIndex: number;
+  store: LibraryStore;
+  onNavigate: (id: string) => void;
+}) {
+  const scrollRef = useRef<HTMLElement>(null);
+  const scrollFrameRef = useRef<number | null>(null);
+  const navigateRef = useRef(onNavigate);
+  navigateRef.current = onNavigate;
+  const handleNavigate = useCallback((id: string) => navigateRef.current(id), []);
+  const [mountedWindow, setMountedWindow] = useState<ViewerFilmstripWindow>(() => {
+    const estimatedViewport = typeof window === 'undefined' ? 1280 : window.innerWidth;
+    const estimatedScrollLeft = Math.max(
+      0,
+      VIEWER_FILMSTRIP_PADDING
+        + activeIndex * VIEWER_FILMSTRIP_STRIDE
+        + VIEWER_FILMSTRIP_ITEM_WIDTH / 2
+        - estimatedViewport / 2,
+    );
+    return viewerFilmstripWindowFor(images.length, estimatedScrollLeft, estimatedViewport);
+  });
+
+  const updateWindow = useCallback((scrollLeft: number, viewportWidth: number) => {
+    const next = viewerFilmstripWindowFor(images.length, scrollLeft, viewportWidth);
+    setMountedWindow((current) => (
+      current.first === next.first && current.last === next.last ? current : next
+    ));
+  }, [images.length]);
+
+  const centerActive = useCallback(() => {
+    const node = scrollRef.current;
+    if (!node || activeIndex < 0 || activeIndex >= images.length) return;
+    const desired = VIEWER_FILMSTRIP_PADDING
+      + activeIndex * VIEWER_FILMSTRIP_STRIDE
+      + VIEWER_FILMSTRIP_ITEM_WIDTH / 2
+      - node.clientWidth / 2;
+    const nextScrollLeft = Math.min(
+      Math.max(0, node.scrollWidth - node.clientWidth),
+      Math.max(0, desired),
+    );
+    node.scrollLeft = nextScrollLeft;
+    updateWindow(nextScrollLeft, node.clientWidth);
+  }, [activeIndex, images.length, updateWindow]);
+
+  useLayoutEffect(() => {
+    if (scrollFrameRef.current != null) {
+      cancelAnimationFrame(scrollFrameRef.current);
+      scrollFrameRef.current = null;
+    }
+    centerActive();
+  }, [centerActive]);
+
+  useEffect(() => {
+    const node = scrollRef.current;
+    if (!node) return;
+    const observer = new ResizeObserver(centerActive);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [centerActive]);
+
+  useEffect(() => () => {
+    if (scrollFrameRef.current != null) cancelAnimationFrame(scrollFrameRef.current);
+  }, []);
+
+  const onScroll = useCallback(() => {
+    if (scrollFrameRef.current != null) return;
+    scrollFrameRef.current = requestAnimationFrame(() => {
+      scrollFrameRef.current = null;
+      const node = scrollRef.current;
+      if (node) updateWindow(node.scrollLeft, node.clientWidth);
+    });
+  }, [updateWindow]);
+
+  const visibleImages = images.slice(mountedWindow.first, mountedWindow.last);
+  return (
+    <footer
+      ref={scrollRef}
+      className="viewer-filmstrip"
+      aria-label="缩略图导航"
+      onScroll={onScroll}
+    >
+      <div
+        className="viewer-filmstrip-virtual-surface"
+        style={{ width: viewerFilmstripContentWidth(images.length) }}
+      >
+        {visibleImages.map((item, windowIndex) => {
+          const itemIndex = mountedWindow.first + windowIndex;
+          return (
+            <ViewerFilmstripItem
+              key={item.id}
+              image={item}
+              itemIndex={itemIndex}
+              itemCount={images.length}
+              active={itemIndex === activeIndex}
+              store={store}
+              onNavigate={handleNavigate}
+            />
+          );
+        })}
+      </div>
+    </footer>
+  );
+});
 
 function Viewer({
   images,
@@ -1949,8 +2840,11 @@ function Viewer({
   const [rotate, setRotate] = useState(0);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [containerSize, setContainerSize] = useState({ w: 0, h: 0 });
+  const [showInfo, setShowInfo] = useState(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
   const displayUrlRef = useRef<string | null>(null);
   const pendingUrlRef = useRef<string | null>(null);
   const dragRef = useRef<{ startX: number; startY: number; startPan: { x: number; y: number } } | null>(null);
@@ -1968,12 +2862,20 @@ function Viewer({
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-    const update = () => setContainerSize({ w: el.clientWidth, h: el.clientHeight });
+    const update = () => {
+      const style = window.getComputedStyle(el);
+      const horizontalPadding = Number.parseFloat(style.paddingLeft) + Number.parseFloat(style.paddingRight);
+      const verticalPadding = Number.parseFloat(style.paddingTop) + Number.parseFloat(style.paddingBottom);
+      setContainerSize({
+        w: Math.max(0, el.clientWidth - horizontalPadding),
+        h: Math.max(0, el.clientHeight - verticalPadding),
+      });
+    };
     update();
     const ro = new ResizeObserver(update);
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
+  }, [showInfo]);
 
   // 原图解码完成后换入显示（旧图在换入前始终保持可见，切换不黑屏）。
   const swapIn = useCallback(
@@ -2063,7 +2965,11 @@ function Viewer({
         store
           .getViewerUrl(fileRefFor(neighbor))
           .then((url) => {
-            if (!cancelled) prefetchOriginal(url, neighbor.width, neighbor.height);
+            if (cancelled) {
+              store.releaseViewerUrl(url);
+              return;
+            }
+            prefetchOriginal(url, neighbor.width, neighbor.height);
           })
           .catch(() => {
             // 预解码失败静默；真显示时由主 <img> 自行加载。
@@ -2128,7 +3034,30 @@ function Viewer({
 
   const onKey = useCallback(
     (e: KeyboardEvent) => {
+      if (e.defaultPrevented || document.querySelector('.context-menu, .modal.modal-open')) return;
+      const target = e.target as HTMLElement | null;
+      if (target?.matches('input, textarea, select, [contenteditable="true"]')) return;
+      if (e.key === 'Tab') {
+        const dialog = dialogRef.current;
+        const focusable = dialog
+          ? [...dialog.querySelectorAll<HTMLElement>('button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])')]
+              .filter((element) => element.offsetParent !== null)
+          : [];
+        if (focusable.length === 0) return;
+        const first = focusable[0]!;
+        const last = focusable[focusable.length - 1]!;
+        const active = document.activeElement;
+        if (e.shiftKey && (active === first || !dialog?.contains(active))) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && (active === last || !dialog?.contains(active))) {
+          e.preventDefault();
+          first.focus();
+        }
+        return;
+      }
       if (e.key === 'Escape') {
+        e.preventDefault();
         onClose();
       } else if (e.key === 'ArrowLeft') {
         onNavigate(images[(index - 1 + images.length) % images.length]!.id);
@@ -2157,29 +3086,45 @@ function Viewer({
     return () => window.removeEventListener('keydown', onKey);
   }, [onKey]);
 
+  useEffect(() => {
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    closeButtonRef.current?.focus();
+    return () => previousFocus?.focus();
+  }, []);
+
   if (!image) return null;
 
   // 缩略图“替换”显示层的条件：新图正在加载（pendingUrl 非空）、或尚无显示图、
   // 或原图加载失败——此时只显示缩略图，与旧图互斥，不叠放。
   const showThumbReplace = thumbUrl != null && (pendingUrl != null || displayUrl == null || originalFailed);
+  const previousImage = images[(index - 1 + images.length) % images.length]!;
+  const nextImage = images[(index + 1) % images.length]!;
+  const scalePercent = Math.round(baseFit * zoom * 100);
 
   return (
-    <div className="viewer-overlay fixed inset-0 z-[100] bg-black flex flex-col">
-      <div className="flex items-center justify-between gap-3 p-4 text-white">
-        <button className="btn btn-ghost btn-square text-white" onClick={onClose} aria-label="关闭">✕</button>
-        <div className="flex items-center gap-3">
-          <button className="btn btn-ghost text-white" onClick={() => onNavigate(images[(index - 1 + images.length) % images.length]!.id)}>‹</button>
-          <span className="text-sm opacity-80">{index + 1} / {images.length}</span>
-          <button className="btn btn-ghost text-white" onClick={() => onNavigate(images[(index + 1) % images.length]!.id)}>›</button>
+    <div className="viewer-overlay" role="dialog" aria-modal="true" aria-label={`查看${image.name}`}>
+      <div className="viewer-dialog" ref={dialogRef}>
+      <header className="viewer-toolbar">
+        <div className="viewer-left">
+          <button ref={closeButtonRef} type="button" className="viewer-button" onClick={onClose} aria-label="关闭查看器" title="关闭查看器"><X size={18} /></button>
+          <div className="viewer-title">
+            <strong title={image.name}>{image.name}</strong>
+            <span>{index + 1} / {images.length}</span>
+          </div>
         </div>
-        <div className="flex items-center gap-1">
-          <button className="btn btn-ghost btn-sm text-white" onClick={fit}>适应</button>
-          <button className="btn btn-ghost btn-sm text-white" onClick={percent}>100%</button>
-          <button className="btn btn-ghost btn-sm text-white" onClick={rotateCW}>↻</button>
+        <div className="viewer-tools" aria-label="查看工具">
+          <button type="button" className="viewer-button" aria-label="缩小" title="缩小" onClick={() => zoomBy(0.8)}><Minus size={17} /></button>
+          <button type="button" className="viewer-zoom" onClick={fit} title="适应窗口">{scalePercent}%</button>
+          <button type="button" className="viewer-button" aria-label="放大" title="放大" onClick={() => zoomBy(1.25)}><Plus size={17} /></button>
+          <span className="viewer-separator" />
+          <button type="button" className="viewer-button" aria-label="适应窗口" title="适应窗口" onClick={fit}><ArrowsOut size={17} /></button>
+          <button type="button" className="viewer-button viewer-tool-text" aria-label="原始大小" title="原始大小" onClick={percent}>1:1</button>
+          <button type="button" className="viewer-button" aria-label="顺时针旋转" title="顺时针旋转" onClick={rotateCW}><ArrowClockwise size={17} /></button>
+          <button type="button" className={`viewer-button ${showInfo ? 'is-active' : ''}`} aria-label="图片信息" aria-pressed={showInfo} title="图片信息" onClick={() => setShowInfo((value) => !value)}><Info size={17} /></button>
         </div>
-      </div>
+      </header>
       <div
-        className="flex-1 flex items-center justify-center overflow-hidden cursor-grab active:cursor-grabbing relative"
+        className={`viewer-stage ${showInfo ? 'has-info' : ''}`}
         ref={containerRef}
         onContextMenu={(event) => onImageContextMenu(event, image)}
         onWheel={(e) => {
@@ -2201,11 +3146,14 @@ function Viewer({
           dragRef.current = null;
         }}
       >
+        <button type="button" className="viewer-nav is-left" aria-label="上一张" disabled={images.length <= 1} onClick={() => onNavigate(previousImage.id)}>
+          <ArrowLeft size={21} />
+        </button>
         {/* 缩略图就绪后“替换”旧图（不是叠放）：显示层与缩略图层互斥，避免快速
         切换时新缩略图叠在旧图上。旧图在缩略图就绪前保持显示，保证不黑屏。 */}
         {(displayUrl && !showThumbReplace) && (
           <img
-            className="select-none pointer-events-none"
+            className="viewer-image"
             src={displayUrl}
             alt={image.name}
             draggable={false}
@@ -2219,7 +3167,7 @@ function Viewer({
         {/* 下一张图的后台隐式加载器：透明挂载，解码完成才换入 displayUrl。 */}
         {pendingUrl && (
           <img
-            className="absolute inset-0 opacity-0 pointer-events-none select-none"
+            className="viewer-pending-image"
             src={pendingUrl}
             alt=""
             aria-hidden="true"
@@ -2231,6 +3179,7 @@ function Viewer({
             }}
             onError={() => {
               if (pendingUrlRef.current !== pendingUrl) return;
+              store.releaseViewerUrl(pendingUrl);
               pendingUrlRef.current = null;
               setPendingUrl(null);
               setOriginalFailed(true);
@@ -2240,7 +3189,7 @@ function Viewer({
         {/* 新图缩略图占位：取代显示层，等待原图解码完成。 */}
         {showThumbReplace && (
           <img
-            className="absolute inset-0 w-full h-full object-contain select-none pointer-events-none"
+            className="viewer-image viewer-placeholder-image"
             src={thumbUrl}
             alt=""
             aria-hidden="true"
@@ -2248,20 +3197,26 @@ function Viewer({
         )}
         {/* 初始打开、显示层与缩略图都未就绪时的加载指示。 */}
         {!displayUrl && !thumbUrl && (
-          <div className="absolute inset-0 flex items-center justify-center">
-            <span className="loading loading-spinner loading-lg text-white/70" />
+          <div className="viewer-loading" role="status" aria-label="正在载入图片">
+            <span />
           </div>
         )}
+        <button type="button" className="viewer-nav is-right" aria-label="下一张" disabled={images.length <= 1} onClick={() => onNavigate(nextImage.id)}>
+          <ArrowRight size={21} />
+        </button>
+        {showInfo && (
+          <aside className="viewer-info" aria-label="图片信息">
+            <h2>图片信息</h2>
+            <div><span>格式</span><strong>{image.ext.replace(/^\./, '').toUpperCase() || '未知'}</strong></div>
+            <div><span>尺寸</span><strong>{natural ? `${natural.w} × ${natural.h}` : image.width && image.height ? `${image.width} × ${image.height}` : '未知'}</strong></div>
+            <div><span>大小</span><strong>{formatBytes(image.size)}</strong></div>
+            <div><span>文件修改</span><strong>{formatModifiedTime(image.mtime)}</strong></div>
+            <div className="is-stacked"><span>所在路径</span><strong title={image.relPath}>{image.relPath}</strong></div>
+            <button type="button" className="viewer-info-action" onClick={(event) => onImageContextMenu(event, image)}><Info size={14} />更多文件操作</button>
+          </aside>
+        )}
       </div>
-      <div className="flex gap-2 px-4 pb-4 pt-2 bg-black/40 overflow-x-auto flex-shrink-0">
-        {images.map((img, i) => (
-          <button key={img.id} className={`filmstrip-thumb ${i === index ? 'active' : ''}`} onClick={() => onNavigate(img.id)}>
-            <BlobImage store={store} fileRef={fileRefFor(img)} alt={img.name} className="w-full h-full object-cover" thumbnail lazy />
-          </button>
-        ))}
-      </div>
-      <div className="absolute bottom-20 right-5 text-xs text-white/80 bg-black/50 rounded-lg px-3 py-2">
-        {image.name} · {natural ? `${natural.w}×${natural.h}` : '—'} · {Math.round(baseFit * zoom * 100)}%
+      <ViewerFilmstrip images={images} activeIndex={index} store={store} onNavigate={onNavigate} />
       </div>
     </div>
   );

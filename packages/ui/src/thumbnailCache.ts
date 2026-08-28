@@ -27,22 +27,23 @@ interface ThumbEntry {
   blob: Blob | null;
   /** 已解析出的 Blob 字节数；未决时为 0。 */
   bytes: number;
+  /** 创建该条目时的缓存代次，防止 clear 前的请求回填。 */
+  generation: number;
   /** 上次被“可见请求升级”的时间戳：防止窗口反复进货时对同一文件狂发 IPC。 */
   lastPromotedAt?: number;
 }
 
 const MAX_BYTES = 256 * 1024 * 1024; // 256MB：512px 缩略图约 7–30KB/张，容量封顶即可
 /**
- * 单条 Blob 上限。512px JPEG 约 7–30KB；大 GIF（>256KB 原样）由 worker 生成
- * 的"可动小缩略图"可能到数百 KB~数 MB——若仍按旧 512KB 上限把它们拒之门外，
- * 滚动回看时这些 GIF 每次都重新 IPC/解码（观察到的"重载的都是 GIF"）。
- * 提到 4MB，配合总容量 LRU（256MB）兜底，让动画缩略图留在缓存里直接复用。
+ * 单条 Blob 上限。512px 缩略图通常只有数十 KB；4MB 上限仅作异常输出兜底，
+ * 再由 256MB 总容量 LRU 控制会话内存。
  */
 const MAX_SINGLE_BLOB_BYTES = 4 * 1024 * 1024;
 
 // Map 迭代序即 LRU 序（最久未用在前）。
 const entries = new Map<string, ThumbEntry>();
 let totalBytes = 0;
+let cacheGeneration = 0;
 
 // —— 全局并发上限 ——
 // 无论可见卡片 + 各级预取（当前目录/子文件夹/全库预热/滚动方向）同时触发多少
@@ -51,25 +52,98 @@ let totalBytes = 0;
 // 源头把洪峰收口成常量，避免快速滚动时几十上百张同时解码打爆堆（OOM 闪退）。
 // 同键请求仍由上面的 Promise 缓存合并；这是不同键之间的全局限流。
 const MAX_CONCURRENT_READS = 3;
+// 非可见任务最多占两个槽，始终给刚进入视口的缩略图留一个可立即启动的槽位。
+const MAX_CONCURRENT_NON_VISIBLE_READS = MAX_CONCURRENT_READS - 1;
 let inFlightReads = 0;
-const readQueue: Array<() => void> = [];
+let inFlightNonVisibleReads = 0;
+let backgroundReadsPaused = false;
 
-function runWhenSlotFree<T>(task: () => Promise<T>): Promise<T> {
+class ThumbnailReadCancelledError extends Error {
+  constructor() {
+    super('缩略图预取已取消');
+    this.name = 'ThumbnailReadCancelledError';
+  }
+}
+
+interface QueuedRead {
+  priority: number;
+  shouldCancel?: () => boolean;
+  start: () => void;
+  cancel: () => void;
+}
+
+const readQueues: QueuedRead[][] = Array.from(
+  { length: THUMB_PRIORITY_WARMUP + 1 },
+  () => [],
+);
+
+function normalizePriority(priority: number | undefined): number {
+  return Math.max(
+    THUMB_PRIORITY_VISIBLE,
+    Math.min(THUMB_PRIORITY_WARMUP, priority ?? THUMB_PRIORITY_VISIBLE),
+  );
+}
+
+function takeNextRead(): QueuedRead | null {
+  for (let priority = THUMB_PRIORITY_VISIBLE; priority <= THUMB_PRIORITY_WARMUP; priority++) {
+    if (
+      priority > THUMB_PRIORITY_VISIBLE &&
+      inFlightNonVisibleReads >= MAX_CONCURRENT_NON_VISIBLE_READS
+    ) continue;
+    if (backgroundReadsPaused && priority >= THUMB_PRIORITY_CURRENT_DIR) continue;
+    const queue = readQueues[priority]!;
+    while (queue.length > 0) {
+      const next = queue.shift()!;
+      if (next.shouldCancel?.()) {
+        next.cancel();
+        continue;
+      }
+      return next;
+    }
+  }
+  return null;
+}
+
+function pumpReadQueue(): void {
+  while (inFlightReads < MAX_CONCURRENT_READS) {
+    const next = takeNextRead();
+    if (!next) return;
+    inFlightReads++;
+    if (next.priority > THUMB_PRIORITY_VISIBLE) inFlightNonVisibleReads++;
+    next.start();
+  }
+}
+
+function runWhenSlotFree<T>(
+  task: () => Promise<T>,
+  options?: { priority?: number; shouldCancel?: () => boolean },
+): Promise<T> {
   return new Promise<T>((resolve, reject) => {
-    const start = (): void => {
-      inFlightReads++;
-      Promise.resolve()
-        .then(task)
-        .then(resolve, reject)
-        .finally(() => {
-          inFlightReads--;
-          const next = readQueue.shift();
-          if (next) next();
-        });
+    const request: QueuedRead = {
+      priority: normalizePriority(options?.priority),
+      shouldCancel: options?.shouldCancel,
+      cancel: () => reject(new ThumbnailReadCancelledError()),
+      start: () => {
+        Promise.resolve()
+          .then(task)
+          .then(resolve, reject)
+          .finally(() => {
+            inFlightReads--;
+            if (request.priority > THUMB_PRIORITY_VISIBLE) inFlightNonVisibleReads--;
+            pumpReadQueue();
+          });
+      },
     };
-    if (inFlightReads < MAX_CONCURRENT_READS) start();
-    else readQueue.push(start);
+    readQueues[request.priority]!.push(request);
+    pumpReadQueue();
   });
+}
+
+/** 滚动期间暂停当前目录/子图包/全库预热，但保留可见和下一屏请求。 */
+export function setThumbnailPreloadPaused(paused: boolean): void {
+  if (backgroundReadsPaused === paused) return;
+  backgroundReadsPaused = paused;
+  if (!paused) pumpReadQueue();
 }
 
 // —— 调试统计（供设置页“调试”面板展示，定位“大文件夹仍在滚动时加载”等问题）——
@@ -93,6 +167,7 @@ export function getRendererThumbnailStats(): RendererThumbnailStats {
 
 /** 清空渲染端缩略图内存缓存（供设置页“清除缓存”调试使用）。 */
 export function clearThumbnailCache(): void {
+  cacheGeneration++;
   entries.clear();
   totalBytes = 0;
   counters.requests = 0;
@@ -110,7 +185,15 @@ function keyOf(file: FileRef, maxSize: number): string {
 /** 仅按总字节数淘汰（无条数上限）：字节超限时从最久未用开始移除。 */
 function evict(): void {
   while (totalBytes > MAX_BYTES && entries.size > 0) {
-    const oldestKey = entries.keys().next().value;
+    // 未决条目还没占用 Blob 字节；删除它们无法降低 totalBytes，
+    // 反而会让迟到的结果重新入队。只在已解析条目中选最久未用的一项。
+    let oldestKey: string | undefined;
+    for (const [key, entry] of entries) {
+      if (entry.bytes > 0) {
+        oldestKey = key;
+        break;
+      }
+    }
     if (oldestKey === undefined) break;
     const oldest = entries.get(oldestKey);
     entries.delete(oldestKey);
@@ -145,7 +228,7 @@ export function peekThumbnailBlob(file: FileRef, maxSize: number): Blob | null {
  * - 条目还在且未出图：正常写入；
  * - 条目已被删除（另一条重复请求失败清掉了）：这条结果完好，重建缓存，
  *   避免“已经生成过、回看又重载”；
- * - 条目已出图：幂等跳过（先完成的已记账）。
+ * - 条目已出图：所有重复请求都返回首个成功的 canonical Blob。
  */
 function settleEntry(
   key: string,
@@ -153,29 +236,39 @@ function settleEntry(
   blob: Blob,
 ): Blob {
   if (!entry) return blob;
-  if (entries.get(key) !== entry) {
-    // 条目被其它重复请求失败清掉了：用这份成功结果重建。
-    if (blob.size <= MAX_SINGLE_BLOB_BYTES) {
-      entry.blob = null;
-      entry.bytes = 0;
-      entry.promise = Promise.resolve(blob);
-      entries.set(key, entry);
-    } else {
-      return blob; // 超大 Blob 不入内存缓存（约定同下）
-    }
+  // clear 后旧请求仍可以向原调用者返回结果，但不得触碰新代缓存。
+  if (entry.generation !== cacheGeneration) return blob;
+
+  // 升级前后的 Promise 都指向同一条目；首个成功结果是该条目的
+  // canonical Blob，后完成的请求必须返回它，不能泄漏另一份 Blob。
+  if (entry.blob !== null) return entry.blob;
+
+  const current = entries.get(key);
+  let target = entry;
+  if (current && current !== entry) {
+    // 条目失败被删除后，同键可能已创建了新条目。这份成功结果
+    // 可以完成新条目，但绝不覆盖它的条目身份或 Promise 调用者。
+    target = current;
+    if (target.blob !== null) return target.blob;
+  } else if (!current) {
+    // 条目被另一条重复请求失败清掉了：用这份成功结果重建。
+    // generation 检查保证这不会复活 clear 前的条目。
+    if (blob.size <= MAX_SINGLE_BLOB_BYTES) entries.set(key, entry);
   }
-  if (entry.blob === null) {
-    if (blob.size <= MAX_SINGLE_BLOB_BYTES) {
-      entry.blob = blob;
-      entry.bytes = blob.size;
-      totalBytes += blob.size;
-    } else {
-      // 超大 Blob（多为 GIF 原样大字节）不入内存缓存：既省内存，也避免
-      // 把其它正常缩略图从 LRU 里挤掉（正是“滚动才加载、磁盘命中重取”的根源）。
-      entries.delete(key);
-    }
+
+  target.blob = blob;
+  target.promise = Promise.resolve(blob);
+  if (blob.size <= MAX_SINGLE_BLOB_BYTES && entries.get(key) === target) {
+    target.bytes = blob.size;
+    totalBytes += blob.size;
+    evict();
+  } else {
+    // 超大异常输出不入内存缓存：既省内存，也避免
+    // 把其它正常缩略图从 LRU 里挤掉。条目仍保留 canonical Blob，
+    // 仅供已在等待的重复 Promise 统一返回，不会被后续 get 命中。
+    if (entries.get(key) === target) entries.delete(key);
   }
-  return blob;
+  return target.blob;
 }
 
 /**
@@ -183,11 +276,39 @@ function settleEntry(
  * 先写好、这条慢请求后失败的成果；删了它，回看同一张图就会重新载图。
  * 只在条目还没有任何有效 Blob 时清理。
  */
-function failEntry(key: string, entry: ThumbEntry | null): void {
-  if (entry && entries.get(key) === entry && entry.blob === null) {
+function failEntry(key: string, entry: ThumbEntry | null, request: Promise<Blob>): void {
+  if (
+    entry &&
+    entries.get(key) === entry &&
+    entry.blob === null &&
+    entry.promise === request
+  ) {
     entries.delete(key);
     totalBytes -= entry.bytes;
   }
+}
+
+function createReadPromise(
+  key: string,
+  getEntry: () => ThumbEntry | null,
+  store: LibraryStore,
+  file: FileRef,
+  maxSize: number,
+  priority: number | undefined,
+  shouldCancel: (() => boolean) | undefined,
+): Promise<Blob> {
+  let request!: Promise<Blob>;
+  request = runWhenSlotFree(
+    () => store.readThumbnail(file, maxSize, { priority }),
+    { priority, shouldCancel },
+  ).then(
+    (blob) => settleEntry(key, getEntry(), blob),
+    (err: unknown) => {
+      failEntry(key, getEntry(), request);
+      throw err;
+    },
+  );
+  return request;
 }
 
 /** 可见请求升级间隔：同一文件太频繁的重进视口不再重复发 IPC。 */
@@ -197,7 +318,7 @@ export function getThumbnailBlob(
   store: LibraryStore,
   file: FileRef,
   maxSize: number,
-  options?: { priority?: number; recheck?: boolean },
+  options?: { priority?: number; recheck?: boolean; shouldCancel?: () => boolean },
 ): Promise<Blob> {
   const key = keyOf(file, maxSize);
   const hit = entries.get(key);
@@ -219,12 +340,14 @@ export function getThumbnailBlob(
         return hit.promise;
       }
       hit.lastPromotedAt = now;
-      hit.promise = runWhenSlotFree(() => store.readThumbnail(file, maxSize, { priority: 0 })).then(
-        (blob) => settleEntry(key, hit, blob),
-        (err: unknown) => {
-          failEntry(key, hit);
-          throw err;
-        },
+      hit.promise = createReadPromise(
+        key,
+        () => hit,
+        store,
+        file,
+        maxSize,
+        THUMB_PRIORITY_VISIBLE,
+        options?.shouldCancel,
       );
     } else if (options?.recheck) {
       // 滚动方向预取（优先级 1）：同一文件已排在整目录预取（优先级 2）队尾时，
@@ -235,14 +358,14 @@ export function getThumbnailBlob(
         return hit.promise;
       }
       hit.lastPromotedAt = now;
-      hit.promise = runWhenSlotFree(() =>
-        store.readThumbnail(file, maxSize, { priority: options.priority ?? 1 }),
-      ).then(
-        (blob) => settleEntry(key, hit, blob),
-        (err: unknown) => {
-          failEntry(key, hit);
-          throw err;
-        },
+      hit.promise = createReadPromise(
+        key,
+        () => hit,
+        store,
+        file,
+        maxSize,
+        options.priority ?? THUMB_PRIORITY_DIRECTIONAL,
+        options.shouldCancel,
       );
     }
     return hit.promise;
@@ -251,16 +374,16 @@ export function getThumbnailBlob(
   counters.cacheMisses++;
 
   let entry: ThumbEntry | null = null;
-  const promise = runWhenSlotFree(() =>
-    store.readThumbnail(file, maxSize, { priority: options?.priority }),
-  ).then(
-    (blob) => settleEntry(key, entry, blob),
-    (err: unknown) => {
-      failEntry(key, entry);
-      throw err;
-    },
+  const promise = createReadPromise(
+    key,
+    () => entry,
+    store,
+    file,
+    maxSize,
+    options?.priority,
+    options?.shouldCancel,
   );
-  entry = { promise, blob: null, bytes: 0 };
+  entry = { promise, blob: null, bytes: 0, generation: cacheGeneration };
   entries.set(key, entry);
   evict();
   return promise;
@@ -306,13 +429,17 @@ export function preloadThumbnails(store: LibraryStore, files: FileRef[], options
       if (options.shouldStop?.()) return;
       active++;
       counters.prefetchScheduled++;
-      getThumbnailBlob(store, file, DEFAULT_PRELOAD_MAX_SIZE, { priority, recheck })
+      getThumbnailBlob(store, file, DEFAULT_PRELOAD_MAX_SIZE, {
+        priority,
+        recheck,
+        shouldCancel: options.shouldStop,
+      })
         .then(() => {
           counters.prefetchCompleted++;
         })
-        .catch(() => {
+        .catch((err: unknown) => {
           // 预加载失败静默；真正显示时 BlobImage 会自行重试并给出失败提示。
-          counters.prefetchFailed++;
+          if (!(err instanceof ThumbnailReadCancelledError)) counters.prefetchFailed++;
         })
         .finally(() => {
           active--;

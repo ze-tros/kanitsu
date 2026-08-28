@@ -3,12 +3,14 @@
 // 线程，主进程只做缓存与调度。主路径是 sharp（libvips，Node-API 原生库，与
 // Electron ABI 兼容），支持 jpeg/png/webp/avif/bmp；sharp 解析失败的少见文件
 // 由主进程 nativeImage 兜底（见 main.ts，文件会进黑名单避免反复尝试）。
-// GIF：动画缩略图用 omggif（纯 JS）按帧解码→缩放→重编码为 可动且小 的 GIF；
-// 小 GIF（≤256KB）由主进程原样透传，不经过这里。
+// GIF 网格缩略图也走 sharp 的单帧输出；原始动画只在查看器中播放。
 import { parentPort } from 'node:worker_threads';
 import { readFile } from 'node:fs/promises';
 import sharp from 'sharp';
 import { GifReader, GifWriter } from 'omggif';
+
+// 多个 worker 已提供图片级并行；限制每条 libvips 管线为单线程，避免 CPU 过度订阅。
+sharp.concurrency(1);
 
 export interface ThumbnailJob {
   requestId: number;
@@ -341,11 +343,8 @@ export async function generateAnimatedGifThumb(filePath: string, targetSize: num
   return new Uint8Array(out);
 }
 
-/** 完整流水线：文件 → 缩略图字节（GIF 输出 GIF，其余输出 JPEG）。 */
+/** 完整流水线：所有格式均输出单帧 JPEG 缩略图。 */
 export async function generateThumbnailFromFile(filePath: string, targetSize: number): Promise<Uint8Array> {
-  if (extOf(filePath) === 'gif') {
-    return generateAnimatedGifThumb(filePath, targetSize);
-  }
   return generateThumbnailWithSharp(filePath, targetSize);
 }
 

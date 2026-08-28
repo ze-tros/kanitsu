@@ -141,7 +141,7 @@ export function CoverPickerModal({
                       type="button"
                       className="btn btn-xs btn-circle btn-primary absolute top-1 right-1 shadow opacity-0 group-hover:opacity-100 focus:opacity-100 transition"
                       disabled={!cover}
-                      title={cover ? `将“${folder.name}”的封面用作本相册封面` : '该子文件夹暂无图片'}
+                      title={cover ? `将“${folder.name}”的封面用作本图包封面` : '该子文件夹暂无图片'}
                       onClick={(event) => {
                         event.stopPropagation();
                         if (cover) onPick(cover.imageId);

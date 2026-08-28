@@ -1,9 +1,15 @@
-import { useEffect, useState } from 'react';
+import {
+  useEffect,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from 'react';
+import { ArrowLeft, Bug, Database, MagicWand, Palette } from '@phosphor-icons/react';
 import type { CustomOrganizeRule } from '../../organizer/src/index';
 import type { ThumbnailDebugStats, ClearCacheResult } from '../../fs-adapter/src/electron';
-import { ArrowLeftIcon, NavButton } from './NavButton';
 import { OrganizeRulesManager } from './OrganizeRulesModal';
 import { SidebarResizeHandle } from './SidebarResizeHandle';
+import { DesktopWindowControls } from './DesktopWindowControls';
 import { getRendererThumbnailStats, clearThumbnailCache, type RendererThumbnailStats } from './thumbnailCache';
 import { startFpsMonitor, stopFpsMonitor, resetFpsMonitor, type FpsStats } from './fpsMonitor';
 import {
@@ -17,6 +23,59 @@ import {
   type LogLevel,
 } from './debugLog';
 
+export type ThemeOption = 'light' | 'dark';
+export type AccentOption = 'cobalt' | 'coral' | 'amber' | 'graphite';
+
+const ACCENT_OPTIONS: ReadonlyArray<{
+  value: AccentOption;
+  label: string;
+}> = [
+  { value: 'cobalt', label: '岩蓝' },
+  { value: 'coral', label: '朱砂' },
+  { value: 'amber', label: '琥珀' },
+  { value: 'graphite', label: '墨灰' },
+];
+
+function handleRadioNavigation<T extends string>(
+  event: ReactKeyboardEvent<HTMLButtonElement>,
+  options: readonly T[],
+  current: T,
+  onChange: (value: T) => void,
+): void {
+  const currentIndex = Math.max(0, options.indexOf(current));
+  let nextIndex: number | null = null;
+  if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+    nextIndex = (currentIndex + 1) % options.length;
+  } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+    nextIndex = (currentIndex - 1 + options.length) % options.length;
+  } else if (event.key === 'Home') {
+    nextIndex = 0;
+  } else if (event.key === 'End') {
+    nextIndex = options.length - 1;
+  }
+  if (nextIndex == null) return;
+
+  event.preventDefault();
+  const next = options[nextIndex];
+  if (!next) return;
+  onChange(next);
+  const radios = event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="radio"]');
+  radios?.[nextIndex]?.focus();
+}
+
+type SettingsPageProps = {
+  rules: CustomOrganizeRule[];
+  onChange: (rules: CustomOrganizeRule[]) => void;
+  onBack: () => void;
+  runtimeLabel?: string;
+  sidebarWidth: number;
+  onSidebarWidthChange: (width: number) => void;
+  theme: ThemeOption;
+  accent: AccentOption;
+  onThemeChange: (theme: ThemeOption) => void;
+  onAccentChange: (accent: AccentOption) => void;
+};
+
 export function SettingsPage({
   rules,
   onChange,
@@ -24,61 +83,123 @@ export function SettingsPage({
   runtimeLabel,
   sidebarWidth,
   onSidebarWidthChange,
-}: {
-  rules: CustomOrganizeRule[];
-  onChange: (rules: CustomOrganizeRule[]) => void;
-  onBack: () => void;
-  runtimeLabel?: string;
-  sidebarWidth: number;
-  onSidebarWidthChange: (width: number) => void;
-}) {
+  theme,
+  accent,
+  onThemeChange,
+  onAccentChange,
+}: SettingsPageProps) {
   const [activeTab, setActiveTab] = useState<'general' | 'organize' | 'debug' | 'cache'>('general');
+  const pageTitle = {
+    general: '界面与主题',
+    organize: '整理规则',
+    debug: '运行诊断',
+    cache: '缓存管理',
+  }[activeTab];
 
   return (
-    <div className="fixed inset-0 z-[120] bg-base-100 flex flex-col titlebar-no-drag">
-      <header className="navbar bg-base-200 border-b border-base-300 px-4 shrink-0 min-h-12 titlebar-drag">
-        <h1 className="text-lg font-semibold titlebar-no-drag">设置</h1>
+    <div className="desktop-settings-page titlebar-no-drag">
+      <header className="desktop-settings-header titlebar-drag">
+        <button type="button" className="desktop-icon-button titlebar-no-drag" onClick={onBack} aria-label="返回图库" title="返回图库">
+          <ArrowLeft size={17} />
+        </button>
+        <h1 className="titlebar-no-drag">设置</h1>
+        <DesktopWindowControls />
       </header>
 
-      <div className="flex flex-1 min-h-0">
-        <aside
-          className="relative shrink-0 border-r border-base-300 bg-base-200 p-3 flex flex-col gap-1"
-          style={{ width: sidebarWidth }}
-        >
-          <SidebarResizeHandle width={sidebarWidth} onResize={onSidebarWidthChange} />
-          <NavButton onClick={onBack} className="w-full" title="返回图库">
-            <ArrowLeftIcon />
-            <span>返回</span>
-          </NavButton>
-          <div className="menu-title text-xs opacity-60 px-1 mt-2">设置项</div>
-          <NavButton onClick={() => setActiveTab('general')} active={activeTab === 'general'} className="w-full">
-            <span>通用</span>
-          </NavButton>
-          <NavButton onClick={() => setActiveTab('organize')} active={activeTab === 'organize'} className="w-full">
-            <span>整理规则</span>
-          </NavButton>
-          <NavButton onClick={() => setActiveTab('debug')} active={activeTab === 'debug'} className="w-full">
-            <span>调试</span>
-          </NavButton>
-          <NavButton onClick={() => setActiveTab('cache')} active={activeTab === 'cache'} className="w-full">
-            <span>缓存</span>
-          </NavButton>
+      <div
+        className="desktop-settings-body"
+        style={{ '--desktop-settings-sidebar-width': `${Math.min(sidebarWidth, 360)}px` } as CSSProperties}
+      >
+        <aside className="desktop-settings-sidebar">
+          <SidebarResizeHandle width={sidebarWidth} onResize={onSidebarWidthChange} max={360} />
+          <div className="desktop-panel-label">设置项</div>
+          <nav className="desktop-settings-nav" aria-label="设置项">
+            <button type="button" className={activeTab === 'general' ? 'is-active' : ''} aria-current={activeTab === 'general' ? 'page' : undefined} onClick={() => setActiveTab('general')}>
+              <Palette size={17} /><span>通用</span>
+            </button>
+            <button type="button" className={activeTab === 'organize' ? 'is-active' : ''} aria-current={activeTab === 'organize' ? 'page' : undefined} onClick={() => setActiveTab('organize')}>
+              <MagicWand size={17} /><span>整理规则</span>
+            </button>
+            <button type="button" className={activeTab === 'debug' ? 'is-active' : ''} aria-current={activeTab === 'debug' ? 'page' : undefined} onClick={() => setActiveTab('debug')}>
+              <Bug size={17} /><span>调试</span>
+            </button>
+            <button type="button" className={activeTab === 'cache' ? 'is-active' : ''} aria-current={activeTab === 'cache' ? 'page' : undefined} onClick={() => setActiveTab('cache')}>
+              <Database size={17} /><span>缓存</span>
+            </button>
+          </nav>
         </aside>
 
-        <main className="flex-1 min-w-0 overflow-y-auto p-5 lg:p-8">
-          <div className="max-w-4xl">
+        <main className="desktop-settings-main">
+          <div className="desktop-settings-content">
+            <h1 className="desktop-settings-page-title">{pageTitle}</h1>
             {activeTab === 'general' && (
-              <section className="rounded-box border border-base-300 bg-base-200/50 p-5">
-                <h2 className="text-base font-semibold">通用设置</h2>
-                <div className="mt-3 flex flex-col gap-2 text-sm opacity-80">
-                  <div>运行模式：{runtimeLabel ?? '—'}</div>
-                  <div>主题切换：使用图库右上角按钮。</div>
-                  <div>自定义整理规则：请在左侧选择“整理规则”。</div>
-                </div>
-              </section>
+              <>
+                <section className="desktop-settings-section">
+                  <header className="desktop-settings-section-heading"><h2>外观</h2></header>
+                  <div className="desktop-settings-row">
+                    <div><strong>界面模式</strong><span>浅色或深色</span></div>
+                    <div className="desktop-settings-mode-control" role="radiogroup" aria-label="界面模式">
+                      {([['light', '浅色'], ['dark', '深色']] as const).map(([value, label]) => (
+                        <button
+                          key={value}
+                          type="button"
+                          role="radio"
+                          aria-checked={theme === value}
+                          tabIndex={theme === value ? 0 : -1}
+                          className={theme === value ? 'is-active' : ''}
+                          onClick={() => onThemeChange(value)}
+                          onKeyDown={(event) => handleRadioNavigation(
+                            event,
+                            ['light', 'dark'],
+                            theme,
+                            onThemeChange,
+                          )}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="desktop-settings-row">
+                    <div><strong>主题色</strong><span>选中状态与关键操作</span></div>
+                  </div>
+                  <div className="desktop-settings-accent-grid" role="radiogroup" aria-label="主题色">
+                    {ACCENT_OPTIONS.map((option) => {
+                      const selected = accent === option.value;
+                      return (
+                        <button
+                          key={option.value}
+                          type="button"
+                          role="radio"
+                          aria-checked={selected}
+                          tabIndex={selected ? 0 : -1}
+                          className={`desktop-settings-accent-option ${selected ? 'is-active' : ''}`}
+                          onClick={() => onAccentChange(option.value)}
+                          onKeyDown={(event) => handleRadioNavigation(
+                            event,
+                            ACCENT_OPTIONS.map((item) => item.value),
+                            accent,
+                            onAccentChange,
+                          )}
+                        >
+                          <span className={`desktop-settings-swatch is-${option.value}`} aria-hidden="true" />
+                          <span>{option.label}</span>
+                          <span className="is-check" aria-hidden="true" />
+                        </button>
+                      );
+                    })}
+                  </div>
+                </section>
+
+                <section className="desktop-settings-section">
+                  <header className="desktop-settings-section-heading"><h2>应用</h2></header>
+                  <div className="desktop-settings-row"><div><strong>运行环境</strong></div><strong>{runtimeLabel ?? '—'}</strong></div>
+                  <div className="desktop-settings-row"><div><strong>自定义整理规则</strong></div><strong>{rules.length} 条</strong></div>
+                </section>
+              </>
             )}
             {activeTab === 'organize' && (
-              <section className="rounded-box border border-base-300 bg-base-200/50 p-5">
+              <section className="desktop-settings-section">
                 <OrganizeRulesManager rules={rules} onChange={onChange} />
               </section>
             )}
@@ -203,11 +324,11 @@ function DebugPanel() {
             </select>
           </label>
           <label className="flex items-center justify-between gap-3">
-            <span>
-              后台预取
-              <span className="block text-xs opacity-60">
-                当前目录 / 子文件夹 / 全库缩略图预取（低优先级）。关闭可对照排查“滚动时加载”行为。
-              </span>
+              <span>
+                后台预取
+                <span className="block text-xs opacity-60">
+                  空闲时生成全库缩略图，并预取下一屏与少量子图包；滚动期间自动暂停后台任务。
+                </span>
             </span>
             <input
               type="checkbox"

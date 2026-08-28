@@ -179,7 +179,7 @@ export class MemoryImportSourcePicker implements ImportSourcePicker {
   }
 
   async pickFolder(): Promise<FolderRef> {
-    return { id: '/', name: this.root.name || '演示相册', kind: 'folder' };
+    return { id: '/', name: this.root.name || '演示图包', kind: 'folder' };
   }
 
   async *listChildren(folder: FolderRef): AsyncGenerator<FsEntry, void, void> {
@@ -197,7 +197,7 @@ export class MemoryLibraryStore implements LibraryStore {
   private readonly tree = new MemoryTree();
 
   async getLibraryRoot(): Promise<FolderRef> {
-    return { id: '/', name: '全部相册', kind: 'folder' };
+    return { id: '/', name: '全部图包', kind: 'folder' };
   }
 
   async getLibraryFingerprint(): Promise<string> {
@@ -219,7 +219,7 @@ export class MemoryLibraryStore implements LibraryStore {
   }
 
   async createTopFolder(name: string): Promise<FolderRef> {
-    const root: FolderRef = { id: '/', name: '全部相册', kind: 'folder' };
+    const root: FolderRef = { id: '/', name: '全部图包', kind: 'folder' };
     const node = this.tree.createUniqueFolder(root, name);
     return { id: joinMemPath('/', node.name), name: node.name, kind: 'folder' };
   }
@@ -267,7 +267,7 @@ export class MemoryLibraryStore implements LibraryStore {
     const norm = normalizeRel(targetRelPath || '');
     const targetId = norm ? `/${norm}` : '/';
     const targetNode = this.tree.get(targetId) ?? this.tree.root;
-    const targetFolder: FolderRef = { id: targetId, name: targetNode.name || '全部相册', kind: 'folder' };
+    const targetFolder: FolderRef = { id: targetId, name: targetNode.name || '全部图包', kind: 'folder' };
     const base = norm ? lastSegment(norm) : '';
 
     const entries: ZipEntry[] = [];
