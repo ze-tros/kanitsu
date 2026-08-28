@@ -285,13 +285,11 @@ body {
   0% { transform: translateX(-100%); }
   100% { transform: translateX(100%); }
 }
-/* 滚动期间暂停加载动画；scrollend（或短延时回退）后恢复。 */
+/* 滚动期间暂停持续加载动画；scrollend（或短延时回退）后恢复。
+   不切换图片淡入动画，否则移除 .sk-scrolling 时会让所有已加载封面重新淡入。 */
 .sk-scrolling .blob-image-shimmer::before,
 .sk-scrolling .blob-image-spinner::before {
   animation-play-state: paused;
-}
-.sk-scrolling .kanitu-image-in {
-  animation: none;
 }
 .blob-image-spinner {
   position: absolute;
