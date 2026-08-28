@@ -2,8 +2,10 @@
   "name": "@kanitu/desktop",
   "private": true,
   "version": "0.1.0",
+  "productName": "全能看图王",
   "main": "dist/main.js",
   "build": {
+    "appId": "com.kanitu.viewer",
     "directories": {
       "output": "release"
     },
@@ -16,7 +18,20 @@
         "from": "../web/dist",
         "to": "web/dist"
       }
-    ]
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "portable": {
+      "artifactName": "Kanitu-Portable-${version}-${arch}.${ext}"
+    }
   },
   "scripts": {
     "dev": "tsc -p tsconfig.build.json && node scripts/dev.mjs",
@@ -32,7 +47,7 @@
   },
   "devDependencies": {
     "@types/omggif": "^1.0.5",
-    "electron": "^33.2.0",
-    "electron-builder": "^25.1.8"
+    "electron": "33.4.11",
+    "electron-builder": "25.1.8"
   }
 }

@@ -7,6 +7,8 @@ Thumbs.db
 .npm-cache/
 apps/desktop/dist-electron/
 apps/desktop/dist/
+apps/desktop/release*/
+apps/desktop/.portable-staging-*/
 *.js.map
 *.d.ts
 .test-build/

@@ -1,0 +1,68 @@
+name: Windows Portable
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-portable-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Windows x64 Portable
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      ELECTRON_MIRROR: https://github.com/electron/electron/releases/download/
+      ELECTRON_BUILDER_BINARIES_MIRROR: https://github.com/electron-userland/electron-builder-binaries/releases/download/
+      KANITU_SIGN_AND_EDIT_EXECUTABLE: 'true'
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --strict-allow-scripts
+
+      - name: Read desktop version
+        id: metadata
+        shell: pwsh
+        run: |
+          $package = Get-Content -Raw 'apps/desktop/package.json' | ConvertFrom-Json
+          "version=$($package.version)" >> $env:GITHUB_OUTPUT
+
+      - name: Type-check workspaces
+        run: npm run typecheck
+
+      - name: Run workspace tests
+        run: npm test --workspaces --if-present
+
+      - name: Build and verify Portable executable
+        run: npm run build:portable
+
+      - name: Re-verify published artifact
+        run: npm run verify:portable
+
+      - name: Upload Portable executable
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: Kanitu-Portable-${{ steps.metadata.outputs.version }}-x64
+          path: |
+            apps/desktop/release/portable/Kanitu-Portable-${{ steps.metadata.outputs.version }}-x64.exe
+            apps/desktop/release/portable/SHA256SUMS.txt
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
