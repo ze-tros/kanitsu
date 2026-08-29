@@ -35,7 +35,7 @@ async function findAvailablePort(startPort) {
   throw new Error(`No available development port in ${startPort}-${endPort}`);
 }
 
-const configuredPort = Number.parseInt(process.env.KANITU_DEV_PORT ?? '', 10);
+const configuredPort = Number.parseInt(process.env.KANITSU_DEV_PORT ?? '', 10);
 const preferredPort = Number.isInteger(configuredPort) && configuredPort > 0 && configuredPort <= 65535
   ? configuredPort
   : DEFAULT_DEV_PORT;

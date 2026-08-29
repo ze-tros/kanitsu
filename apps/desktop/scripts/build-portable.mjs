@@ -74,9 +74,9 @@ if (process.platform !== 'win32') {
   throw new Error('Windows Portable builds must run on Windows');
 }
 
-const signAndEditValue = process.env.KANITU_SIGN_AND_EDIT_EXECUTABLE ?? 'false';
+const signAndEditValue = process.env.KANITSU_SIGN_AND_EDIT_EXECUTABLE ?? 'false';
 if (signAndEditValue !== 'true' && signAndEditValue !== 'false') {
-  throw new Error('KANITU_SIGN_AND_EDIT_EXECUTABLE must be true or false');
+  throw new Error('KANITSU_SIGN_AND_EDIT_EXECUTABLE must be true or false');
 }
 
 const [rootPackage, desktopPackage] = await Promise.all([
@@ -97,7 +97,7 @@ if (
   );
 }
 
-const executableFilename = `Kanitu-Portable-${desktopPackage.version}-x64.exe`;
+const executableFilename = `Kanitsu-Portable-${desktopPackage.version}-x64.exe`;
 const electronBuilderCli = path.join(repoRoot, 'node_modules', 'electron-builder', 'cli.js');
 await stat(electronBuilderCli);
 

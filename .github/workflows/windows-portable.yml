@@ -21,7 +21,7 @@ jobs:
     env:
       ELECTRON_MIRROR: https://github.com/electron/electron/releases/download/
       ELECTRON_BUILDER_BINARIES_MIRROR: https://github.com/electron-userland/electron-builder-binaries/releases/download/
-      KANITU_SIGN_AND_EDIT_EXECUTABLE: 'true'
+      KANITSU_SIGN_AND_EDIT_EXECUTABLE: 'true'
 
     steps:
       - name: Check out repository
@@ -59,9 +59,9 @@ jobs:
       - name: Upload Portable executable
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: Kanitu-Portable-${{ steps.metadata.outputs.version }}-x64
+          name: Kanitsu-Portable-${{ steps.metadata.outputs.version }}-x64
           path: |
-            apps/desktop/release/portable/Kanitu-Portable-${{ steps.metadata.outputs.version }}-x64.exe
+            apps/desktop/release/portable/Kanitsu-Portable-${{ steps.metadata.outputs.version }}-x64.exe
             apps/desktop/release/portable/SHA256SUMS.txt
           if-no-files-found: error
           compression-level: 0

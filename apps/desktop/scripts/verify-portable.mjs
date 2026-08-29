@@ -62,7 +62,7 @@ const writeChecksum = process.argv.includes('--write-checksum');
 const outputDir = outputDirOption
   ? path.resolve(outputDirOption)
   : path.join(desktopDir, 'release', 'portable');
-const executableFilename = `Kanitu-Portable-${desktopPackage.version}-x64.exe`;
+const executableFilename = `Kanitsu-Portable-${desktopPackage.version}-x64.exe`;
 const executablePath = path.join(outputDir, executableFilename);
 const checksumPath = path.join(outputDir, checksumFilename);
 
