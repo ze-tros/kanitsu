@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>全能看图王 · daisyUI 样式 Demo</title>
+<title>Kanitsu · daisyUI 样式 Demo</title>
 <link href="https://cdn.jsdelivr.net/npm/daisyui@5" rel="stylesheet" type="text/css" />
 <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
 <style>
@@ -135,7 +135,7 @@
     <aside class="bg-base-200 min-h-full w-72 p-4 flex flex-col gap-4">
       <div class="flex items-center gap-3 px-1">
         <div class="bg-gradient-to-br from-sky-500 to-violet-500 rounded-xl w-10 h-10 flex items-center justify-center text-white text-xl">◉</div>
-        <span class="text-lg font-bold">全能看图王</span>
+        <span class="text-lg font-bold">Kanitsu</span>
       </div>
 
       <ul class="menu bg-base-200 rounded-box w-full">
@@ -208,7 +208,7 @@ var index = 0;
 
 var app = {
   initTheme: function () {
-    var saved = localStorage.getItem("kanitu-theme");
+    var saved = localStorage.getItem("kanitsu-theme");
     var theme = saved || (window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
     this.applyTheme(theme);
   },
@@ -216,7 +216,7 @@ var app = {
     document.documentElement.setAttribute("data-theme", theme);
     var sw = document.getElementById("themeSwitcher");
     if (sw) sw.checked = theme === "light";
-    localStorage.setItem("kanitu-theme", theme);
+    localStorage.setItem("kanitsu-theme", theme);
   },
   render: function () {
     document.getElementById("counter").textContent = (index + 1) + " / " + items.length;

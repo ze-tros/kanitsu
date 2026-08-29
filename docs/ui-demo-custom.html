@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>全能看图王 · 新版 UI 样式 Demo</title>
+<title>Kanitsu · 新版 UI 样式 Demo</title>
 <style>
 :root[data-theme="dark"] {
   color-scheme: dark;
@@ -177,7 +177,7 @@ button { font: inherit; cursor: pointer; }
     <div class="sidebar-inner">
       <div class="brand">
         <div class="logo">◉</div>
-        <div class="name">全能看图王</div>
+        <div class="name">Kanitsu</div>
       </div>
       <div>
         <div class="tree-title">收藏</div>
@@ -285,14 +285,14 @@ var app = {
     document.documentElement.setAttribute("data-theme", theme);
     var t = document.getElementById("themeToggle");
     if (t) t.textContent = theme === "dark" ? "☾" : "☀";
-    localStorage.setItem("kanitu-theme", theme);
+    localStorage.setItem("kanitsu-theme", theme);
   },
   toggleTheme: function() {
     var cur = document.documentElement.getAttribute("data-theme") || "dark";
     this.applyTheme(cur === "dark" ? "light" : "dark");
   },
   initTheme: function() {
-    var saved = localStorage.getItem("kanitu-theme");
+    var saved = localStorage.getItem("kanitsu-theme");
     var theme = saved || (window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
     this.applyTheme(theme);
   },

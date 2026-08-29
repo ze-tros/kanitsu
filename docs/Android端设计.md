@@ -13,7 +13,7 @@ core + organizer + cover-picker
           │
 AndroidImportSourcePicker / AndroidLibraryStore
           │
-Capacitor Kanitu plugin
+Capacitor Kanitsu plugin
   ├─ SafSource
   ├─ AlbumLibrary
   ├─ ThumbnailService
@@ -28,7 +28,7 @@ Capacitor Kanitu plugin
 |---|---|
 | `apps/mobile/capacitor.config.ts` | 应用 ID、名称、Web 资源目录和 Android 配置 |
 | `apps/mobile/android/` | Gradle 工程和 Android 资源 |
-| `KanituPlugin.java` | Capacitor 方法、后台线程、任务取消、进度事件和调试接口 |
+| `KanitsuPlugin.java` | Capacitor 方法、后台线程、任务取消、进度事件和调试接口 |
 | `SafSource.java` | SAF 目录访问与原生整树导入 |
 | `AlbumLibrary.java` | 应用图库 CRUD、路径校验和指纹 |
 | `ThumbnailService.java` | 缩略图解码、GIF、队列与磁盘缓存 |
@@ -84,7 +84,7 @@ ACTION_OPEN_DOCUMENT_TREE
 
 ## 6. 缩略图
 
-`KanituPlugin` 使用固定大小线程池处理请求，`ThumbnailService` 再通过信号量限制并发解码数量。缓存键包含文件路径、修改时间、大小、目标尺寸和实现版本。
+`KanitsuPlugin` 使用固定大小线程池处理请求，`ThumbnailService` 再通过信号量限制并发解码数量。缓存键包含文件路径、修改时间、大小、目标尺寸和实现版本。
 
 处理策略：
 

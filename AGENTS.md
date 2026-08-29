@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-This repository is an npm workspace monorepo for Kanitu, a local-first image viewer. Application shells live in `apps/`: `web` contains the Vite/React entry point, `desktop` contains Electron main/preload code, and `mobile` contains the Capacitor Android project. Reusable TypeScript modules live in `packages/`: `core` owns library operations and domain types, `fs-adapter` abstracts storage, `organizer` and `cover-picker` provide focused features, `image-pipeline` defines image processing, and `ui` contains shared React components. Unit tests are colocated in each package's `test/` directory. Design notes and prototypes belong in `docs/`; Android resources remain under `apps/mobile/android/app/src/main/res/`.
+This repository is an npm workspace monorepo for Kanitsu, a local-first image viewer. Application shells live in `apps/`: `web` contains the Vite/React entry point, `desktop` contains Electron main/preload code, and `mobile` contains the Capacitor Android project. Reusable TypeScript modules live in `packages/`: `core` owns library operations and domain types, `fs-adapter` abstracts storage, `organizer` and `cover-picker` provide focused features, `image-pipeline` defines image processing, and `ui` contains shared React components. Unit tests are colocated in each package's `test/` directory. Design notes and prototypes belong in `docs/`; Android resources remain under `apps/mobile/android/app/src/main/res/`.
 
 ## Build, Test, and Development Commands
 
