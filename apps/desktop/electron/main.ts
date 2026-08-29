@@ -10,12 +10,12 @@ import archiver from 'archiver';
 import { imageSize } from 'image-size';
 import { logger, readLogTail, setLogLevel } from './logger';
 
-// 应用 bundle 协议：生产构建渲染层以 kanitu-app:// 加载。file:// 下绝对路径会
+// 应用 bundle 协议：生产构建渲染层以 kanitsu-app:// 加载。file:// 下绝对路径会
 // 404、且 type=module 脚本会被 CORS 拦截（白屏）；自定义 scheme 一步规避，
 // 顺带为 SPA 路由/安全边界打底。必须在 app ready 之前注册。
 protocol.registerSchemesAsPrivileged([
   {
-    scheme: 'kanitu-app',
+    scheme: 'kanitsu-app',
     privileges: {
       standard: true,
       secure: true,
@@ -850,6 +850,12 @@ function bundleRoot(): string {
   return path.join(__dirname, '../../web/dist');
 }
 
+/** Returns the application icon both in development and in packaged builds. */
+function applicationIconPath(): string {
+  if (app.isPackaged) return path.join(process.resourcesPath, 'kanitsu-icon.png');
+  return path.resolve(__dirname, '../../..', 'assets', 'kanitsu-icon.png');
+}
+
 const BUNDLE_MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -870,13 +876,13 @@ const BUNDLE_MIME: Record<string, string> = {
 };
 
 /**
- * Registers the `kanitu-app://` protocol serving apps/web/dist build output.
+ * Registers the `kanitsu-app://` protocol serving apps/web/dist build output.
  * 比 loadFile(file://) 稳：统一 scheme 规避绝对路径 404 与 file:// module CORS；
  * 只允许 dist 目录内文件（防目录穿越）。
  */
 function registerBundleProtocol(): void {
   const root = bundleRoot();
-  protocol.handle('kanitu-app', async (request) => {
+  protocol.handle('kanitsu-app', async (request) => {
     const url = new URL(request.url);
     let rel = decodeURIComponent(url.pathname).replace(/^\/+/, '');
     if (!rel) rel = 'index.html';
@@ -896,12 +902,12 @@ function registerBundleProtocol(): void {
 }
 
 /**
- * Registers a guarded `kanitu-file://` protocol so the renderer can display the
+ * Registers a guarded `kanitsu-file://` protocol so the renderer can display the
  * ORIGINAL file: Chromium streams and decodes it in the renderer (no cap, no giant
  * IPC buffer). Only files inside the library are served.
  */
 function registerViewerProtocol(): void {
-  protocol.handle('kanitu-file', async (request) => {
+  protocol.handle('kanitsu-file', async (request) => {
     const filePath = new URL(request.url).searchParams.get('p');
     if (!filePath) return new Response('错误请求', { status: 400 });
     try {
@@ -937,7 +943,8 @@ function createWindow() {
     minWidth: 800,
     minHeight: 560,
     frame: false,
-    title: '全能看图王',
+    title: 'Kanitsu',
+    icon: applicationIconPath(),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -970,9 +977,9 @@ function createWindow() {
     const cacheBust = `v=${Date.now()}`;
     void win.loadURL(url.includes('?') ? `${url}&${cacheBust}` : `${url}?${cacheBust}`);
   } else {
-    // 生产构建：走 kanitu-app:// 协议（file:// 下绝对路径/模块脚本会白屏）。
+    // 生产构建：走 kanitsu-app:// 协议（file:// 下绝对路径/模块脚本会白屏）。
     // 查询串仅用于破缓存，协议处理器按 pathname 服务文件。
-    void win.loadURL(`kanitu-app://bundle/index.html?v=${Date.now()}`);
+    void win.loadURL(`kanitsu-app://bundle/index.html?v=${Date.now()}`);
   }
 }
 

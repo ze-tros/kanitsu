@@ -2,7 +2,7 @@
 
 @plugin "daisyui" {
   themes: light --default, dark --prefersdark;
-  root: "#kanitu-unused-theme-root";
+  root: "#kanitsu-unused-theme-root";
   exclude: rootscrollgutter, rootscrolllock, drawer, modal;
 }
 
@@ -279,9 +279,9 @@ body {
     transparent 100%
   );
   will-change: transform;
-  animation: kanitu-shimmer-sweep 1.2s linear infinite;
+  animation: kanitsu-shimmer-sweep 1.2s linear infinite;
 }
-@keyframes kanitu-shimmer-sweep {
+@keyframes kanitsu-shimmer-sweep {
   0% { transform: translateX(-100%); }
   100% { transform: translateX(100%); }
 }
@@ -416,17 +416,17 @@ body {
 }
 
 /* —— 柔和动画 ——
-   kanitu-image-in：缩略图/原图就绪换入时淡入，取代生硬硬切。
+   kanitsu-image-in：缩略图/原图就绪换入时淡入，取代生硬硬切。
    仅合成器属性（opacity），不触发 layout；尊重系统“减少动态效果”。 */
-@keyframes kanitu-image-in {
+@keyframes kanitsu-image-in {
   from { opacity: 0; }
   to { opacity: 1; }
 }
-.kanitu-image-in {
-  animation: kanitu-image-in 180ms ease-out both;
+.kanitsu-image-in {
+  animation: kanitsu-image-in 180ms ease-out both;
 }
 @media (prefers-reduced-motion: reduce) {
-  .kanitu-image-in {
+  .kanitsu-image-in {
     animation: none !important;
   }
 }
@@ -659,35 +659,13 @@ html[data-theme="light"][data-accent="graphite"] {
 }
 
 .desktop-brand-mark {
-  position: relative;
+  display: block;
   width: 28px;
   height: 28px;
   flex: 0 0 28px;
-  overflow: hidden;
-  border: 1px solid var(--desktop-accent-line);
+  object-fit: contain;
   border-radius: var(--desktop-radius-control);
-  background: var(--desktop-accent-soft);
-  box-shadow: inset 0 1px rgb(255 255 255 / 8%);
-}
-
-.desktop-brand-mark > span {
-  position: absolute;
-  top: 5px;
-  width: 5px;
-  height: 17px;
-  border-radius: 2px;
-  background: var(--desktop-accent-fill);
-  transform: skewX(-18deg);
-}
-
-.desktop-brand-mark > span:first-child {
-  left: 7px;
-}
-
-.desktop-brand-mark > span:last-child {
-  top: 11px;
-  right: 7px;
-  height: 11px;
+  user-select: none;
 }
 
 .desktop-brand-lockup > div {

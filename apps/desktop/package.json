@@ -1,11 +1,12 @@
 {
-  "name": "@kanitu/desktop",
+  "name": "@kanitsu/desktop",
   "private": true,
   "version": "0.1.0",
-  "productName": "全能看图王",
+  "productName": "Kanitsu",
   "main": "dist/main.js",
   "build": {
-    "appId": "com.kanitu.viewer",
+    "appId": "com.kanitsu.viewer",
+    "icon": "../../assets/kanitsu-icon.png",
     "directories": {
       "output": "release"
     },
@@ -17,6 +18,10 @@
       {
         "from": "../web/dist",
         "to": "web/dist"
+      },
+      {
+        "from": "../../assets/kanitsu-icon.png",
+        "to": "kanitsu-icon.png"
       }
     ],
     "win": {
@@ -27,10 +32,11 @@
             "x64"
           ]
         }
-      ]
+      ],
+      "icon": "../../assets/kanitsu-icon.ico"
     },
     "portable": {
-      "artifactName": "Kanitu-Portable-${version}-${arch}.${ext}"
+      "artifactName": "Kanitsu-Portable-${version}-${arch}.${ext}"
     }
   },
   "scripts": {

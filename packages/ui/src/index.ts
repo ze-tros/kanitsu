@@ -1,4 +1,5 @@
 export * from './BlobImage';
+export * from './KanitsuLogo';
 export * from './CardMotion';
 export * from './fpsMonitor';
 export * from './objectUrlPool';

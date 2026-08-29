@@ -35,6 +35,7 @@ import type { FileRef, ImportSourcePicker, LibraryStore } from '../../../fs-adap
 import { organizeByFolder, type CustomOrganizeRule } from '../../../organizer/src/index';
 import { pickCover } from '../../../cover-picker/src/index';
 import { BlobImage } from '../BlobImage';
+import { KanitsuLogo } from '../KanitsuLogo';
 import {
   preloadThumbnails,
   THUMB_PRIORITY_CURRENT_DIR,
@@ -570,11 +571,11 @@ export function MobileApp({
   const [blurredImages, setBlurredImages] = useState<ReadonlySet<string>>(() => loadBlurredImages());
   const [pinnedCovers, setPinnedCovers] = useState<Record<string, string>>(() => loadPinnedCovers());
   const [customRules, setCustomRules] = useState<CustomOrganizeRule[]>(() => loadCustomRules());
-  const [showFileNames, setShowFileNames] = useState<boolean>(() => localStorage.getItem('kanitu.showFileNames') === '1');
+  const [showFileNames, setShowFileNames] = useState<boolean>(() => localStorage.getItem('kanitsu.showFileNames') === '1');
   const [sortMode, setSortMode] = useState<'default' | 'name' | 'date' | 'size'>('default');
   /** 包含子目录聚合视图（DESIGN.md 4.3）：图片区显示当前目录及其所有子目录的图片。 */
   const [aggregate, setAggregate] = useState(false);
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>(() => (localStorage.getItem('kanitu.viewMode') === 'list' ? 'list' : 'grid'));
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>(() => (localStorage.getItem('kanitsu.viewMode') === 'list' ? 'list' : 'grid'));
 
   // ===== UI 层状态 =====
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -733,8 +734,8 @@ export function MobileApp({
   const stackRef = useRef<StackEntry[]>([]);
 
   const readStackSnapshot = useCallback((): StackEntry[] => {
-    const s = window.history.state as { kanituStack?: unknown } | null;
-    return Array.isArray(s?.kanituStack) ? (s.kanituStack as StackEntry[]) : [];
+    const s = window.history.state as { kanitsuStack?: unknown } | null;
+    return Array.isArray(s?.kanitsuStack) ? (s.kanitsuStack as StackEntry[]) : [];
   }, []);
 
   const closeOverlayUI = useCallback((layer: OverlayLayer) => {
@@ -802,7 +803,7 @@ export function MobileApp({
   const openOverlay = useCallback((layer: OverlayLayer) => {
     const next: StackEntry[] = [...stackRef.current, { type: 'overlay', layer }];
     stackRef.current = next;
-    window.history.pushState({ kanituStack: next }, '');
+    window.history.pushState({ kanitsuStack: next }, '');
   }, []);
 
   /** 主动关闭某 overlay：同步更新栈 + 回退对应步数的 history，popstate 对账后自然忽略。 */
@@ -837,7 +838,7 @@ export function MobileApp({
       if (target === (selectedFolderId || snap.rootId)) return;
       const next: StackEntry[] = [...stackRef.current, { type: 'folder', folderId: target }];
       stackRef.current = next;
-      window.history.pushState({ kanituStack: next }, '');
+      window.history.pushState({ kanitsuStack: next }, '');
       setSelectedFolderId(target);
       const folder = snap.folders[target];
       if (folder && folder.childCount > 0) {
@@ -1390,7 +1391,7 @@ export function MobileApp({
         onSelect: () => {
           const next = viewMode === 'list' ? 'grid' : 'list';
           setViewMode(next);
-          localStorage.setItem('kanitu.viewMode', next);
+          localStorage.setItem('kanitsu.viewMode', next);
         },
       },
       {
@@ -1399,7 +1400,7 @@ export function MobileApp({
         onSelect: () => {
           const next = !showFileNames;
           setShowFileNames(next);
-          localStorage.setItem('kanitu.showFileNames', next ? '1' : '0');
+          localStorage.setItem('kanitsu.showFileNames', next ? '1' : '0');
         },
       },
       ...(importReport ? [{ label: '查看导入报告', icon: '📋', onSelect: () => { setShowReport(true); openOverlay('report'); } }] : []),
@@ -1480,7 +1481,7 @@ export function MobileApp({
   }, []);
 
   // ===== 渲染 =====
-  const title = searchActive ? '' : isRoot ? '全能看图王' : selectedFolder?.name ?? '';
+  const title = searchActive ? '' : isRoot ? 'Kanitsu' : selectedFolder?.name ?? '';
   const subtitle = selectedFolder
     ? `${selectedFolder.directImageCount} 图片 · ${selectedFolder.childCount} 子目录`
     : '';
@@ -1823,8 +1824,8 @@ export function MobileApp({
           <div className="m-drawer-mask absolute inset-0 bg-black/45" onClick={() => closeOverlay('drawer')} />
           <aside className="m-drawer-panel absolute left-0 top-0 bottom-0 w-[84vw] max-w-[340px] bg-base-100 shadow-2xl flex flex-col" style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}>
             <div className="px-4 py-3.5 border-b border-base-300/70 flex items-center gap-2.5 shrink-0">
-              <span className="w-8 h-8 rounded-xl bg-gradient-to-br from-sky-500 to-violet-500 flex items-center justify-center text-white text-sm">图</span>
-              <span className="text-base font-semibold">全能看图王</span>
+              <KanitsuLogo className="w-8 h-8 rounded-xl object-contain shrink-0" alt="" aria-hidden="true" />
+              <span className="text-base font-semibold">Kanitsu</span>
             </div>
             <div className="flex-1 overflow-y-auto overscroll-contain p-2" style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 12px)' }}>
               {rootFolder && (

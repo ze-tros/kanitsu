@@ -79,6 +79,7 @@ import type { FileRef } from '../../fs-adapter/src/types';
 import { organizeByFolder, type CustomOrganizeRule } from '../../organizer/src/index';
 import { pickCover } from '../../cover-picker/src/index';
 import { BlobImage } from './BlobImage';
+import { KanitsuLogo } from './KanitsuLogo';
 import {
   getThumbnailBlob,
   preloadThumbnails,
@@ -196,8 +197,8 @@ function downloadBlob(blob: Blob, fileName: string): void {
   URL.revokeObjectURL(url);
 }
 
-const BLUR_STORAGE_KEY = 'kanitu-blurred-images';
-const PINNED_COVERS_KEY = 'kanitu-pinned-covers';
+const BLUR_STORAGE_KEY = 'kanitsu-blurred-images';
+const PINNED_COVERS_KEY = 'kanitsu-pinned-covers';
 
 // 子文件夹预览图预加载参数：进入某文件夹时，为每个子文件夹的前若干张
 // 缩略图预热缓存（见下方 useEffect），点进子文件夹时网格立即可用。
@@ -240,7 +241,7 @@ export function savePinnedCovers(covers: Record<string, string>): void {
 export function loadBlurredImages(): ReadonlySet<string> {
   try {
     // 旧版按相册（文件夹）存储，现改为逐图标记，作废旧键。
-    localStorage.removeItem('kanitu-blurred-albums');
+    localStorage.removeItem('kanitsu-blurred-albums');
     const raw = localStorage.getItem(BLUR_STORAGE_KEY);
     return new Set<string>(raw ? (JSON.parse(raw) as string[]) : []);
   } catch {
@@ -298,19 +299,19 @@ export function LibraryBrowser({
   const [blurredImages, setBlurredImages] = useState<ReadonlySet<string>>(() => loadBlurredImages());
   const [searchQuery, setSearchQuery] = useState('');
   const [theme, setTheme] = useState<ThemeOption>(() => {
-    const saved = localStorage.getItem('kanitu-theme');
+    const saved = localStorage.getItem('kanitsu-theme');
     if (saved === 'light' || saved === 'dark') return saved;
     return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
   });
   const [accent, setAccent] = useState<AccentOption>(() => {
-    const saved = localStorage.getItem('kanitu-accent');
+    const saved = localStorage.getItem('kanitsu-accent');
     return saved === 'coral' || saved === 'amber' || saved === 'graphite' ? saved : 'cobalt';
   });
   const [viewMode, setViewMode] = useState<ViewMode>(() =>
-    localStorage.getItem('kanitu-view-mode') === 'list' ? 'list' : 'grid',
+    localStorage.getItem('kanitsu-view-mode') === 'list' ? 'list' : 'grid',
   );
   const [inspectorOpen, setInspectorOpen] = useState(() =>
-    localStorage.getItem('kanitu-inspector-open') === '1',
+    localStorage.getItem('kanitsu-inspector-open') === '1',
   );
   const [sortMode, setSortMode] = useState<SortMode>('name');
   const [showNames, setShowNames] = useState(true);
@@ -319,10 +320,10 @@ export function LibraryBrowser({
   const [sidebarHidden, setSidebarHidden] = useState(() => {
     // 手机竖屏（<1024px）默认收起侧栏；桌面端沿用本地记忆。
     if (typeof window !== 'undefined' && window.innerWidth < 1024) return true;
-    return localStorage.getItem('kanitu-sidebar-hidden') === '1';
+    return localStorage.getItem('kanitsu-sidebar-hidden') === '1';
   });
   const [sidebarWidth, setSidebarWidth] = useState(() => {
-    const value = Number(localStorage.getItem('kanitu-sidebar-width'));
+    const value = Number(localStorage.getItem('kanitsu-sidebar-width'));
     return Number.isFinite(value) && value >= 200 ? Math.min(value, 360) : 288;
   });
   const [customRules, setCustomRules] = useState<CustomOrganizeRule[]>(() => loadCustomRules());
@@ -353,7 +354,7 @@ export function LibraryBrowser({
   // 启动时把本地保存的日志等级同步给主进程：否则缩略图调试日志要等
   // “打开设置页”触发 setLogLevel 后才会开始记录。
   useEffect(() => {
-    void window.kanituDesktop?.setLogLevel?.(getLogLevelPref());
+    void window.kanitsuDesktop?.setLogLevel?.(getLogLevelPref());
   }, []);
 
   // —— 内容区滚动位置记忆：按目录保存/恢复，返回上一级再回来时停留在原处 ——
@@ -368,7 +369,7 @@ export function LibraryBrowser({
   // Persist sidebar appearance across sessions.
   useEffect(() => {
     try {
-      localStorage.setItem('kanitu-sidebar-hidden', sidebarHidden ? '1' : '0');
+      localStorage.setItem('kanitsu-sidebar-hidden', sidebarHidden ? '1' : '0');
     } catch {
       // Ignore storage errors.
     }
@@ -376,7 +377,7 @@ export function LibraryBrowser({
 
   useEffect(() => {
     try {
-      localStorage.setItem('kanitu-sidebar-width', String(sidebarWidth));
+      localStorage.setItem('kanitsu-sidebar-width', String(sidebarWidth));
     } catch {
       // Ignore storage errors.
     }
@@ -384,8 +385,8 @@ export function LibraryBrowser({
 
   useEffect(() => {
     try {
-      localStorage.setItem('kanitu-view-mode', viewMode);
-      localStorage.setItem('kanitu-inspector-open', inspectorOpen ? '1' : '0');
+      localStorage.setItem('kanitsu-view-mode', viewMode);
+      localStorage.setItem('kanitsu-inspector-open', inspectorOpen ? '1' : '0');
     } catch {
       // Ignore storage errors.
     }
@@ -395,8 +396,8 @@ export function LibraryBrowser({
     document.documentElement.dataset.theme = theme;
     document.documentElement.dataset.accent = accent;
     document.documentElement.style.colorScheme = theme;
-    localStorage.setItem('kanitu-theme', theme);
-    localStorage.setItem('kanitu-accent', accent);
+    localStorage.setItem('kanitsu-theme', theme);
+    localStorage.setItem('kanitsu-accent', accent);
   }, [accent, theme]);
 
   // Startup: load the cached index (no full re-scan). Fallback scans + persists.
@@ -827,7 +828,7 @@ export function LibraryBrowser({
   const rootFolder = snapshot?.folders[snapshot.rootId] ?? null;
   const selectedParentFolder = selectedFolder?.parentId ? snapshot?.folders[selectedFolder.parentId] ?? null : null;
   const runtimeLabel =
-    (window as { kanituDesktop?: { platform?: string } }).kanituDesktop?.platform === 'electron'
+    (window as { kanitsuDesktop?: { platform?: string } }).kanitsuDesktop?.platform === 'electron'
       ? 'Electron 本地图库'
       : 'Web 演示图库';
   const isRootSelected = !selectedFolderId || selectedFolderId === snapshot?.rootId;
@@ -2522,11 +2523,11 @@ function TitleBar({
   onImport: () => void;
 }) {
   return (
-    <header className={`app-titlebar ${window.kanituDesktop?.platform === 'electron' ? 'titlebar-drag' : ''}`}>
-      <div className="desktop-brand-lockup" aria-label="全能看图王">
-        <span className="desktop-brand-mark" aria-hidden="true"><span /><span /></span>
+    <header className={`app-titlebar ${window.kanitsuDesktop?.platform === 'electron' ? 'titlebar-drag' : ''}`}>
+      <div className="desktop-brand-lockup" aria-label="Kanitsu">
+        <KanitsuLogo className="desktop-brand-mark" alt="" aria-hidden="true" />
         <div>
-          <strong>全能看图王</strong>
+          <strong>Kanitsu</strong>
           <span>本地图包工作台</span>
         </div>
       </div>
