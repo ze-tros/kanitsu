@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { CustomOrganizeRule } from '../../../organizer/src/index';
-import type { KanituAndroidBridge } from '../../../fs-adapter/src/android';
+import type { KanitsuAndroidBridge } from '../../../fs-adapter/src/android';
 import { OrganizeRulesManager } from '../OrganizeRulesModal';
 import { getRendererThumbnailStats, clearThumbnailCache, type RendererThumbnailStats } from '../thumbnailCache';
 import {
@@ -24,13 +24,13 @@ const LEVEL_LABELS: ReadonlyArray<[LogLevel, string]> = [
 ];
 
 /** ui 包不直接依赖 fs-adapter/android 的全局声明，这里做类型化读取。 */
-function androidBridge(): KanituAndroidBridge | undefined {
-  return (window as unknown as { kanituAndroid?: KanituAndroidBridge }).kanituAndroid;
+function androidBridge(): KanitsuAndroidBridge | undefined {
+  return (window as unknown as { kanitsuAndroid?: KanitsuAndroidBridge }).kanitsuAndroid;
 }
 
 /**
  * 移动端设置页：全屏列表式布局。
- * 复用桌面端的规则管理器与调试/缓存逻辑，桥接改用 window.kanituAndroid。
+ * 复用桌面端的规则管理器与调试/缓存逻辑，桥接改用 window.kanitsuAndroid。
  */
 export function MobileSettingsScreen({
   rules,
@@ -94,7 +94,7 @@ export function MobileSettingsScreen({
 
         <section className="rounded-2xl border border-base-300 bg-base-200/40 p-4">
           <h2 className="text-sm font-semibold mb-1">关于</h2>
-          <p className="text-xs opacity-60">全能看图王 · Android 模式 v{androidBridge()?.version ?? '0.1.0'}</p>
+          <p className="text-xs opacity-60">Kanitsu · Android 模式 v{androidBridge()?.version ?? '0.1.0'}</p>
         </section>
       </main>
     </div>

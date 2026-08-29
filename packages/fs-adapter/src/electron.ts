@@ -29,7 +29,7 @@ export interface ClearCacheResult {
   diskBytes: number;
 }
 
-export interface KanituDesktopBridge {
+export interface KanitsuDesktopBridge {
   platform: 'electron';
   version: string;
   getThumbnailDebugStats(): Promise<ThumbnailDebugStats>;
@@ -68,7 +68,7 @@ export interface KanituDesktopBridge {
 
 declare global {
   interface Window {
-    kanituDesktop?: KanituDesktopBridge;
+    kanitsuDesktop?: KanitsuDesktopBridge;
   }
 }
 
@@ -92,9 +92,9 @@ function toEntry(ref: FolderRef | FileRef): DesktopFsEntry {
   };
 }
 
-function requireBridge(): KanituDesktopBridge {
-  const bridge = window.kanituDesktop;
-  if (!bridge) throw new Error('kanituDesktop 桥未就绪，请在 Electron 环境中运行。');
+function requireBridge(): KanitsuDesktopBridge {
+  const bridge = window.kanitsuDesktop;
+  if (!bridge) throw new Error('kanitsuDesktop 桥未就绪，请在 Electron 环境中运行。');
   return bridge;
 }
 
@@ -169,9 +169,9 @@ export class ElectronLibraryStore implements LibraryStore {
 
   async getViewerUrl(file: FileRef): Promise<string> {
     // 查看器始终显示原始分辨率原图（保留全部像素，便于 100% 查看）。
-    // 主进程通过 kanitu-file 协议直接服务原始文件，渲染进程用解码缓存池
+    // 主进程通过 kanitsu-file 协议直接服务原始文件，渲染进程用解码缓存池
     // 预解码相邻原图来缓解大图切换卡顿（见 LibraryBrowser 的 Viewer）。
-    return `kanitu-file://file/?p=${encodeURIComponent(file.id)}`;
+    return `kanitsu-file://file/?p=${encodeURIComponent(file.id)}`;
   }
 
   releaseViewerUrl(_url: string): void {

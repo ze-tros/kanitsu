@@ -1,4 +1,4 @@
-package com.kanitu.viewer.kanitu;
+package com.kanitsu.viewer.kanitsu;
 
 import android.app.Activity;
 import android.content.Intent;
@@ -27,8 +27,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /** Capacitor bridge for SAF import, album library, thumbnails and zip export. */
-@CapacitorPlugin(name = "Kanitu")
-public class KanituPlugin extends Plugin {
+@CapacitorPlugin(name = "Kanitsu")
+public class KanitsuPlugin extends Plugin {
 
     // 有界线程池：大图库快速滚动时可见卡片 + 各级预取会同时发出大量缩略图请求，
     // 无界 cachedThreadPool 会为每个请求各起一个线程并发解码，堆内存瞬间被打爆

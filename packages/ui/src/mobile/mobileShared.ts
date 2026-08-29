@@ -50,7 +50,7 @@ export function haptic(duration = 12): void {
 
 export type ThemeMode = 'light' | 'dark' | 'system';
 
-const THEME_KEY = 'kanitu-theme';
+const THEME_KEY = 'kanitsu-theme';
 
 export function loadThemeMode(): ThemeMode {
   const v = localStorage.getItem(THEME_KEY);

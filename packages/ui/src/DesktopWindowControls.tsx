@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Minus, X } from '@phosphor-icons/react';
-import type { KanituDesktopBridge } from '../../fs-adapter/src/electron';
+import type { KanitsuDesktopBridge } from '../../fs-adapter/src/electron';
 
 export function DesktopWindowControls() {
-  const bridge = (window as { kanituDesktop?: KanituDesktopBridge }).kanituDesktop;
+  const bridge = (window as { kanitsuDesktop?: KanitsuDesktopBridge }).kanitsuDesktop;
   const isElectron = bridge?.platform === 'electron';
   const [maximized, setMaximized] = useState(false);
 

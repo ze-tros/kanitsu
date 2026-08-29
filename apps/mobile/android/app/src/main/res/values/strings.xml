@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">全能看图王</string>
-    <string name="title_activity_main">全能看图王</string>
-    <string name="package_name">com.kanitu.viewer</string>
-    <string name="custom_url_scheme">com.kanitu.viewer</string>
+    <string name="app_name">Kanitsu</string>
+    <string name="title_activity_main">Kanitsu</string>
+    <string name="package_name">com.kanitsu.viewer</string>
+    <string name="custom_url_scheme">com.kanitsu.viewer</string>
 </resources>

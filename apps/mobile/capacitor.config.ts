@@ -1,8 +1,8 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'com.kanitu.viewer',
-  appName: '全能看图王',
+  appId: 'com.kanitsu.viewer',
+  appName: 'Kanitsu',
   webDir: '../web/dist',
   android: {
     allowMixedContent: false,

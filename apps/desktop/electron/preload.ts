@@ -81,4 +81,4 @@ const bridge = {
   },
 };
 
-contextBridge.exposeInMainWorld('kanituDesktop', bridge);
+contextBridge.exposeInMainWorld('kanitsuDesktop', bridge);

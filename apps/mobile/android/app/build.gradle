@@ -1,10 +1,10 @@
 apply plugin: 'com.android.application'
 
 android {
-    namespace "com.kanitu.viewer"
+    namespace "com.kanitsu.viewer"
     compileSdk rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "com.kanitu.viewer"
+        applicationId "com.kanitsu.viewer"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1

@@ -1,4 +1,4 @@
-package com.kanitu.viewer.kanitu;
+package com.kanitsu.viewer.kanitsu;
 
 /** Emits import/export progress to the JS bridge. */
 public interface ProgressEmitter {

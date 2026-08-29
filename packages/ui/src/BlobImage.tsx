@@ -79,7 +79,7 @@ export function BlobImage({
   // 缩略图优先显示图像靠上的部分（object-cover 裁剪默认居中，会裁掉主体所在的
   // 上半部）；原图查看不受影响。
   const coverClass = thumbnail ? ' object-top' : '';
-  const imageClass = `${className ?? ''}${blur ? ' blur-preview' : ''}${coverClass}${url ? ' kanitu-image-in' : ''}`;
+  const imageClass = `${className ?? ''}${blur ? ' blur-preview' : ''}${coverClass}${url ? ' kanitsu-image-in' : ''}`;
   return (
     <div
       className={`blob-image w-full h-full${url ? ' is-ready' : ''}${failed ? ' failed' : ''}`}

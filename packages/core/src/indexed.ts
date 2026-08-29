@@ -1,7 +1,7 @@
 import type { FolderNode, ImageEntry, LibrarySnapshot } from './types';
 import type { PersistentIndex } from './library';
 
-const DB_NAME = 'kanitu-index';
+const DB_NAME = 'kanitsu-index';
 const DB_VERSION = 2;
 const FOLDERS = 'folders';
 const IMAGES = 'images';

@@ -1,7 +1,7 @@
 import { useMemo, useState, type FormEvent } from 'react';
 import { applyCustomRule, BUILTIN_ORGANIZE_RULES, type CustomOrganizeRule } from '../../organizer/src/index';
 
-const STORAGE_KEY = 'kanitu-organize-custom-rules';
+const STORAGE_KEY = 'kanitsu-organize-custom-rules';
 
 function isValidCustomRule(value: unknown): value is CustomOrganizeRule {
   if (!value || typeof value !== 'object') return false;

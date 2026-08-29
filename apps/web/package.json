@@ -1,5 +1,5 @@
 {
-  "name": "@kanitu/web",
+  "name": "@kanitsu/web",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -10,12 +10,12 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@kanitu/core": "0.1.0",
-    "@kanitu/cover-picker": "0.1.0",
-    "@kanitu/fs-adapter": "0.1.0",
-    "@kanitu/image-pipeline": "0.1.0",
-    "@kanitu/organizer": "0.1.0",
-    "@kanitu/ui": "0.1.0",
+    "@kanitsu/core": "0.1.0",
+    "@kanitsu/cover-picker": "0.1.0",
+    "@kanitsu/fs-adapter": "0.1.0",
+    "@kanitsu/image-pipeline": "0.1.0",
+    "@kanitsu/organizer": "0.1.0",
+    "@kanitsu/ui": "0.1.0",
     "@tailwindcss/vite": "^4.3.3",
     "daisyui": "^5.7.22",
     "react": "^18.3.1",

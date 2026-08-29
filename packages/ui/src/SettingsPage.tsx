@@ -241,7 +241,7 @@ function DebugPanel() {
 
   useEffect(() => {
     setLogLevelPref(level);
-    void window.kanituDesktop?.setLogLevel?.(level);
+    void window.kanitsuDesktop?.setLogLevel?.(level);
   }, [level]);
 
   useEffect(() => {
@@ -264,7 +264,7 @@ function DebugPanel() {
   };
 
   const refreshMainLogs = async (): Promise<void> => {
-    const lines = (await window.kanituDesktop?.readLogs?.(300)) ?? [];
+    const lines = (await window.kanitsuDesktop?.readLogs?.(300)) ?? [];
     setMainLogs(lines);
   };
 
@@ -347,7 +347,7 @@ function DebugPanel() {
             读取
           </button>
         </div>
-        <p className="text-xs opacity-60 mb-2">位于 userData/logs/kanitu-日期.log；乱码时以此为准（控制台可能受系统代码页影响）。</p>
+        <p className="text-xs opacity-60 mb-2">位于 userData/logs/kanitsu-日期.log；乱码时以此为准（控制台可能受系统代码页影响）。</p>
         <div className="max-h-48 overflow-y-auto">
           {mainLogs.length === 0 ? (
             <div className="text-sm opacity-60 py-2">暂无主进程日志。</div>
@@ -402,7 +402,7 @@ function CachePanel() {
   useEffect(() => {
     const refresh = (): void => {
       setRenderer(getRendererThumbnailStats());
-      void window.kanituDesktop
+      void window.kanitsuDesktop
         ?.getThumbnailDebugStats?.()
         .then((stats) => setMainStats(stats))
         .catch(() => setMainStats(null));
@@ -422,7 +422,7 @@ function CachePanel() {
   };
 
   const handleClearMainCache = async (): Promise<void> => {
-    const result: ClearCacheResult | null = await window.kanituDesktop?.clearCaches?.() ?? null;
+    const result: ClearCacheResult | null = await window.kanitsuDesktop?.clearCaches?.() ?? null;
     if (!result) {
       setClearResult('Web/演示模式无主进程缓存可清。');
       return;

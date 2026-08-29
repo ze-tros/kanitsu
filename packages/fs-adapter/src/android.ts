@@ -51,9 +51,9 @@ export interface AndroidExportResultPayload {
 
 /**
  * Raw Capacitor plugin surface. Binary values cross the JS bridge as base64 strings,
- * so this is intentionally separate from the wrapped KanituAndroidBridge below.
+ * so this is intentionally separate from the wrapped KanitsuAndroidBridge below.
  */
-interface KanituPluginNative {
+interface KanitsuPluginNative {
   pickSourceFolder(): Promise<AndroidFsEntry | null>;
   listSourceChildren(opts: { folder: AndroidFsEntry }): Promise<{ entries: AndroidFsEntry[] }>;
   readSourceBlob(opts: { file: AndroidFsEntry }): Promise<AndroidBinaryPayload>;
@@ -80,8 +80,8 @@ interface KanituPluginNative {
   readLogs(opts: { maxLines?: number }): Promise<{ lines: string[] }>;
 }
 
-/** Wrapped bridge exposed as window.kanituAndroid to the shared UI/Core code. */
-export interface KanituAndroidBridge {
+/** Wrapped bridge exposed as window.kanitsuAndroid to the shared UI/Core code. */
+export interface KanitsuAndroidBridge {
   platform: 'android';
   version: string;
   pickSourceFolder(): Promise<AndroidFsEntry | null>;
@@ -113,7 +113,7 @@ export interface KanituAndroidBridge {
 
 declare global {
   interface Window {
-    kanituAndroid?: KanituAndroidBridge;
+    kanitsuAndroid?: KanitsuAndroidBridge;
   }
 }
 
@@ -162,23 +162,23 @@ function toEntry(ref: FolderRef | FileRef): AndroidFsEntry {
   };
 }
 
-let bridgePromise: Promise<KanituAndroidBridge> | undefined;
+let bridgePromise: Promise<KanitsuAndroidBridge> | undefined;
 
 /**
- * Eagerly registers the Capacitor plugin and exposes window.kanituAndroid.
+ * Eagerly registers the Capacitor plugin and exposes window.kanitsuAndroid.
  * Call once at app startup on Android so platform detection and later calls are synchronous.
  */
-export function initAndroidBridge(): Promise<KanituAndroidBridge> {
+export function initAndroidBridge(): Promise<KanitsuAndroidBridge> {
   return requireBridge();
 }
 
-function requireBridge(): Promise<KanituAndroidBridge> {
-  if (window.kanituAndroid) return Promise.resolve(window.kanituAndroid);
+function requireBridge(): Promise<KanitsuAndroidBridge> {
+  if (window.kanitsuAndroid) return Promise.resolve(window.kanitsuAndroid);
   if (!bridgePromise) {
     bridgePromise = (async () => {
       const { registerPlugin } = await import('@capacitor/core');
-      const p = registerPlugin<KanituPluginNative>('Kanitu');
-      const bridge: KanituAndroidBridge = {
+      const p = registerPlugin<KanitsuPluginNative>('Kanitsu');
+      const bridge: KanitsuAndroidBridge = {
         platform: 'android',
         version: '0.1.0',
         pickSourceFolder: () => p.pickSourceFolder(),
@@ -231,7 +231,7 @@ function requireBridge(): Promise<KanituAndroidBridge> {
         setLogLevel: (level) => p.setLogLevel({ level }),
         readLogs: async (maxLines) => (await p.readLogs({ maxLines })).lines,
       };
-      window.kanituAndroid = bridge;
+      window.kanitsuAndroid = bridge;
       return bridge;
     })();
   }

@@ -1,6 +1,6 @@
 // 主进程日志：结构化（时间/等级/tag/消息），写 UTF-8 日志文件 + 同步控制台。
 // 不引入第三方框架：本应用只需 分级过滤 + 落盘 + 尾部读取，几十行足够，
-// 也避免给 Electron 打包引入额外依赖。日志文件在 userData/logs/kanitu-日期.log。
+// 也避免给 Electron 打包引入额外依赖。日志文件在 userData/logs/kanitsu-日期.log。
 import { app } from 'electron';
 import { appendFile, mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -47,7 +47,7 @@ function asciiForConsole(text: string): string {
 function todayFile(): string {
   const d = new Date();
   const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
-  return path.join(app.getPath('userData'), 'logs', `kanitu-${stamp}.log`);
+  return path.join(app.getPath('userData'), 'logs', `kanitsu-${stamp}.log`);
 }
 
 async function ensureFile(): Promise<string> {

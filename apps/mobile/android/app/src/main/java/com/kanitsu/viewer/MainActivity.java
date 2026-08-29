@@ -1,16 +1,16 @@
-package com.kanitu.viewer;
+package com.kanitsu.viewer;
 
 import android.content.res.Configuration;
 import android.os.Build;
 import android.os.Bundle;
 import android.view.View;
 import com.getcapacitor.BridgeActivity;
-import com.kanitu.viewer.kanitu.KanituPlugin;
+import com.kanitsu.viewer.kanitsu.KanitsuPlugin;
 
 public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
-        registerPlugin(KanituPlugin.class);
+        registerPlugin(KanitsuPlugin.class);
         super.onCreate(savedInstanceState);
 
         // 状态栏/导航栏颜色与 web 内容顶部（导航栏 base-200）一致，避免颜色割裂。

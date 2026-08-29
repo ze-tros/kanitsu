@@ -20,19 +20,19 @@ export default defineConfig({
   base: './',
   resolve: {
     alias: {
-      '@kanitu/core': pkg('core', 'src', 'index.ts'),
-      '@kanitu/fs-adapter': pkg('fs-adapter', 'src', 'index.ts'),
-      '@kanitu/organizer': pkg('organizer', 'src', 'index.ts'),
-      '@kanitu/cover-picker': pkg('cover-picker', 'src', 'index.ts'),
-      '@kanitu/image-pipeline': pkg('image-pipeline', 'src', 'index.ts'),
-      '@kanitu/ui': pkg('ui', 'src', 'index.ts'),
+      '@kanitsu/core': pkg('core', 'src', 'index.ts'),
+      '@kanitsu/fs-adapter': pkg('fs-adapter', 'src', 'index.ts'),
+      '@kanitsu/organizer': pkg('organizer', 'src', 'index.ts'),
+      '@kanitsu/cover-picker': pkg('cover-picker', 'src', 'index.ts'),
+      '@kanitsu/image-pipeline': pkg('image-pipeline', 'src', 'index.ts'),
+      '@kanitsu/ui': pkg('ui', 'src', 'index.ts'),
     },
   },
   plugins: [
     react(),
     tailwindcss(),
     {
-      name: 'watch-kanitu-packages',
+      name: 'watch-kanitsu-packages',
       configureServer(server) {
         const packagesPath = normalize(packagesDir);
         server.watcher.add(packagesPath);
@@ -50,12 +50,12 @@ export default defineConfig({
   },
   optimizeDeps: {
     exclude: [
-      '@kanitu/core',
-      '@kanitu/fs-adapter',
-      '@kanitu/organizer',
-      '@kanitu/cover-picker',
-      '@kanitu/image-pipeline',
-      '@kanitu/ui',
+      '@kanitsu/core',
+      '@kanitsu/fs-adapter',
+      '@kanitsu/organizer',
+      '@kanitsu/cover-picker',
+      '@kanitsu/image-pipeline',
+      '@kanitsu/ui',
     ],
   },
 });

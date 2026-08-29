@@ -1,4 +1,4 @@
-package com.kanitu.viewer.kanitu;
+package com.kanitsu.viewer.kanitsu;
 
 import android.content.Context;
 import android.graphics.Bitmap;

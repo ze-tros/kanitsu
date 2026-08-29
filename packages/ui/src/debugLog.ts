@@ -5,8 +5,8 @@ import type { LogEntry, LogLevel } from '../../core/src/index';
 import { formatLogLine } from '../../core/src/index';
 
 const MAX_LOGS = 300;
-const LEVEL_KEY = 'kanitu-log-level';
-const PREFETCH_KEY = 'kanitu-prefetch-enabled';
+const LEVEL_KEY = 'kanitsu-log-level';
+const PREFETCH_KEY = 'kanitsu-prefetch-enabled';
 const logs: LogEntry[] = [];
 const LEVEL_ORDER: Record<LogLevel, number> = { debug: 10, info: 20, warn: 30, error: 40 };
 
