@@ -1736,6 +1736,20 @@ export function MobileApp({
                 </svg>
               </button>
             </div>
+            <button className="m-import-launch" onClick={() => void handleImport()}>
+              <span className="m-import-launch-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+              </span>
+              <span className="m-import-launch-copy">
+                <strong>导入图包</strong>
+                <small>从设备选择文件夹，自动建立本地图库</small>
+              </span>
+              <svg viewBox="0 0 24 24" className="m-import-launch-arrow" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M5 12h14M13 6l6 6-6 6" />
+              </svg>
+            </button>
           </section>
         )}
 
@@ -1965,15 +1979,13 @@ export function MobileApp({
         <nav className={`m-bottom-dock ${isRoot ? 'is-library' : 'is-package'}`} aria-label={isRoot ? '主导航' : '图包操作'}>
           {isRoot ? (
             <>
-              <button className="m-dock-button is-active" onClick={openDrawer}>
+              <button className="m-dock-button is-active" aria-current="page">
                 <MobileIcon name="🏠" className="w-5 h-5" />
                 <span>图库</span>
               </button>
-              <button className="m-dock-button is-primary" onClick={() => void handleImport()}>
-                <svg viewBox="0 0 24 24" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                  <path d="M12 5v14M5 12h14" />
-                </svg>
-                <span>导入图包</span>
+              <button className="m-dock-button" onClick={openSearch}>
+                <MobileIcon name="🔍" className="w-5 h-5" />
+                <span>搜索</span>
               </button>
               <button
                 className="m-dock-button"
@@ -2007,13 +2019,18 @@ export function MobileApp({
       {drawerOpen && (
         <div className="fixed inset-0" style={{ zIndex: Z_DRAWER }}>
           <div className="m-drawer-mask m-overlay-scrim absolute inset-0" onClick={() => closeOverlay('drawer')} />
-          <aside className="m-drawer-panel absolute left-0 top-0 bottom-0 w-[84vw] max-w-[340px] flex flex-col" style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}>
-            <div className="m-drawer-brand shrink-0">
-              <KanitsuLogo className="object-contain shrink-0" alt="" aria-hidden="true" />
-              <span className="m-drawer-brand-copy">
-                <strong>Kanitsu</strong>
-                <span>本地图包浏览器</span>
-              </span>
+          <aside className="m-directory-panel absolute inset-0 flex flex-col" style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}>
+            <div className="m-directory-header shrink-0">
+              <button className="m-icon-button" onClick={() => closeOverlay('drawer')} aria-label="关闭目录">
+                <svg viewBox="0 0 24 24" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
+              </button>
+              <div className="m-drawer-brand shrink-0">
+                <KanitsuLogo className="object-contain shrink-0" alt="" aria-hidden="true" />
+                <span className="m-drawer-brand-copy">
+                  <strong>目录</strong>
+                  <span>浏览你的本地图包</span>
+                </span>
+              </div>
             </div>
             <div className="m-drawer-tree" style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 12px)' }}>
               {rootFolder && (
