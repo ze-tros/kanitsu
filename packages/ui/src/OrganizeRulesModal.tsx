@@ -46,9 +46,13 @@ function createRuleId(): string {
 export function OrganizeRulesManager({
   rules,
   onChange,
+  showIntro = true,
+  className,
 }: {
   rules: CustomOrganizeRule[];
   onChange: (rules: CustomOrganizeRule[]) => void;
+  showIntro?: boolean;
+  className?: string;
 }) {
   const [name, setName] = useState('');
   const [pattern, setPattern] = useState('');
@@ -154,18 +158,22 @@ export function OrganizeRulesManager({
   };
 
   return (
-    <div className="flex flex-col gap-6">
-      <h3 className="font-bold text-lg">整理规则</h3>
-      <p className="text-sm opacity-70 mt-1">内置规则固定生效；自定义规则会优先于内置规则匹配，并自动保存到本机。</p>
+    <div className={`organize-rules-manager flex flex-col gap-6 ${className ?? ''}`}>
+      {showIntro && (
+        <>
+          <h3 className="font-bold text-lg">整理规则</h3>
+          <p className="text-sm opacity-70 mt-1">内置规则固定生效；自定义规则会优先于内置规则匹配，并自动保存到本机。</p>
+        </>
+      )}
 
-        <div className="mt-5">
-          <h4 className="text-sm font-semibold mb-2">内置规则</h4>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+        <div className="organize-rules-section mt-5">
+          <h4 className="organize-rules-subtitle text-sm font-semibold mb-2">内置规则</h4>
+          <div className="organize-rules-list grid grid-cols-1 md:grid-cols-2 gap-2">
             {BUILTIN_ORGANIZE_RULES.map((rule) => (
-              <div key={rule.id} className="rounded-box border border-base-300 bg-base-100 p-3">
+              <div key={rule.id} className="organize-rule-card rounded-box border border-base-300 bg-base-100 p-3">
                 <div className="flex items-center justify-between gap-2">
                   <span className="font-medium text-sm">{rule.name}</span>
-                  <span className="badge badge-sm">{rule.confidence.toFixed(2)}</span>
+                  <span className="organize-rule-score badge badge-sm">{rule.confidence.toFixed(2)}</span>
                 </div>
                 <p className="text-xs opacity-70 mt-1">{rule.description}</p>
               </div>
@@ -173,31 +181,31 @@ export function OrganizeRulesManager({
           </div>
         </div>
 
-        <div className="mt-5">
-          <h4 className="text-sm font-semibold mb-2">自定义规则</h4>
+        <div className="organize-rules-section mt-5">
+          <h4 className="organize-rules-subtitle text-sm font-semibold mb-2">自定义规则</h4>
           {rules.length === 0 ? (
-            <div className="text-sm opacity-70 border border-dashed border-base-300 rounded-box p-4 mb-4">
+            <div className="organize-rules-empty text-sm opacity-70 border border-dashed border-base-300 rounded-box p-4 mb-4">
               还没有自定义规则。添加后会保存到本机，下次打开仍可使用。
             </div>
           ) : (
-            <div className="flex flex-col gap-2 mb-4">
+            <div className="organize-rules-list flex flex-col gap-2 mb-4">
               {rules.map((rule) => (
-                <div key={rule.id} className="rounded-box border border-base-300 bg-base-100 p-3">
+                <div key={rule.id} className="organize-rule-card rounded-box border border-base-300 bg-base-100 p-3">
                   <div className="flex items-center justify-between gap-2">
                     <label className="flex items-center gap-2 cursor-pointer">
                       <input
                         type="checkbox"
-                        className="checkbox checkbox-sm"
+                        className="organize-rule-checkbox checkbox checkbox-sm"
                         checked={rule.enabled}
                         onChange={() => toggleEnabled(rule.id)}
                       />
                       <span className="font-medium text-sm">{rule.name}</span>
                     </label>
-                    <span className="badge badge-sm">{rule.confidence.toFixed(2)}</span>
+                    <span className="organize-rule-score badge badge-sm">{rule.confidence.toFixed(2)}</span>
                   </div>
-                  <p className="text-xs opacity-70 mt-1">正则：<code>{rule.pattern}</code></p>
-                  <p className="text-xs opacity-70">目标目录：<code>{rule.target}</code></p>
-                  <div className="flex gap-2 mt-2">
+                  <p className="organize-rule-meta text-xs opacity-70 mt-1">正则：<code>{rule.pattern}</code></p>
+                  <p className="organize-rule-meta text-xs opacity-70">目标目录：<code>{rule.target}</code></p>
+                  <div className="organize-rule-actions flex gap-2 mt-2">
                     <button className="btn btn-xs btn-ghost" onClick={() => startEdit(rule)}>编辑</button>
                     <button className="btn btn-xs btn-ghost text-error" onClick={() => deleteRule(rule.id)}>删除</button>
                   </div>
@@ -206,40 +214,40 @@ export function OrganizeRulesManager({
             </div>
           )}
 
-          <form className="rounded-box border border-base-300 bg-base-100 p-4 flex flex-col gap-3" onSubmit={handleSubmit}>
-            <div className="text-sm font-medium">{editingId ? '编辑规则' : '添加规则'}</div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <label className="form-control w-full">
+          <form className="organize-rule-form rounded-box border border-base-300 bg-base-100 p-4 flex flex-col gap-3" onSubmit={handleSubmit}>
+            <div className="organize-rule-form-title text-sm font-medium">{editingId ? '编辑规则' : '添加规则'}</div>
+            <div className="organize-rule-fields grid grid-cols-1 md:grid-cols-2 gap-3">
+              <label className="organize-rule-field form-control w-full">
                 <span className="label-text text-xs">名称</span>
                 <input
-                  className="input input-sm input-bordered"
+                  className="organize-rule-input input input-sm input-bordered"
                   value={name}
                   onChange={(event) => setName(event.target.value)}
                   placeholder="例如：Pixiv 作品 ID"
                 />
               </label>
-              <label className="form-control w-full">
+              <label className="organize-rule-field form-control w-full">
                 <span className="label-text text-xs">置信度（0–1）</span>
                 <input
-                  className="input input-sm input-bordered"
+                  className="organize-rule-input input input-sm input-bordered"
                   value={confidence}
                   onChange={(event) => setConfidence(event.target.value)}
                   placeholder="0.80"
                 />
               </label>
-              <label className="form-control w-full md:col-span-2">
+              <label className="organize-rule-field form-control w-full md:col-span-2">
                 <span className="label-text text-xs">正则表达式（匹配去扩展名后的文件名）</span>
                 <input
-                  className="input input-sm input-bordered font-mono"
+                  className="organize-rule-input input input-sm input-bordered font-mono"
                   value={pattern}
                   onChange={(event) => setPattern(event.target.value)}
                   placeholder={'^(\\d{1,4})_(\\d{5,})_p(\\d+)$'}
                 />
               </label>
-              <label className="form-control w-full md:col-span-2">
+              <label className="organize-rule-field form-control w-full md:col-span-2">
                 <span className="label-text text-xs">目标目录模板（$1、$2… 表示捕获组）</span>
                 <input
-                  className="input input-sm input-bordered font-mono"
+                  className="organize-rule-input input input-sm input-bordered font-mono"
                   value={target}
                   onChange={(event) => setTarget(event.target.value)}
                   placeholder="$2"
@@ -247,17 +255,17 @@ export function OrganizeRulesManager({
               </label>
             </div>
 
-            <div className="flex flex-col gap-1">
-              <label className="form-control w-full">
+            <div className="organize-rule-preview flex flex-col gap-1">
+              <label className="organize-rule-field form-control w-full">
                 <span className="label-text text-xs">测试文件名</span>
                 <input
-                  className="input input-sm input-bordered font-mono"
+                  className="organize-rule-input input input-sm input-bordered font-mono"
                   value={sample}
                   onChange={(event) => setSample(event.target.value)}
                   placeholder="001_131950002_p0.jpg"
                 />
               </label>
-              <div className="text-xs opacity-70">
+              <div className="organize-rule-preview-result text-xs opacity-70">
                 预览：
                 {regexError ? (
                   <span className="text-error">{'正则表达式无效：' + regexError}</span>
@@ -269,9 +277,9 @@ export function OrganizeRulesManager({
               </div>
             </div>
 
-            {error && <div className="text-xs text-error">{error}</div>}
+            {error && <div className="organize-rule-error text-xs text-error">{error}</div>}
 
-            <div className="flex justify-end gap-2">
+            <div className="organize-rule-form-actions flex justify-end gap-2">
               {editingId && (
                 <button type="button" className="btn btn-ghost btn-sm" onClick={resetDraft}>
                   取消编辑

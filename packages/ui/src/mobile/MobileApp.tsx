@@ -70,6 +70,7 @@ import {
   saveBlurredImages,
   savePinnedCovers,
   skippedReasonLabel,
+  startThemeModeSync,
 } from './mobileShared';
 import { Z_BATCH_BAR, Z_DIALOG, Z_DRAWER } from './zindex';
 import { MobileIcon } from './mobileIcons';
@@ -81,7 +82,7 @@ const IMAGE_GAP = IMAGE_GRID.gap;
 const IMAGE_NAME_H = 16;
 const FOLDER_COLS = FOLDER_GRID.cols;
 const FOLDER_GAP = FOLDER_GRID.gap;
-const FOLDER_CAPTION_H = 46;
+const FOLDER_CAPTION_H = 50;
 
 type OverlayLayer = 'drawer' | 'sheet' | 'viewer' | 'settings' | 'organize' | 'cover' | 'dialog' | 'report' | 'search';
 type StackEntry = { type: 'folder'; folderId: string } | { type: 'overlay'; layer: OverlayLayer };
@@ -133,11 +134,11 @@ function useLongPress(onLongPress: () => void, ms = 460) {
 
   const start = useCallback(
     (e: React.TouchEvent) => {
+      cancel();
       firedRef.current = false;
       const t = e.touches[0];
       startPointRef.current = t ? { x: t.clientX, y: t.clientY } : null;
       setPressing(true);
-      cancel();
       timerRef.current = window.setTimeout(() => {
         timerRef.current = null;
         firedRef.current = true;
@@ -266,7 +267,7 @@ function ImageCard({
   const lp = useLongPress(onActions);
   return (
     <div
-      className="relative overflow-hidden rounded-[4px] bg-base-300/40 flex flex-col"
+      className="m-gallery-item m-image-card relative overflow-hidden flex flex-col"
       role="button"
       tabIndex={0}
       aria-label={selectMode ? (selected ? `已选择 ${image.name}` : `选择 ${image.name}`) : image.name}
@@ -295,7 +296,7 @@ function ImageCard({
         {lp.pressing && <div className="absolute inset-0 bg-black/25 pointer-events-none" aria-hidden="true" />}
         {selectMode && (
           <div
-            className={"absolute top-1 right-1 w-5 h-5 rounded-full border-2 flex items-center justify-center text-[10px] z-10 " +
+            className={"m-selection-indicator absolute top-1 right-1 w-5 h-5 flex items-center justify-center text-[10px] z-10 " +
               (selected ? 'bg-primary border-primary text-primary-content' : 'bg-black/40 border-white/70 text-white')}
             aria-hidden="true"
           >
@@ -314,7 +315,7 @@ function ImageCard({
       </div>
       {showName && (
         <div
-          className="shrink-0 px-0.5 pt-0.5 text-[10px] leading-tight truncate opacity-80 select-none"
+          className="m-image-name shrink-0 truncate select-none"
           style={{ height: IMAGE_NAME_H }}
           aria-hidden="true"
         >
@@ -351,7 +352,7 @@ function ImageListRow({
     .join(' · ');
   return (
     <div
-      className={"flex items-center gap-3 rounded-lg px-1.5 py-1.5 " + (selectMode && selected ? 'bg-primary/10' : 'active:bg-base-200/60')}
+      className={"m-image-list-row flex items-center gap-3 " + (selectMode && selected ? 'is-selected' : '')}
       role="button"
       tabIndex={0}
       aria-label={selectMode ? (selected ? `已选择 ${image.name}` : `选择 ${image.name}`) : image.name}
@@ -376,10 +377,10 @@ function ImageListRow({
       }}
       onContextMenu={(e) => e.preventDefault()}
     >
-      <div className="relative w-14 h-14 rounded-lg overflow-hidden bg-base-300/40 shrink-0">
+      <div className="m-list-thumb relative w-14 h-14 overflow-hidden shrink-0">
         {selectMode && (
           <div
-            className={"absolute top-0.5 right-0.5 w-4 h-4 rounded-full border-2 flex items-center justify-center text-[9px] z-10 " +
+            className={"m-selection-indicator absolute top-0.5 right-0.5 w-4 h-4 flex items-center justify-center text-[9px] z-10 " +
               (selected ? 'bg-primary border-primary text-primary-content' : 'bg-black/40 border-white/70 text-white')}
             aria-hidden="true"
           >
@@ -397,8 +398,8 @@ function ImageListRow({
         />
       </div>
       <div className="flex-1 min-w-0">
-        <div className="text-sm truncate">{image.name}</div>
-        {meta && <div className="text-[11px] opacity-75 tabular-nums truncate">{meta}</div>}
+        <div className="m-list-title truncate">{image.name}</div>
+        {meta && <div className="m-list-meta tabular-nums truncate">{meta}</div>}
       </div>
     </div>
   );
@@ -425,7 +426,7 @@ function FolderCard({
   const lp = useLongPress(onActions);
   return (
     <div
-      className="relative overflow-hidden rounded-2xl bg-base-200 border border-base-300/70"
+      className="m-gallery-item m-folder-card relative overflow-hidden"
       role="button"
       tabIndex={0}
       aria-label={folder.name}
@@ -445,7 +446,7 @@ function FolderCard({
       onContextMenu={(e) => e.preventDefault()}
     >
       {lp.pressing && <div className="absolute inset-0 bg-black/25 pointer-events-none" aria-hidden="true" />}
-      <div className="relative aspect-[16/10] overflow-hidden bg-base-300/40">
+      <div className="m-folder-cover relative aspect-[16/10] overflow-hidden">
         {coverImage ? (
           <BlobImage
             store={store}
@@ -457,19 +458,19 @@ function FolderCard({
             blur={blurred}
           />
         ) : (
-          <div className="w-full h-full flex items-center justify-center opacity-40">
+          <div className="m-folder-placeholder w-full h-full flex items-center justify-center">
             <svg viewBox="0 0 24 24" className="w-10 h-10" fill="none" stroke="currentColor" strokeWidth="1.5">
               <path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
             </svg>
           </div>
         )}
         {pinned && (
-          <span className="absolute top-1.5 left-1.5 badge badge-primary badge-sm shadow">📌</span>
+          <span className="m-pin-badge absolute top-1.5 left-1.5"><MobileIcon name="📌" className="w-3.5 h-3.5" /></span>
         )}
       </div>
-      <div className="px-2.5 py-2 flex items-center justify-between gap-2" style={{ height: FOLDER_CAPTION_H }}>
-        <span className="text-[13px] font-medium truncate">{folder.name}</span>
-        <span className="text-[11px] opacity-60 whitespace-nowrap tabular-nums">
+      <div className="m-folder-caption flex items-center justify-between gap-2" style={{ height: FOLDER_CAPTION_H }}>
+        <span className="m-folder-title truncate">{folder.name}</span>
+        <span className="m-folder-meta whitespace-nowrap tabular-nums">
           {folder.imageCount} 图 / {folder.childCount} 夹
         </span>
       </div>
@@ -498,19 +499,16 @@ function MobileFolderTree({
   const children = childrenOf(snapshot, folderId).sort((a, b) => a.name.localeCompare(b.name));
   if (children.length === 0 && depth === 0) return null;
   return (
-    <div className="flex flex-col">
+    <div className="m-tree-list flex flex-col">
       {children.map((folder) => {
         const hasChildren = folder.childCount > 0;
         const expanded = expandedFolders.has(folder.id);
         const selected = folder.id === selectedFolderId;
         return (
           <div key={folder.id}>
-            <div
-              className={`flex items-center rounded-xl min-h-[44px] ${selected ? 'bg-primary/15 text-primary' : 'active:bg-base-300/60'}`}
-              style={{ paddingLeft: depth * 16 + 4 }}
-            >
+            <div className={`m-tree-row ${selected ? 'is-selected' : ''}`} style={{ paddingLeft: depth * 16 + 4 }}>
               <button
-                className="w-8 h-11 flex items-center justify-center shrink-0"
+                className="m-tree-toggle"
                 disabled={!hasChildren}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -527,9 +525,9 @@ function MobileFolderTree({
                   <path d="M3.5 2.2L8.5 6l-5 3.8z" fill="currentColor" />
                 </svg>
               </button>
-              <button className="flex-1 min-w-0 flex items-center justify-between gap-2 pr-3 py-2 text-left" onClick={() => onSelect(folder)}>
-                <span className="truncate text-[15px]">{folder.name}</span>
-                <span className={`text-xs tabular-nums ${selected ? 'text-primary' : 'opacity-50'}`}>{folder.imageCount}</span>
+              <button className="m-tree-link" onClick={() => onSelect(folder)}>
+                <span className="m-tree-title">{folder.name}</span>
+                <span className="m-tree-count">{folder.imageCount}</span>
               </button>
             </div>
             {hasChildren && expanded && (
@@ -559,6 +557,8 @@ export function MobileApp({
   store: LibraryStore;
   index: PersistentIndex;
 }) {
+  useEffect(() => startThemeModeSync(), []);
+
   // ===== 数据状态 =====
   const [snapshot, setSnapshot] = useState<LibrarySnapshot | null>(null);
   const [selectedFolderId, setSelectedFolderId] = useState('');
@@ -654,6 +654,15 @@ export function MobileApp({
   const selectedFolder = snapshot?.folders[currentFolderId] ?? null;
   const rootFolder = snapshot ? snapshot.folders[snapshot.rootId] : null;
   const isRoot = !selectedFolderId || selectedFolderId === snapshot?.rootId;
+  const libraryStats = useMemo(() => {
+    if (!snapshot) return { folderCount: 0, imageCount: 0, bytes: 0 };
+    const images = Object.values(snapshot.images);
+    return {
+      folderCount: Object.values(snapshot.folders).filter((folder) => folder.id !== snapshot.rootId).length,
+      imageCount: images.length,
+      bytes: images.reduce((total, image) => total + (image.size ?? 0), 0),
+    };
+  }, [snapshot]);
 
   const searchTerm = searchQuery.trim().toLowerCase();
   const folderImages = useMemo(() => {
@@ -1481,128 +1490,139 @@ export function MobileApp({
   }, []);
 
   // ===== 渲染 =====
-  const title = searchActive ? '' : isRoot ? 'Kanitsu' : selectedFolder?.name ?? '';
+  const title = searchActive ? '' : selectedFolder?.name ?? '';
   const subtitle = selectedFolder
     ? `${selectedFolder.directImageCount} 图片 · ${selectedFolder.childCount} 子目录`
     : '';
 
   return (
-    <div className="fixed inset-0 bg-base-100 text-base-content flex flex-col overflow-hidden">
-      {/* 顶栏 */}
-      <header
-        className="shrink-0 z-20 bg-base-100/95 backdrop-blur border-b border-base-300/60"
-        style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}
-      >
-        {searchActive ? (
-          <div className="flex items-center gap-1 px-1 h-14">
-            <button
-              className="w-11 h-11 flex items-center justify-center shrink-0 active:opacity-60"
-              onClick={closeSearch}
-              aria-label="关闭搜索"
-            >
-              <svg viewBox="0 0 24 24" className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                <path d="M15 18l-6-6 6-6" />
-              </svg>
-            </button>
-            <div className="flex-1 flex items-center gap-2 bg-base-200 rounded-full px-4 h-10">
-              <svg viewBox="0 0 24 24" className="w-4 h-4 opacity-50 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                <circle cx="11" cy="11" r="7" />
-                <path d="M21 21l-4.3-4.3" />
-              </svg>
-              <input
-                autoFocus
-                className="flex-1 bg-transparent outline-none text-[15px] min-w-0"
-                placeholder="搜索全部相册…"
-                value={searchInput}
-                onChange={(e) => setSearchInput(e.target.value)}
-              />
-              {searchInput && (
-                <button className="shrink-0 opacity-60" onClick={() => setSearchInput('')} aria-label="清空">
-                  ✕
-                </button>
-              )}
-            </div>
-          </div>
-        ) : selectMode ? (
-          <div className="flex items-center px-1 h-14">
-            <button
-              className="w-auto h-11 px-1 flex items-center justify-center shrink-0 text-primary active:opacity-60"
-              onClick={exitSelectMode}
-              aria-label="完成多选"
-            >
-              <svg viewBox="0 0 24 24" className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M5 13l4 4L19 7" />
-              </svg>
-              <span className="text-sm font-medium ml-0.5">完成</span>
-            </button>
-            <div className="flex-1 min-w-0 px-1.5">
-              <div className="text-[17px] font-semibold truncate leading-tight">已选 {selectedIds.size} 张</div>
-              <div className="text-[11px] opacity-60 truncate leading-tight mt-0.5">
-                {selectedIds.size > 0 ? '点击图片可取消选择' : '点击图片选择'}
-              </div>
-            </div>
-            <button
-              className="w-auto h-11 px-3 flex items-center justify-center shrink-0 text-sm font-medium text-primary active:opacity-60"
-              onClick={handleSelectAll}
-              aria-label="全选"
-            >
-              全选
-            </button>
-          </div>
-        ) : (
-          <div className="flex items-center px-1 h-14">
-            {isRoot ? (
-              <button className="w-11 h-11 flex items-center justify-center shrink-0 active:opacity-60" onClick={openDrawer} aria-label="打开目录">
-                <svg viewBox="0 0 24 24" className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                  <path d="M4 6h16M4 12h16M4 18h16" />
-                </svg>
-              </button>
-            ) : (
-              <button className="w-11 h-11 flex items-center justify-center shrink-0 active:opacity-60" onClick={goUp} aria-label="返回上级">
-                <svg viewBox="0 0 24 24" className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <div className="mobile-studio m-app-shell fixed inset-0 flex flex-col overflow-hidden">
+      {(searchActive || selectMode || !isRoot) && (
+        <header
+          className="m-context-header shrink-0 z-20"
+          style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}
+        >
+          {searchActive ? (
+            <div className="m-context-bar">
+              <button className="m-icon-button" onClick={closeSearch} aria-label="关闭搜索">
+                <svg viewBox="0 0 24 24" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
                   <path d="M15 18l-6-6 6-6" />
                 </svg>
               </button>
-            )}
-            <div className="flex-1 min-w-0 px-1.5">
-              <div className="text-[17px] font-semibold truncate leading-tight">{title}</div>
-              {subtitle && <div className="text-[11px] opacity-75 truncate leading-tight mt-0.5">{subtitle}</div>}
+              <label className="m-search-field flex-1">
+                <MobileIcon name="🔍" className="w-[18px] h-[18px]" />
+                <input
+                  autoFocus
+                  placeholder="搜索图包或文件名"
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
+                />
+                {searchInput && (
+                  <button className="m-search-clear" onClick={() => setSearchInput('')} aria-label="清空">
+                    ✕
+                  </button>
+                )}
+              </label>
             </div>
-            <button className="w-11 h-11 flex items-center justify-center shrink-0 active:opacity-60" onClick={openSearch} aria-label="搜索">
-              <svg viewBox="0 0 24 24" className="w-[22px] h-[22px]" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                <circle cx="11" cy="11" r="7" />
-                <path d="M21 21l-4.3-4.3" />
-              </svg>
-            </button>
-            <button className="w-11 h-11 flex items-center justify-center shrink-0 active:opacity-60" onClick={openMoreActions} aria-label="更多">
-              <svg viewBox="0 0 24 24" className="w-[22px] h-[22px]" fill="currentColor">
-                <circle cx="12" cy="5" r="1.8" />
-                <circle cx="12" cy="12" r="1.8" />
-                <circle cx="12" cy="19" r="1.8" />
-              </svg>
-            </button>
-          </div>
-        )}
-      </header>
+          ) : selectMode ? (
+            <div className="m-context-bar">
+              <button className="m-text-button is-accent" onClick={exitSelectMode} aria-label="完成多选">
+                <svg viewBox="0 0 24 24" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M5 13l4 4L19 7" />
+                </svg>
+                <span>完成</span>
+              </button>
+              <div className="m-context-title">
+                <strong>已选 {selectedIds.size} 张</strong>
+                <span>{selectedIds.size > 0 ? '点击图片可取消选择' : '点击图片选择'}</span>
+              </div>
+              <button className="m-text-button is-accent" onClick={handleSelectAll} aria-label="全选">
+                全选
+              </button>
+            </div>
+          ) : (
+            <div className="m-context-bar">
+              <button className="m-icon-button" onClick={goUp} aria-label="返回上级">
+                <svg viewBox="0 0 24 24" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M15 18l-6-6 6-6" />
+                </svg>
+              </button>
+              <div className="m-context-title">
+                <strong>{title}</strong>
+                {subtitle && <span>{subtitle}</span>}
+              </div>
+              <button className="m-icon-button" onClick={openSearch} aria-label="搜索">
+                <MobileIcon name="🔍" className="w-5 h-5" />
+              </button>
+              <button className="m-icon-button" onClick={openMoreActions} aria-label="更多">
+                <svg viewBox="0 0 24 24" className="w-5 h-5" fill="currentColor">
+                  <circle cx="12" cy="5" r="1.5" />
+                  <circle cx="12" cy="12" r="1.5" />
+                  <circle cx="12" cy="19" r="1.5" />
+                </svg>
+              </button>
+            </div>
+          )}
+        </header>
+      )}
 
       {/* 主内容 */}
-      <main ref={mainScrollRef} onScroll={onMainScroll} className="flex-1 overflow-y-auto overscroll-contain relative">
+      <main
+        ref={mainScrollRef}
+        onScroll={onMainScroll}
+        className={`m-library-scroll flex-1 overflow-y-auto overscroll-contain relative ${isRoot && !searchActive && !selectMode ? 'is-root' : ''}`}
+      >
+        {snapshot && isRoot && !searchActive && !selectMode && (
+          <section className="m-library-intro">
+            <div className="m-eyebrow-row">
+              <span className="m-eyebrow">本地图书馆</span>
+              <button className="m-index-state" onClick={openDrawer}>
+                查看目录
+              </button>
+            </div>
+            <h1>全部图包</h1>
+            <div className="m-library-stats">
+              <span>{rootFolder?.childCount ?? 0} 个图包</span>
+              <i />
+              <span>{libraryStats.imageCount.toLocaleString('zh-CN')} 张图片</span>
+              <i />
+              <span>{formatBytes(libraryStats.bytes)}</span>
+            </div>
+            <div className="m-library-tools">
+              <button className="m-search-launch" onClick={openSearch}>
+                <MobileIcon name="🔍" className="w-[18px] h-[18px]" />
+                <span>搜索图包或文件名</span>
+                <small>本地</small>
+              </button>
+              <button className="m-square-button" onClick={openMoreActions} aria-label="更多图库操作">
+                <svg viewBox="0 0 24 24" className="w-5 h-5" fill="currentColor">
+                  <circle cx="12" cy="5" r="1.5" />
+                  <circle cx="12" cy="12" r="1.5" />
+                  <circle cx="12" cy="19" r="1.5" />
+                </svg>
+              </button>
+            </div>
+          </section>
+        )}
+
         {!snapshot ? (
-          <div className="h-full flex items-center justify-center">
-            <span className="loading loading-spinner loading-lg text-primary" />
+          <div className="m-loading-state">
+            <span className="m-progress-spinner" aria-label="正在载入图库" />
           </div>
         ) : searching ? (
           searchFolders.length === 0 && searchImages.length === 0 ? (
-            <div className="h-full flex flex-col items-center justify-center px-10 text-center">
-              <MobileIcon name="🔍" className="w-12 h-12 opacity-60 mb-4" />
-              <div className="text-base font-medium">未找到匹配项</div>
-              <div className="text-sm opacity-60 mt-1">没有与「{searchQuery}」匹配的文件夹或图片</div>
+            <div className="m-empty-state">
+              <div>
+                <span className="m-empty-icon"><MobileIcon name="🔍" className="w-6 h-6" /></span>
+                <div className="m-empty-title">未找到匹配项</div>
+                <div className="m-empty-copy">没有与「{searchQuery}」匹配的文件夹或图片</div>
+              </div>
             </div>
           ) : (
-            <div className="px-[10px] pt-3" style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 100px)' }}>
+            <div className="m-content-pad">
               {searchFolders.length > 0 && (
-                <section className="mb-4">
-                  <h3 className="text-[13px] font-semibold opacity-60 mb-2 px-0.5">
+                <section className="m-section">
+                  <h3 className="m-section-label">
                     匹配的文件夹 <span className="tabular-nums">{searchFolders.length}</span>
                   </h3>
                   <VirtualGrid
@@ -1629,8 +1649,8 @@ export function MobileApp({
                 </section>
               )}
               {searchImages.length > 0 && (
-                <section>
-                  <h3 className="text-[13px] font-semibold opacity-60 mb-2 px-0.5">
+                <section className="m-section">
+                  <h3 className="m-section-label">
                     匹配的图片 <span className="tabular-nums">{searchImages.length}</span>
                   </h3>
                   {viewMode === 'list' ? (
@@ -1679,29 +1699,31 @@ export function MobileApp({
             </div>
           )
         ) : childFolders.length === 0 && displayImages.length === 0 ? (
-          <div className="h-full flex flex-col items-center justify-center px-10 text-center">
+          <div className="m-empty-state">
+            <div>
             {searchTerm ? (
               <>
-                <div className="text-5xl mb-4">🔍</div>
-                <div className="text-base font-medium">未找到匹配项</div>
-                <div className="text-sm opacity-60 mt-1">没有与「{searchQuery}」匹配的子目录或图片</div>
+                <span className="m-empty-icon"><MobileIcon name="🔍" className="w-6 h-6" /></span>
+                <div className="m-empty-title">未找到匹配项</div>
+                <div className="m-empty-copy">没有与「{searchQuery}」匹配的子目录或图片</div>
               </>
             ) : (
               <>
-                <MobileIcon name="🖼️" className="w-12 h-12 opacity-60 mb-4" />
-                <div className="text-base font-medium">{isRoot ? '图库还是空的' : '该目录暂无图片'}</div>
-                <div className="text-sm opacity-60 mt-1 mb-6">{isRoot ? '导入照片，开始整理你的图库' : '返回上级或导入新内容'}</div>
-                <button className="px-6 py-3 rounded-full bg-primary text-primary-content font-medium active:scale-95 transition-transform" onClick={() => void handleImport()}>
+                <span className="m-empty-icon"><MobileIcon name="🖼️" className="w-6 h-6" /></span>
+                <div className="m-empty-title">{isRoot ? '图库还是空的' : '该目录暂无图片'}</div>
+                <div className="m-empty-copy">{isRoot ? '导入照片，开始整理你的图库' : '返回上级或导入新内容'}</div>
+                <button className="m-primary-button" onClick={() => void handleImport()}>
                   导入相册
                 </button>
               </>
             )}
+            </div>
           </div>
         ) : (
-          <div className="px-[10px] pt-3" style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 100px)' }}>
+          <div className="m-content-pad">
             {childFolders.length > 0 && (
-              <section ref={folderSectionRef} className="mb-4">
-                <h3 className="text-[13px] font-semibold opacity-60 mb-2 px-0.5">子文件夹</h3>
+              <section ref={folderSectionRef} className="m-section">
+                <h3 className="m-section-label">子文件夹 <span>{childFolders.length}</span></h3>
                 <VirtualGrid
                   items={childFolderCards}
                   cols={FOLDER_COLS}
@@ -1726,8 +1748,8 @@ export function MobileApp({
               </section>
             )}
             {displayImages.length > 0 && (
-              <section ref={imageSectionRef}>
-                <h3 className="text-[13px] font-semibold opacity-60 mb-2 px-0.5">
+              <section ref={imageSectionRef} className="m-section">
+                <h3 className="m-section-label">
                   {aggregate ? '全部图片（含子目录）' : '图片'} <span className="tabular-nums">{displayImages.length}</span>
                 </h3>
                 {viewMode === 'list' ? (
@@ -1780,21 +1802,21 @@ export function MobileApp({
       {/* 批量操作栏 */}
       {selectMode && !viewerOpen && (
         <div
-          className="fixed left-3 right-3"
+          className="m-batch-wrap"
           style={{ bottom: 'calc(env(safe-area-inset-bottom, 0px) + 16px)', zIndex: Z_BATCH_BAR }}
         >
-          <div className="bg-base-100 border border-base-300 rounded-2xl shadow-xl px-4 h-12 flex items-center gap-2">
-            <span className="text-sm font-medium tabular-nums shrink-0">{selectedIds.size} 张</span>
+          <div className="m-batch-bar">
+            <span className="m-batch-count tabular-nums shrink-0">{selectedIds.size} 张</span>
             <div className="flex-1" />
             <button
-              className="text-sm font-medium px-3 py-1.5 rounded-xl bg-base-200 active:bg-base-300 disabled:opacity-40"
+              className="m-button"
               disabled={selectedIds.size === 0}
               onClick={() => void handleBatchMove()}
             >
               移动到新文件夹
             </button>
             <button
-              className="text-sm font-medium px-3 py-1.5 rounded-xl bg-error/10 text-error active:bg-error/20 disabled:opacity-40"
+              className="m-button is-danger"
               disabled={selectedIds.size === 0}
               onClick={() => void handleBatchDelete()}
             >
@@ -1804,33 +1826,68 @@ export function MobileApp({
         </div>
       )}
 
-      {/* 导入 FAB */}
+      {/* 底部主导航 / 图包操作 */}
       {!importing && !viewerOpen && !selectMode && (
-        <button
-          className="fixed z-30 w-14 h-14 rounded-full bg-primary text-primary-content shadow-xl shadow-primary/30 flex items-center justify-center active:scale-90 transition-transform"
-          style={{ right: 18, bottom: 'calc(env(safe-area-inset-bottom, 0px) + 22px)' }}
-          onClick={() => void handleImport()}
-          aria-label="导入相册"
-        >
-          <svg viewBox="0 0 24 24" className="w-7 h-7" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
-            <path d="M12 5v14M5 12h14" />
-          </svg>
-        </button>
+        <nav className={`m-bottom-dock ${isRoot ? 'is-library' : 'is-package'}`} aria-label={isRoot ? '主导航' : '图包操作'}>
+          {isRoot ? (
+            <>
+              <button className="m-dock-button is-active" onClick={openDrawer}>
+                <MobileIcon name="🏠" className="w-5 h-5" />
+                <span>图库</span>
+              </button>
+              <button className="m-dock-button is-primary" onClick={() => void handleImport()}>
+                <svg viewBox="0 0 24 24" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+                <span>导入图包</span>
+              </button>
+              <button
+                className="m-dock-button"
+                onClick={() => {
+                  setShowSettings(true);
+                  openOverlay('settings');
+                }}
+              >
+                <MobileIcon name="⚙️" className="w-5 h-5" />
+                <span>设置</span>
+              </button>
+            </>
+          ) : (
+            <>
+              <button className="m-dock-button" disabled={folderImages.length === 0} onClick={handleEnterSelectMode}>
+                <MobileIcon name="✅" className="w-5 h-5" />
+                <span>选择</span>
+              </button>
+              <button className="m-dock-button is-primary" disabled={!selectedFolder} onClick={() => selectedFolder && openOrganizeFor(selectedFolder)}>
+                <MobileIcon name="🧹" className="w-5 h-5" />
+                <span>智能整理</span>
+              </button>
+              <button className="m-dock-button" disabled={!selectedFolder} onClick={() => selectedFolder && void handleExport(selectedFolder)}>
+                <MobileIcon name="⬆️" className="w-5 h-5" />
+                <span>导出</span>
+              </button>
+            </>
+          )}
+          <span className="m-gesture-bar" aria-hidden="true" />
+        </nav>
       )}
 
       {/* 抽屉 */}
       {drawerOpen && (
         <div className="fixed inset-0" style={{ zIndex: Z_DRAWER }}>
-          <div className="m-drawer-mask absolute inset-0 bg-black/45" onClick={() => closeOverlay('drawer')} />
-          <aside className="m-drawer-panel absolute left-0 top-0 bottom-0 w-[84vw] max-w-[340px] bg-base-100 shadow-2xl flex flex-col" style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}>
-            <div className="px-4 py-3.5 border-b border-base-300/70 flex items-center gap-2.5 shrink-0">
-              <KanitsuLogo className="w-8 h-8 rounded-xl object-contain shrink-0" alt="" aria-hidden="true" />
-              <span className="text-base font-semibold">Kanitsu</span>
+          <div className="m-drawer-mask m-overlay-scrim absolute inset-0" onClick={() => closeOverlay('drawer')} />
+          <aside className="m-drawer-panel absolute left-0 top-0 bottom-0 w-[84vw] max-w-[340px] flex flex-col" style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}>
+            <div className="m-drawer-brand shrink-0">
+              <KanitsuLogo className="object-contain shrink-0" alt="" aria-hidden="true" />
+              <span className="m-drawer-brand-copy">
+                <strong>Kanitsu</strong>
+                <span>本地图包浏览器</span>
+              </span>
             </div>
-            <div className="flex-1 overflow-y-auto overscroll-contain p-2" style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 12px)' }}>
+            <div className="m-drawer-tree" style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 12px)' }}>
               {rootFolder && (
-                <div
-                  className={`flex items-center gap-2.5 rounded-xl min-h-[44px] px-3 ${isRoot ? 'bg-primary/15 text-primary' : 'active:bg-base-300/60'}`}
+                <button
+                  className={`m-tree-row m-tree-root ${isRoot ? 'is-selected' : ''}`}
                   onClick={() => {
                     closeOverlay('drawer');
                     if (!isRoot) navigateToFolder(rootFolder.id);
@@ -1839,9 +1896,9 @@ export function MobileApp({
                   <svg viewBox="0 0 24 24" className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M3 10.5L12 3l9 7.5V21H3z" />
                   </svg>
-                  <span className="flex-1 text-[15px]">全部相册</span>
-                  <span className={`text-xs tabular-nums ${isRoot ? 'text-primary' : 'opacity-50'}`}>{rootFolder.imageCount}</span>
-                </div>
+                  <span className="m-tree-title flex-1">全部图包</span>
+                  <span className="m-tree-count">{rootFolder.imageCount}</span>
+                </button>
               )}
               {snapshot && (
                 <MobileFolderTree
@@ -1858,20 +1915,20 @@ export function MobileApp({
                 />
               )}
             </div>
-            <div className="shrink-0 border-t border-base-300/70 p-2" style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 8px)' }}>
+            <div className="m-drawer-footer shrink-0" style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 8px)' }}>
               <button
-                className="w-full flex items-center gap-2.5 rounded-xl min-h-[44px] px-3 active:bg-base-300/60"
+                className="m-drawer-footer-button"
                 onClick={() => {
                   closeOverlay('drawer');
                   setShowSettings(true);
                   openOverlay('settings');
                 }}
               >
-                <svg viewBox="0 0 24 24" className="w-5 h-5 shrink-0 opacity-70" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <svg viewBox="0 0 24 24" className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <circle cx="12" cy="12" r="3" />
                   <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09a1.65 1.65 0 00-1-1.51 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09a1.65 1.65 0 001.51-1 1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33h0a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51h0a1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82v0a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z" />
                 </svg>
-                <span className="text-[15px]">设置</span>
+                <span className="m-tree-title">设置</span>
               </button>
             </div>
           </aside>
@@ -1976,40 +2033,41 @@ export function MobileApp({
       {/* 导入报告 */}
       {showReport && importReport && (
         <div className="m-dialog-mask fixed inset-0 flex items-end justify-center" style={{ zIndex: Z_DIALOG }}>
-          <div className="absolute inset-0 bg-black/45" onClick={() => closeOverlay('report')} />
+          <div className="m-overlay-scrim absolute inset-0" onClick={() => closeOverlay('report')} />
           <div
-            className="m-sheet-panel relative bg-base-100 rounded-t-3xl shadow-2xl w-full max-h-[70vh] flex flex-col"
+            className="m-sheet-panel relative w-full max-h-[70vh] flex flex-col"
             style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 12px)' }}
           >
-            <div className="px-5 pt-3 pb-2 border-b border-base-300/60">
-              <h3 className="text-base font-semibold">导入报告</h3>
-              <p className="text-xs opacity-60 mt-1">
+            <div className="m-sheet-handle-wrap" aria-hidden="true"><span className="m-sheet-handle" /></div>
+            <div className="m-sheet-header">
+              <strong>导入报告</strong>
+              <span>
                 来源：{importReport.sourceFolderName} · 扫描 {importReport.scannedFileCount} · 复制 {importReport.copiedImageCount} · 跳过 {importReport.skippedCount}
-              </p>
+              </span>
             </div>
-            <div className="flex-1 overflow-y-auto px-5 py-3">
+            <div className="m-sheet-content m-report-content flex-1">
               {importReport.skippedFiles.length === 0 && importReport.errors.length === 0 ? (
-                <p className="text-sm opacity-70 py-4 text-center">全部成功，没有跳过或失败的文件。</p>
+                <p className="m-report-empty">全部成功，没有跳过或失败的文件。</p>
               ) : (
                 <>
                   {importReport.skippedFiles.map((f, i) => (
-                    <div key={`s-${i}`} className="py-1.5 text-xs flex gap-2">
-                      <span className="text-warning shrink-0">跳过</span>
+                    <div key={`s-${i}`} className="m-report-row is-warning">
+                      <span className="shrink-0">跳过</span>
                       <span className="font-mono break-all flex-1">{f.path}</span>
-                      <span className="opacity-60 shrink-0">{skippedReasonLabel(f.reason)}</span>
+                      <span className="m-report-reason shrink-0">{skippedReasonLabel(f.reason)}</span>
                     </div>
                   ))}
                   {importReport.errors.map((e, i) => (
-                    <div key={`e-${i}`} className="py-1.5 text-xs flex gap-2">
-                      <span className="text-error shrink-0">失败</span>
+                    <div key={`e-${i}`} className="m-report-row is-error">
+                      <span className="shrink-0">失败</span>
                       <span className="font-mono break-all flex-1">{e}</span>
                     </div>
                   ))}
                 </>
               )}
             </div>
-            <div className="px-5 pt-2">
-              <button className="w-full py-3 rounded-2xl bg-base-200 text-[15px] font-medium active:bg-base-300" onClick={() => closeOverlay('report')}>
+            <div className="m-sheet-footer">
+              <button className="m-sheet-cancel" onClick={() => closeOverlay('report')}>
                 关闭
               </button>
             </div>
@@ -2020,25 +2078,25 @@ export function MobileApp({
       {/* 整理结果 */}
       {organizeResult && (
         <div className="m-dialog-mask fixed inset-0 flex items-center justify-center p-8" style={{ zIndex: Z_DIALOG }}>
-          <div className="absolute inset-0 bg-black/45" onClick={() => setOrganizeResult(null)} />
-          <div className="m-dialog relative bg-base-100 rounded-3xl shadow-2xl w-full max-w-sm p-5 max-h-[70vh] flex flex-col">
-            <h3 className="text-base font-semibold shrink-0">整理结果</h3>
-            <p className="text-sm opacity-75 mt-2 shrink-0">
+          <div className="m-overlay-scrim absolute inset-0" onClick={() => setOrganizeResult(null)} />
+          <div className="m-dialog relative w-full max-w-sm p-5 max-h-[70vh] flex flex-col">
+            <h3 className="m-dialog-title shrink-0">整理结果</h3>
+            <p className="m-dialog-copy shrink-0">
               已应用 {organizeResult.appliedCount} · 跳过低置信度 {organizeResult.skippedLowConfidenceCount} · 冲突 {organizeResult.conflicts.length}
             </p>
             {organizeResult.conflicts.length > 0 && (
               <div className="flex-1 overflow-y-auto mt-3 min-h-0">
                 {organizeResult.conflicts.map((c, i) => (
-                  <div key={i} className="py-1.5 text-xs border-b border-base-300/40 last:border-0">
+                  <div key={i} className="m-conflict-row block">
                     <div className="font-mono break-all">{c.name}</div>
-                    <div className="opacity-60 mt-0.5">
+                    <div className="m-conflict-detail">
                       → {c.targetRelPath}（{conflictReasonLabel(c.reason)}）
                     </div>
                   </div>
                 ))}
               </div>
             )}
-            <button className="w-full py-2.5 rounded-xl bg-base-200 text-[15px] mt-4 shrink-0 active:bg-base-300" onClick={() => setOrganizeResult(null)}>
+            <button className="m-button is-full mt-4 shrink-0" onClick={() => setOrganizeResult(null)}>
               关闭
             </button>
           </div>

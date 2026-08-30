@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { MobileIcon } from './mobileIcons';
+import { Z_DIALOG, Z_PROGRESS, Z_SHEET, Z_TOAST } from './zindex';
 
 /**
  * 移动端底部动作面板（替代桌面右键菜单）。
@@ -61,33 +63,31 @@ export function MobileActionSheet({
 
   return (
     <div className={`m-sheet-mask fixed inset-0 ${closing ? 'm-closing' : ''}`} style={{ zIndex: Z_SHEET }}>
-      <div className="absolute inset-0 bg-black/45" onClick={requestClose} />
+      <div className="m-overlay-scrim absolute inset-0" onClick={requestClose} />
       <div
         ref={panelRef}
-        className="m-sheet-panel absolute left-0 right-0 bottom-0 bg-base-100 rounded-t-3xl shadow-2xl flex flex-col max-h-[78vh]"
+        className="m-sheet-panel absolute left-0 right-0 bottom-0 flex flex-col max-h-[78vh]"
         style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 8px)' }}
       >
         <div
-          className="pt-2 pb-1 flex justify-center touch-none"
+          className="m-sheet-handle-wrap"
           onTouchStart={onHandleTouchStart}
           onTouchMove={onHandleTouchMove}
           onTouchEnd={onHandleTouchEnd}
         >
-          <span className="w-9 h-1 rounded-full bg-base-content/25" />
+          <span className="m-sheet-handle" />
         </div>
         {(title || subtitle) && (
-          <div className="px-5 pt-1 pb-2 border-b border-base-300/60 min-w-0">
-            {title && <div className="text-base font-semibold truncate">{title}</div>}
-            {subtitle && <div className="text-xs opacity-60 truncate mt-0.5">{subtitle}</div>}
+          <div className="m-sheet-header">
+            {title && <strong>{title}</strong>}
+            {subtitle && <span>{subtitle}</span>}
           </div>
         )}
-        <div className="overflow-y-auto overscroll-contain py-1.5">
+        <div className="m-sheet-content">
           {actions.map((action, i) => (
             <button
               key={i}
-              className={`w-full flex items-center gap-3.5 px-5 py-3.5 text-left text-[15px] active:bg-base-300/50 transition-colors ${
-                action.danger ? 'text-error' : ''
-              } ${action.disabled ? 'opacity-40' : ''}`}
+              className={`m-sheet-action ${action.danger ? 'is-danger' : ''}`}
               disabled={action.disabled}
               onClick={() => {
                 if (action.disabled) return;
@@ -97,7 +97,7 @@ export function MobileActionSheet({
               }}
             >
               {action.icon && (
-                <span className="w-6 shrink-0 flex items-center justify-center opacity-80">
+                <span className="m-sheet-action-icon">
                   {typeof action.icon === 'string' ? <MobileIcon name={action.icon} className="w-5 h-5" /> : action.icon}
                 </span>
               )}
@@ -105,8 +105,8 @@ export function MobileActionSheet({
             </button>
           ))}
         </div>
-        <div className="px-3 pt-1">
-          <button className="w-full py-3 rounded-2xl bg-base-200 text-[15px] font-medium active:bg-base-300" onClick={requestClose}>
+        <div className="m-sheet-footer">
+          <button className="m-sheet-cancel" onClick={requestClose}>
             取消
           </button>
         </div>
@@ -131,15 +131,15 @@ export function MobileConfirmDialog({
 }) {
   return (
     <div className="m-dialog-mask fixed inset-0 flex items-center justify-center p-8" style={{ zIndex: Z_DIALOG }}>
-      <div className="absolute inset-0 bg-black/45" onClick={onCancel} />
-      <div className="m-dialog relative bg-base-100 rounded-3xl shadow-2xl w-full max-w-sm p-5">
-        <h3 className="text-base font-semibold">{title}</h3>
-        <p className="text-sm opacity-75 mt-2 leading-relaxed">{body}</p>
-        <div className="flex gap-2.5 mt-5">
-          <button className="flex-1 py-2.5 rounded-xl bg-base-200 text-[15px] active:bg-base-300" onClick={onCancel}>
+      <div className="m-overlay-scrim absolute inset-0" onClick={onCancel} />
+      <div className="m-dialog relative w-full max-w-sm p-5">
+        <h3 className="m-dialog-title">{title}</h3>
+        <p className="m-dialog-copy">{body}</p>
+        <div className="m-dialog-actions">
+          <button className="m-button" onClick={onCancel}>
             取消
           </button>
-          <button className="flex-1 py-2.5 rounded-xl bg-error text-error-content text-[15px] font-medium active:opacity-90" onClick={onConfirm}>
+          <button className="m-button is-danger" onClick={onConfirm}>
             {confirmLabel}
           </button>
         </div>
@@ -183,14 +183,14 @@ export function MobilePromptDialog({
 
   return (
     <div className="m-dialog-mask fixed inset-0 flex items-center justify-center p-8" style={{ zIndex: Z_DIALOG }}>
-      <div className="absolute inset-0 bg-black/45" onClick={onCancel} />
-      <div className="m-dialog relative bg-base-100 rounded-3xl shadow-2xl w-full max-w-sm p-5">
-        <h3 className="text-base font-semibold">{title}</h3>
+      <div className="m-overlay-scrim absolute inset-0" onClick={onCancel} />
+      <div className="m-dialog relative w-full max-w-sm p-5">
+        <h3 className="m-dialog-title">{title}</h3>
         <div className="mt-3">
-          <span className="text-xs opacity-60">{label}</span>
+          <span className="m-dialog-label">{label}</span>
           <input
             ref={inputRef}
-            className="input input-bordered w-full mt-1.5 text-[15px] rounded-xl"
+            className="m-input mt-1.5"
             value={value}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={(e) => {
@@ -199,12 +199,12 @@ export function MobilePromptDialog({
             }}
           />
         </div>
-        <div className="flex gap-2.5 mt-5">
-          <button className="flex-1 py-2.5 rounded-xl bg-base-200 text-[15px] active:bg-base-300" onClick={onCancel}>
+        <div className="m-dialog-actions">
+          <button className="m-button" onClick={onCancel}>
             取消
           </button>
           <button
-            className="flex-1 py-2.5 rounded-xl bg-primary text-primary-content text-[15px] font-medium active:opacity-90 disabled:opacity-40"
+            className="m-button is-primary"
             disabled={!value.trim()}
             onClick={submit}
           >
@@ -218,21 +218,18 @@ export function MobilePromptDialog({
 
 /** 底部 Toast（自动消失由调用方控制）。 */
 export function MobileToast({ text, kind }: { text: string; kind: 'info' | 'success' | 'error' }) {
-  const cls = kind === 'error' ? 'bg-error text-error-content' : kind === 'success' ? 'bg-success text-success-content' : 'bg-neutral text-neutral-content';
+  const cls = kind === 'error' ? 'is-error' : kind === 'success' ? 'is-success' : '';
   return (
     <div
       className="m-toast fixed left-1/2 -translate-x-1/2 pointer-events-none max-w-[86vw]"
       style={{ bottom: 'calc(env(safe-area-inset-bottom, 0px) + 88px)', zIndex: Z_TOAST }}
     >
-      <div className={`${cls} rounded-2xl px-4 py-2.5 text-sm shadow-xl leading-snug`}>{text}</div>
+      <div className={`m-toast-card ${cls}`}>{text}</div>
     </div>
   );
 }
 
 /** 底部进度卡片（导入 / 导出 / 整理进行中）。 */
-import { Z_DIALOG, Z_PROGRESS, Z_SHEET, Z_TOAST } from './zindex';
-import { MobileIcon } from './mobileIcons';
-
 export function MobileProgressCard({
   title,
   detail,
@@ -247,27 +244,28 @@ export function MobileProgressCard({
   onCancel?: () => void;
 }) {
   const hasProgress = typeof done === 'number' && typeof total === 'number' && total > 0;
+  const progressPct = hasProgress ? Math.min(100, Math.max(0, (done / total) * 100)) : 0;
   return (
     <div
       className="fixed left-3 right-3"
       style={{ bottom: 'calc(env(safe-area-inset-bottom, 0px) + 16px)', zIndex: Z_PROGRESS }}
     >
-      <div className="bg-base-100 border border-base-300 rounded-2xl shadow-xl p-4">
+      <div className="m-progress-card">
         <div className="flex items-center gap-3">
-          <span className="loading loading-spinner loading-sm text-primary shrink-0" />
+          <span className="m-progress-spinner" aria-hidden="true" />
           <div className="flex-1 min-w-0">
-            <div className="text-sm font-medium truncate">{title}</div>
-            {detail && <div className="text-xs opacity-60 truncate mt-0.5">{detail}</div>}
+            <div className="m-progress-title">{title}</div>
+            {detail && <div className="m-progress-detail truncate mt-0.5">{detail}</div>}
           </div>
           {hasProgress && (
-            <span className="text-xs opacity-70 shrink-0 tabular-nums">
+            <span className="m-progress-count shrink-0 tabular-nums">
               {done}/{total}
             </span>
           )}
           {onCancel && (
             <button
               type="button"
-              className="btn btn-ghost btn-xs shrink-0 text-error"
+              className="m-button is-ghost is-danger shrink-0"
               onClick={onCancel}
               aria-label="取消"
             >
@@ -276,7 +274,7 @@ export function MobileProgressCard({
           )}
         </div>
         {hasProgress && (
-          <progress className="progress progress-primary w-full mt-2.5 h-1.5" value={done} max={total} />
+          <div className="m-progress-track"><span style={{ width: `${progressPct}%` }} /></div>
         )}
       </div>
     </div>

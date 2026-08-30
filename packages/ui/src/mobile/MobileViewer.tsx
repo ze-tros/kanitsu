@@ -623,13 +623,13 @@ export function MobileViewer({
 
   return (
     <div
-      className={`fixed inset-0 bg-black flex flex-col select-none ${closing ? 'm-viewer-exit' : ''}`}
+      className={`m-viewer-root fixed inset-0 flex flex-col select-none ${closing ? 'm-viewer-exit' : ''}`}
       style={{ touchAction: 'none', zIndex: Z_VIEWER }}
     >
       {/* 手势层 + 图片页 */}
       <div
         ref={containerRef}
-        className="flex-1 relative overflow-hidden"
+        className="m-viewer-stage flex-1 relative overflow-hidden"
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
@@ -716,7 +716,7 @@ export function MobileViewer({
                 )}
                 {!p?.thumbUrl && !p?.fullReady && (
                   <div className="absolute inset-0 flex items-center justify-center">
-                    <span className="loading loading-spinner loading-lg text-white/60" />
+                    <span className="m-viewer-spinner" aria-label="正在载入原图" />
                   </div>
                 )}
               </div>
@@ -727,29 +727,26 @@ export function MobileViewer({
 
       {/* 顶部栏 */}
       <div
-        className={`absolute top-0 left-0 right-0 z-10 transition-opacity duration-200 ${
+        className={`m-viewer-chrome m-viewer-top absolute top-0 left-0 right-0 z-10 transition-opacity duration-200 ${
           uiVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'
         }`}
-        style={{
-          paddingTop: 'env(safe-area-inset-top, 0px)',
-          background: 'linear-gradient(to bottom, rgba(0,0,0,0.55), transparent)',
-        }}
+        style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}
       >
-        <div className="flex items-center gap-1 px-1 py-2">
-          <button className="w-11 h-11 flex items-center justify-center text-white active:opacity-60" onClick={requestClose} aria-label="返回">
-            <svg viewBox="0 0 24 24" className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <div className="m-viewer-toolbar">
+          <button className="m-viewer-button" onClick={requestClose} aria-label="返回">
+            <svg viewBox="0 0 24 24" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M15 18l-6-6 6-6" />
             </svg>
           </button>
-          <div className="flex-1 min-w-0 text-white">
-            <div className="text-[15px] font-medium truncate">{current.name}</div>
-            <div className="text-xs opacity-70 tabular-nums">
+          <div className="m-viewer-heading">
+            <strong>{current.name}</strong>
+            <span className="tabular-nums">
               {index + 1} / {images.length}
               {currentPage?.naturalW ? ` · ${currentPage.naturalW}×${currentPage.naturalH}` : ''}
-            </div>
+            </span>
           </div>
           <button
-            className="w-11 h-11 flex items-center justify-center text-white active:opacity-60"
+            className="m-viewer-button"
             onClick={() => {
               const next = (rotation + 90) % 360;
               setRotation(next);
@@ -761,28 +758,28 @@ export function MobileViewer({
             }}
             aria-label="旋转"
           >
-            <svg viewBox="0 0 24 24" className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg viewBox="0 0 24 24" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M21 12a9 9 0 1 1-3-6.7" />
               <path d="M21 3v6h-6" />
             </svg>
           </button>
           <button
-            className="w-11 h-11 flex items-center justify-center text-white active:opacity-60"
+            className={`m-viewer-button ${showInfo ? 'is-active' : ''}`}
             onClick={() => setShowInfo((v) => !v)}
             aria-label="图片信息"
           >
-            <svg viewBox="0 0 24 24" className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <svg viewBox="0 0 24 24" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
               <circle cx="12" cy="12" r="9" />
               <path d="M12 16v-5" />
               <path d="M12 8h.01" />
             </svg>
           </button>
           <button
-            className="w-11 h-11 flex items-center justify-center text-white active:opacity-60"
+            className="m-viewer-button"
             onClick={() => onShowActions(current)}
             aria-label="更多操作"
           >
-            <svg viewBox="0 0 24 24" className="w-6 h-6" fill="currentColor">
+            <svg viewBox="0 0 24 24" className="w-5 h-5" fill="currentColor">
               <circle cx="12" cy="5" r="1.8" />
               <circle cx="12" cy="12" r="1.8" />
               <circle cx="12" cy="19" r="1.8" />
@@ -794,16 +791,16 @@ export function MobileViewer({
       {/* 图片信息面板 */}
       {showInfo && current && (
         <div
-          className="absolute left-3 right-3 z-20 bg-black/85 backdrop-blur text-white rounded-xl p-4"
+          className="m-viewer-info absolute left-3 right-3 z-20"
           style={{ top: 'calc(env(safe-area-inset-top, 0px) + 72px)' }}
         >
           <div className="flex items-start justify-between gap-3">
-            <div className="text-sm font-semibold truncate">{current.name}</div>
-            <button className="shrink-0 text-white/70 active:opacity-60" onClick={() => setShowInfo(false)} aria-label="关闭信息">
+            <div className="m-viewer-info-title truncate">{current.name}</div>
+            <button className="m-viewer-info-close shrink-0" onClick={() => setShowInfo(false)} aria-label="关闭信息">
               ✕
             </button>
           </div>
-          <div className="mt-2 text-xs space-y-1.5">
+          <div className="m-viewer-info-grid">
             <InfoRow
               label="尺寸"
               value={
@@ -823,13 +820,10 @@ export function MobileViewer({
 
       {/* 底部胶片条 */}
       <div
-        className={`absolute bottom-0 left-0 right-0 z-10 transition-opacity duration-200 ${
+        className={`m-viewer-chrome m-viewer-bottom absolute bottom-0 left-0 right-0 z-10 transition-opacity duration-200 ${
           uiVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'
         }`}
-        style={{
-          paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 10px)',
-          background: 'linear-gradient(to top, rgba(0,0,0,0.55), transparent)',
-        }}
+        style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 10px)' }}
       >
         <Filmstrip images={images} index={index} store={store} onSelect={(img) => onNavigate(img.id)} />
       </div>
@@ -874,7 +868,7 @@ function Filmstrip({
   return (
     <div
       ref={stripRef}
-      className="flex gap-1.5 pt-2 overflow-x-auto m-filmstrip"
+      className="m-filmstrip flex gap-1.5 overflow-x-auto"
       style={{
         paddingLeft: start * FILM_ITEM_STEP + 12, // 12 = 原 px-3
         paddingRight: (images.length - end) * FILM_ITEM_STEP + 12,
@@ -885,9 +879,7 @@ function Filmstrip({
         return (
           <button
             key={img.id}
-            className={`shrink-0 w-14 h-14 rounded-lg overflow-hidden border-2 transition-colors ${
-              i === index ? 'border-white' : 'border-transparent opacity-60'
-            }`}
+            className={`m-filmstrip-item shrink-0 w-14 h-14 overflow-hidden ${i === index ? 'is-active' : ''}`}
             onClick={() => onSelect(img)}
           >
             <FilmThumb store={store} image={img} />
@@ -900,9 +892,9 @@ function Filmstrip({
 
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex gap-2">
-      <span className="shrink-0 opacity-60 w-14">{label}</span>
-      <span className="flex-1 break-all">{value}</span>
+    <div className="m-viewer-info-row">
+      <span>{label}</span>
+      <strong>{value}</strong>
     </div>
   );
 }
@@ -924,6 +916,6 @@ function FilmThumb({ store, image }: { store: LibraryStore; image: ImageEntry })
       if (objUrl) releaseObjectUrl(objUrl);
     };
   }, [store, image]);
-  if (!url) return <div className="w-full h-full bg-white/10" />;
+  if (!url) return <div className="m-filmstrip-placeholder w-full h-full" />;
   return <img src={url} alt="" className="w-full h-full object-cover" draggable={false} />;
 }

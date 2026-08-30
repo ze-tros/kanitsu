@@ -37,6 +37,10 @@ function detectPlatform(): Platform {
 
 export default function App() {
   const platform = useMemo(detectPlatform, []);
+  const mobilePreview =
+    import.meta.env.DEV &&
+    platform === 'web' &&
+    new URLSearchParams(window.location.search).get('mobile-preview') === '1';
   const [androidReady, setAndroidReady] = useState(platform !== 'android');
 
   // Android：启动即注册桥（window.kanitsuAndroid），完成后才进入 UI，
@@ -88,6 +92,10 @@ export default function App() {
         </div>
       );
     }
+    return <MobileApp picker={adapters.picker} store={adapters.store} index={index} />;
+  }
+
+  if (mobilePreview) {
     return <MobileApp picker={adapters.picker} store={adapters.store} index={index} />;
   }
 
