@@ -10,7 +10,7 @@ This repository is an npm workspace monorepo for Kanitsu, a local-first image vi
 - `npm run dev:web`: start the Vite web development server.
 - `npm run dev:desktop`: compile Electron code and launch the desktop development environment.
 - `npm run build:web`: type-check and build the web application into `apps/web/dist/`.
-- `npm run build:mobile`: build the web bundle and sync it into the Android project.
+- `npm run build:android`: build the web bundle, sync it into Android, and generate a debug APK.
 - `npm run typecheck`: run TypeScript checks across all workspaces.
 - `npm test --workspaces --if-present`: run package tests, including `core` and `fs-adapter`.
 

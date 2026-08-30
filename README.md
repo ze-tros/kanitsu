@@ -49,7 +49,7 @@ npm run dev:desktop
 npm run typecheck
 npm test --workspaces --if-present
 npm run build:web
-npm run build:mobile
+npm run build:android
 ```
 
 ## Windows Portable
@@ -82,12 +82,13 @@ GitHub Actions 中的 `Windows Portable` 工作流支持手动运行，也会在
 
 此处的 Portable 指“单 EXE、免安装”。图包库、缩略图缓存和日志仍保存到 Electron `userData` 目录，不会随 EXE 移动。
 
-Android debug APK：
+Android debug APK（一键构建 Web、同步 Capacitor 并生成 APK）：
 
-```powershell
-cd apps/mobile/android
-.\gradlew.bat assembleDebug
+```bash
+npm run build:android
 ```
+
+APK 固定位于 `apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk`。Android 项目已在 `gradle.properties` 中禁用常驻 Gradle Daemon，构建完成后会退出当前构建进程。
 
 ## 文档
 

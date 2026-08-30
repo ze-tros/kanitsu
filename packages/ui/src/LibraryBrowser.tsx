@@ -81,6 +81,7 @@ import { pickCover } from '../../cover-picker/src/index';
 import { BlobImage } from './BlobImage';
 import { KanitsuLogo } from './KanitsuLogo';
 import {
+  COVER_THUMBNAIL_SIZE,
   getThumbnailBlob,
   preloadThumbnails,
   THUMB_PRIORITY_CURRENT_DIR,
@@ -744,13 +745,19 @@ export function LibraryBrowser({
     if (!snapshot) return;
     const token = { cancelled: false };
     const targets: FileRef[] = [];
+    const pinnedTargets: FileRef[] = [];
     for (const child of childFolders) {
       if (targets.length >= PRELOAD_MAX_FOLDERS) break;
+      const card = childFolderCards.find((item) => item.folder.id === child.id);
+      const pinned = card?.covers.find((image) => image.id === pinnedCovers[child.id]);
+      if (pinned) {
+        pinnedTargets.push({ id: pinned.fileRefId ?? pinned.id, name: pinned.name, kind: 'file', mtime: pinned.mtime, size: pinned.size });
+      }
       for (const img of directImagesOf(snapshot, child.id).slice(0, PRELOAD_PER_FOLDER)) {
         targets.push({ id: img.fileRefId ?? img.id, name: img.name, kind: 'file', mtime: img.mtime, size: img.size });
       }
     }
-    if (targets.length === 0) return;
+    if (targets.length === 0 && pinnedTargets.length === 0) return;
     if (!isPrefetchEnabled()) return; // 设置页“调试→预取开关”可关闭
     const schedule = (work: () => void): void => {
       if (typeof requestIdleCallback === 'function') {
@@ -759,12 +766,21 @@ export function LibraryBrowser({
         setTimeout(work, 0);
       }
     };
-    schedule(() => preloadThumbnails(store, targets, { priority: THUMB_PRIORITY_SUBFOLDER, shouldStop: () => token.cancelled }));
+    if (targets.length > 0) {
+      schedule(() => preloadThumbnails(store, targets, { priority: THUMB_PRIORITY_SUBFOLDER, shouldStop: () => token.cancelled }));
+    }
+    if (pinnedTargets.length > 0) {
+      schedule(() => preloadThumbnails(store, pinnedTargets, {
+        maxSize: COVER_THUMBNAIL_SIZE,
+        priority: THUMB_PRIORITY_SUBFOLDER,
+        shouldStop: () => token.cancelled,
+      }));
+    }
     logDebug('prefetch', `子文件夹预取 P2：${targets.length} 张`);
     return () => {
       token.cancelled = true;
     };
-  }, [snapshot, childFolders, store]);
+  }, [snapshot, childFolders, childFolderCards, pinnedCovers, store]);
 
   // 当前图包使用独立的优先级 2。切换图包时，这批请求会把同键的全库预热
   // 从优先级 4 提升；主进程按缓存键合并任务，因此只迁移队列位置，不重复解码。
@@ -1614,6 +1630,7 @@ export function LibraryBrowser({
                                       alt={`${folder.name}封面`}
                                       className="desktop-package-cover-image"
                                       thumbnail
+                                      thumbnailSize={image.id === pinnedCovers[folder.id] ? COVER_THUMBNAIL_SIZE : undefined}
                                       lazy
                                       blur={isImageBlurred(image.relPath, blurredImages)}
                                     />
@@ -2244,7 +2261,7 @@ function DesktopInspector({
       </header>
       <div className="desktop-inspector-cover">
         {coverImage ? (
-          <BlobImage store={store} fileRef={imageFileRef(coverImage)} alt={rootSelected ? '全部图包封面' : `${folder?.name ?? '图包'}封面`} className="desktop-inspector-cover-image" thumbnail lazy blur={blurredImages.has(coverImage.relPath)} />
+          <BlobImage store={store} fileRef={imageFileRef(coverImage)} alt={rootSelected ? '全部图包封面' : `${folder?.name ?? '图包'}封面`} className="desktop-inspector-cover-image" thumbnail thumbnailSize={folder && coverImage.id === pinnedCovers[folder.id] ? COVER_THUMBNAIL_SIZE : undefined} lazy blur={blurredImages.has(coverImage.relPath)} />
         ) : (
           <span><ImagesSquare size={30} weight="duotone" /></span>
         )}

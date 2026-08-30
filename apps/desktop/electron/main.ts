@@ -26,7 +26,7 @@ protocol.registerSchemesAsPrivileged([
   },
 ]);
 
-const IMAGE_EXT = new Set(['jpg', 'jpeg', 'png', 'webp', 'avif', 'bmp', 'gif']);
+const IMAGE_EXT = new Set(['jpg', 'jpe', 'jpeg', 'png', 'webp', 'avif', 'bmp', 'gif']);
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -91,6 +91,7 @@ function buildIndexJson(root: string, files: FsFileMeta[], exportedAt = Date.now
 
 let libraryRoot = '';
 let allowedSourceRoot: string | null = null;
+const importCancelStates = new Map<string, { cancelled: boolean }>();
 
 interface DesktopFsEntry {
   id: string;
@@ -145,6 +146,94 @@ function assertSourceAllowed(p: string): void {
   const r = path.resolve(root);
   if (target === r || target.startsWith(r + path.sep)) return;
   throw new Error(`路径不在所选源文件夹内：${p}`);
+}
+
+interface NativeImportProgress {
+  scanned: number;
+  copied: number;
+  skipped: number;
+  current?: string;
+}
+
+interface NativeImportResult {
+  canceled: boolean;
+  targetTopFolder: string;
+  scannedFileCount: number;
+  copiedImageCount: number;
+  skippedCount: number;
+  skippedFiles: Array<{ path: string; reason: 'no-extension' | 'unsupported-format' }>;
+  errors: string[];
+}
+
+async function importSourceTreeNative(
+  source: DesktopFsEntry,
+  targetTopName: string,
+  cancel: { cancelled: boolean },
+  onProgress: (progress: NativeImportProgress) => void,
+): Promise<NativeImportResult> {
+  assertSourceAllowed(source.id);
+  await ensureDir(getLibraryRoot());
+  const targetTop = await createTopFolder(targetTopName);
+  const state = {
+    scanned: 0,
+    copied: 0,
+    skipped: 0,
+    skippedFiles: [] as Array<{ path: string; reason: 'no-extension' | 'unsupported-format' }>,
+    errors: [] as string[],
+  };
+  let lastProgressAt = 0;
+
+  const emitProgress = (current?: string, force = false): void => {
+    const now = Date.now();
+    if (!force && lastProgressAt !== 0 && now - lastProgressAt < 100) return;
+    lastProgressAt = now;
+    onProgress({ scanned: state.scanned, copied: state.copied, skipped: state.skipped, current });
+  };
+
+  const walk = async (sourceDir: string, targetDir: string, relPath: string): Promise<void> => {
+    const entries = await fs.readdir(sourceDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (cancel.cancelled) return;
+      const sourcePath = path.join(sourceDir, entry.name);
+      const targetPath = path.join(targetDir, entry.name);
+      const childRelPath = relPath ? path.join(relPath, entry.name).split(path.sep).join('/') : entry.name;
+      state.scanned++;
+
+      if (entry.isDirectory()) {
+        await ensureDir(targetPath);
+        await walk(sourcePath, targetPath, childRelPath);
+        continue;
+      }
+
+      const ext = path.extname(entry.name).toLowerCase().slice(1);
+      if (IMAGE_EXT.has(ext)) {
+        try {
+          // Desktop source and destination are local files. Keeping the copy in the
+          // main process avoids transferring every image through renderer IPC.
+          await fs.copyFile(sourcePath, targetPath);
+          state.copied++;
+        } catch (error) {
+          state.errors.push(`${entry.name}: ${String(error)}`);
+        }
+      } else {
+        state.skipped++;
+        state.skippedFiles.push({ path: childRelPath, reason: ext ? 'unsupported-format' : 'no-extension' });
+      }
+      emitProgress(entry.name);
+    }
+  };
+
+  await walk(source.id, targetTop.id, '');
+  emitProgress(undefined, true);
+  return {
+    canceled: cancel.cancelled,
+    targetTopFolder: targetTop.name,
+    scannedFileCount: state.scanned,
+    copiedImageCount: state.copied,
+    skippedCount: state.skipped,
+    skippedFiles: state.skippedFiles,
+    errors: state.errors,
+  };
 }
 
 async function readImageDimensions(filePath: string): Promise<{ width: number; height: number } | undefined> {
@@ -362,7 +451,7 @@ async function pruneThumbCache(): Promise<void> {
 //   0 可见 > 1 滚动方向预取 > 2 当前目录 > 3 子文件夹/封面 > 4 全库预热/无关，
 // 高优先级永远先取，保证“屏幕里看到的”永远优先于后台预热；滚动方向预取只
 // 落后可见请求一档，快速滚动时下一屏缩略图能抢在整目录预热洪峰前面生成。
-const THUMB_WORKER_FORMATS = new Set(['jpg', 'jpeg', 'png', 'webp', 'avif', 'bmp']);
+const THUMB_WORKER_FORMATS = new Set(['jpg', 'jpe', 'jpeg', 'png', 'webp', 'avif', 'bmp']);
 const THUMB_WORKER_COUNT = 4;
 const THUMB_JOB_TIMEOUT_MS = 8000;
 const THUMB_PRIORITIES = 5;
@@ -579,6 +668,22 @@ function registerIpc(): void {
     assertSourceAllowed(file.id);
     const buf = await fs.readFile(file.id);
     return new Uint8Array(buf);
+  });
+
+  ipcMain.handle('import:tree', async (event, source: DesktopFsEntry, targetTopName: string, cancelToken?: string): Promise<NativeImportResult> => {
+    const token = cancelToken ?? '';
+    const cancel = { cancelled: false };
+    importCancelStates.set(token, cancel);
+    try {
+      return await importSourceTreeNative(source, targetTopName, cancel, (progress) => event.sender.send('import:progress', progress));
+    } finally {
+      importCancelStates.delete(token);
+    }
+  });
+
+  ipcMain.handle('import:cancel', async (_event, token: string): Promise<void> => {
+    const state = importCancelStates.get(token);
+    if (state) state.cancelled = true;
   });
 
   // Album library (app-managed copy)
@@ -866,6 +971,7 @@ const BUNDLE_MIME: Record<string, string> = {
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
+  '.jpe': 'image/jpeg',
   '.jpeg': 'image/jpeg',
   '.gif': 'image/gif',
   '.webp': 'image/webp',

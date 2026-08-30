@@ -132,17 +132,10 @@ ACTION_CREATE_DOCUMENT
 
 ## 10. 构建与安装
 
-从仓库根目录同步 Web 资源：
+从仓库根目录一键构建 Web、同步 Capacitor 并生成 debug APK：
 
 ```bash
-npm run build:mobile
-```
-
-生成 debug APK：
-
-```powershell
-cd apps/mobile/android
-.\gradlew.bat assembleDebug
+npm run build:android
 ```
 
 APK 路径：

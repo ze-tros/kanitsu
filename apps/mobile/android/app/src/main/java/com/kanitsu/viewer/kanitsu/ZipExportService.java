@@ -21,7 +21,7 @@ import org.json.JSONObject;
 
 /** Streams a library folder into a user-chosen SAF zip document. */
 public final class ZipExportService {
-    private static final Set<String> IMAGE_EXT = new HashSet<>(Arrays.asList("jpg", "jpeg", "png", "webp", "avif", "bmp", "gif"));
+    private static final Set<String> IMAGE_EXT = new HashSet<>(Arrays.asList("jpg", "jpe", "jpeg", "png", "webp", "avif", "bmp", "gif"));
 
     private final Context context;
 

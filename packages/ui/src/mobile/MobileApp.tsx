@@ -37,6 +37,7 @@ import { pickCover } from '../../../cover-picker/src/index';
 import { BlobImage } from '../BlobImage';
 import { KanitsuLogo } from '../KanitsuLogo';
 import {
+  COVER_THUMBNAIL_SIZE,
   preloadThumbnails,
   THUMB_PRIORITY_CURRENT_DIR,
   THUMB_PRIORITY_DIRECTIONAL,
@@ -72,7 +73,7 @@ import {
   skippedReasonLabel,
   startThemeModeSync,
 } from './mobileShared';
-import { Z_BATCH_BAR, Z_DIALOG, Z_DRAWER } from './zindex';
+import { Z_BATCH_BAR, Z_DIALOG, Z_DRAWER, Z_SETTINGS } from './zindex';
 import { MobileIcon } from './mobileIcons';
 
 // —— 移动端网格参数（单一数据源：mobileShared，避免与库内 IMAGE_GRID 漂移）——
@@ -84,7 +85,7 @@ const FOLDER_COLS = FOLDER_GRID.cols;
 const FOLDER_GAP = FOLDER_GRID.gap;
 const FOLDER_CAPTION_H = 50;
 
-type OverlayLayer = 'drawer' | 'sheet' | 'viewer' | 'settings' | 'organize' | 'cover' | 'dialog' | 'report' | 'search';
+type OverlayLayer = 'drawer' | 'sheet' | 'viewer' | 'settings' | 'mine' | 'organize' | 'cover' | 'dialog' | 'report' | 'search';
 type StackEntry = { type: 'folder'; folderId: string } | { type: 'overlay'; layer: OverlayLayer };
 
 interface SheetModel {
@@ -100,6 +101,23 @@ type PromptState =
   | { kind: 'rename-folder'; folder: FolderNode }
   | { kind: 'create-folder'; folder: FolderNode }
   | { kind: 'batch-move'; count: number };
+
+type SortMode = 'default' | 'name' | 'date' | 'size';
+type SortDirection = 'asc' | 'desc';
+
+type MineScreenProps = {
+  onBack: () => void;
+  onOpenSettings: () => void;
+  rootFolder: FolderNode | null;
+  imageCount: number;
+  importReport: ImportTask | null;
+  lastManifest: OrganizeManifest | null;
+  organizing: boolean;
+  onOrganize: () => void;
+  onExport: () => void;
+  onUndo: () => void;
+  onShowReport: () => void;
+};
 
 function imageToFileRef(image: ImageEntry): FileRef {
   return {
@@ -307,10 +325,10 @@ function ImageCard({
           store={store}
           fileRef={imageToFileRef(image)}
           alt={image.name}
-          className="w-full h-full object-cover"
-          thumbnail
-          lazy
-          blur={blurred}
+           className="w-full h-full object-cover"
+           thumbnail
+           lazy
+           blur={blurred}
         />
       </div>
       {showName && (
@@ -391,10 +409,10 @@ function ImageListRow({
           store={store}
           fileRef={imageToFileRef(image)}
           alt={image.name}
-          className="w-full h-full object-cover"
-          thumbnail
-          lazy
-          blur={blurred}
+           className="w-full h-full object-cover"
+           thumbnail
+           lazy
+           blur={blurred}
         />
       </div>
       <div className="flex-1 min-w-0">
@@ -452,10 +470,11 @@ function FolderCard({
             store={store}
             fileRef={imageToFileRef(coverImage)}
             alt={folder.name}
-            className="w-full h-full object-cover"
-            thumbnail
-            lazy
-            blur={blurred}
+             className="w-full h-full object-cover"
+             thumbnail
+             thumbnailSize={pinned ? COVER_THUMBNAIL_SIZE : undefined}
+             lazy
+             blur={blurred}
           />
         ) : (
           <div className="m-folder-placeholder w-full h-full flex items-center justify-center">
@@ -474,6 +493,186 @@ function FolderCard({
           {folder.imageCount} 图 / {folder.childCount} 夹
         </span>
       </div>
+    </div>
+  );
+}
+
+/** 文件夹列表行（封面 + 名称 + 递归图片/子目录计数）。 */
+function FolderListRow({
+  folder,
+  coverImage,
+  store,
+  pinned,
+  blurred,
+  onOpen,
+  onActions,
+}: {
+  folder: FolderNode;
+  coverImage: ImageEntry | undefined;
+  store: LibraryStore;
+  pinned: boolean;
+  blurred: boolean;
+  onOpen: () => void;
+  onActions: () => void;
+}) {
+  const lp = useLongPress(onActions);
+  return (
+    <div
+      className="m-folder-list-row flex items-center gap-3"
+      role="button"
+      tabIndex={0}
+      aria-label={folder.name}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onOpen();
+        }
+      }}
+      onTouchStart={lp.onTouchStart}
+      onTouchMove={lp.onTouchMove}
+      onTouchEnd={lp.onTouchEnd}
+      onTouchCancel={lp.onTouchCancel}
+      onClick={() => {
+        if (!lp.wasLongPress()) onOpen();
+      }}
+      onContextMenu={(e) => e.preventDefault()}
+    >
+      <div className="m-list-thumb relative w-14 h-14 overflow-hidden shrink-0">
+        {lp.pressing && <div className="absolute inset-0 bg-black/25 pointer-events-none z-10" aria-hidden="true" />}
+        {coverImage ? (
+          <BlobImage
+            store={store}
+            fileRef={imageToFileRef(coverImage)}
+            alt={folder.name}
+             className="w-full h-full object-cover"
+             thumbnail
+             thumbnailSize={pinned ? COVER_THUMBNAIL_SIZE : undefined}
+             lazy
+             blur={blurred}
+          />
+        ) : (
+          <div className="m-folder-placeholder w-full h-full flex items-center justify-center">
+            <MobileIcon name="📂" className="w-6 h-6" />
+          </div>
+        )}
+        {pinned && <span className="m-list-pin absolute top-1 left-1"><MobileIcon name="📌" className="w-3 h-3" /></span>}
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="m-list-title truncate">{folder.name}</div>
+        <div className="m-list-meta tabular-nums truncate">
+          {folder.imageCount} 张图片 · {folder.childCount} 个子文件夹
+        </div>
+      </div>
+      <svg viewBox="0 0 24 24" className="m-list-chevron w-4 h-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M9 18l6-6-6-6" />
+      </svg>
+    </div>
+  );
+}
+
+function MobileMineScreen({
+  onBack,
+  onOpenSettings,
+  rootFolder,
+  imageCount,
+  importReport,
+  lastManifest,
+  organizing,
+  onOrganize,
+  onExport,
+  onUndo,
+  onShowReport,
+}: MineScreenProps) {
+  return (
+    <div className="m-mine-screen fixed inset-0 flex flex-col" style={{ zIndex: Z_SETTINGS }}>
+      <header className="m-context-header shrink-0" style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}>
+        <div className="m-context-bar">
+          <button className="m-icon-button" onClick={onBack} aria-label="返回图库">
+            <svg viewBox="0 0 24 24" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M15 18l-6-6 6-6" />
+            </svg>
+          </button>
+          <div className="m-context-title">
+            <strong>我的</strong>
+            <span>本地工作区</span>
+          </div>
+          <span className="w-11 h-11 shrink-0" aria-hidden="true" />
+        </div>
+      </header>
+      <main className="m-mine-content flex-1 overflow-y-auto overscroll-contain">
+        <section className="m-mine-hero">
+          <span className="m-eyebrow">工作区</span>
+          <h1>我的</h1>
+          <p>管理 Kanitsu 的本地偏好与运行状态。</p>
+        </section>
+        <section className="m-mine-group">
+          <h2 className="m-settings-group-title">应用</h2>
+          <button className="m-mine-entry" onClick={onOpenSettings}>
+            <span className="m-mine-entry-icon"><MobileIcon name="⚙️" className="w-5 h-5" /></span>
+            <span className="m-mine-entry-copy">
+              <strong>设置</strong>
+              <span>主题、缓存、整理规则与诊断</span>
+            </span>
+            <svg viewBox="0 0 24 24" className="m-list-chevron w-4 h-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M9 18l6-6-6-6" />
+            </svg>
+          </button>
+        </section>
+        {rootFolder && (
+          <section className="m-mine-group">
+            <h2 className="m-settings-group-title">图库工具</h2>
+            <button className="m-mine-entry" disabled={imageCount === 0} onClick={onOrganize}>
+              <span className="m-mine-entry-icon"><MobileIcon name="🧹" className="w-5 h-5" /></span>
+              <span className="m-mine-entry-copy">
+                <strong>整理图库</strong>
+                <span>按文件名规则重新分组图片</span>
+              </span>
+              <svg viewBox="0 0 24 24" className="m-list-chevron w-4 h-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M9 18l6-6-6-6" />
+              </svg>
+            </button>
+            <button className="m-mine-entry" disabled={imageCount === 0} onClick={onExport}>
+              <span className="m-mine-entry-icon"><MobileIcon name="⬆️" className="w-5 h-5" /></span>
+              <span className="m-mine-entry-copy">
+                <strong>导出图库</strong>
+                <span>将全部图包导出为 ZIP</span>
+              </span>
+              <svg viewBox="0 0 24 24" className="m-list-chevron w-4 h-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M9 18l6-6-6-6" />
+              </svg>
+            </button>
+          </section>
+        )}
+        {(lastManifest || importReport) && (
+          <section className="m-mine-group">
+            <h2 className="m-settings-group-title">最近活动</h2>
+            {lastManifest && (
+              <button className="m-mine-entry" disabled={organizing} onClick={onUndo}>
+                <span className="m-mine-entry-icon"><MobileIcon name="↩️" className="w-5 h-5" /></span>
+                <span className="m-mine-entry-copy">
+                  <strong>撤销上次整理</strong>
+                  <span>恢复整理前的文件位置</span>
+                </span>
+                <svg viewBox="0 0 24 24" className="m-list-chevron w-4 h-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M9 18l6-6-6-6" />
+                </svg>
+              </button>
+            )}
+            {importReport && (
+              <button className="m-mine-entry" onClick={onShowReport}>
+                <span className="m-mine-entry-icon"><MobileIcon name="📋" className="w-5 h-5" /></span>
+                <span className="m-mine-entry-copy">
+                  <strong>导入报告</strong>
+                  <span>查看最近一次导入的跳过与失败文件</span>
+                </span>
+                <svg viewBox="0 0 24 24" className="m-list-chevron w-4 h-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M9 18l6-6-6-6" />
+                </svg>
+              </button>
+            )}
+          </section>
+        )}
+      </main>
     </div>
   );
 }
@@ -572,7 +771,8 @@ export function MobileApp({
   const [pinnedCovers, setPinnedCovers] = useState<Record<string, string>>(() => loadPinnedCovers());
   const [customRules, setCustomRules] = useState<CustomOrganizeRule[]>(() => loadCustomRules());
   const [showFileNames, setShowFileNames] = useState<boolean>(() => localStorage.getItem('kanitsu.showFileNames') === '1');
-  const [sortMode, setSortMode] = useState<'default' | 'name' | 'date' | 'size'>('default');
+  const [sortMode, setSortMode] = useState<SortMode>('default');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
   /** 包含子目录聚合视图（DESIGN.md 4.3）：图片区显示当前目录及其所有子目录的图片。 */
   const [aggregate, setAggregate] = useState(false);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>(() => (localStorage.getItem('kanitsu.viewMode') === 'list' ? 'list' : 'grid'));
@@ -585,6 +785,7 @@ export function MobileApp({
   const [sheet, setSheet] = useState<SheetModel | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
   const [promptState, setPromptState] = useState<PromptState | null>(null);
+  const [showMine, setShowMine] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [coverPickerFolder, setCoverPickerFolder] = useState<FolderNode | null>(null);
   // 多选 / 批量操作
@@ -601,6 +802,7 @@ export function MobileApp({
   const [organizeProgress, setOrganizeProgress] = useState<{ done: number; total: number } | null>(null);
   const [exporting, setExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState<{ done: number; total: number } | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   // 任务取消句柄：导入/导出用 token（原生 cancelTask），整理用 JS 侧标志。
   const importCancelTokenRef = useRef<string | null>(null);
   const exportCancelTokenRef = useRef<string | null>(null);
@@ -657,6 +859,19 @@ export function MobileApp({
     setToast({ text, kind: detected });
   }, []);
 
+  const handleRefresh = useCallback(async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      await refresh();
+      notify('已刷新', 'success');
+    } catch (err) {
+      notify(`刷新失败：${String(err)}`, 'error');
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refreshing, refresh, notify]);
+
   // ===== 派生数据 =====
   const currentFolderId = selectedFolderId || snapshot?.rootId || '';
   const selectedFolder = snapshot?.folders[currentFolderId] ?? null;
@@ -679,19 +894,38 @@ export function MobileApp({
     if (searchTerm) images = images.filter((img) => img.name.toLowerCase().includes(searchTerm));
     if (sortMode !== 'default') {
       const sorted = [...images];
-      if (sortMode === 'name') sorted.sort((a, b) => a.name.localeCompare(b.name));
-      else if (sortMode === 'date') sorted.sort((a, b) => (b.mtime ?? 0) - (a.mtime ?? 0));
-      else sorted.sort((a, b) => (b.size ?? 0) - (a.size ?? 0));
+      const direction = sortDirection === 'asc' ? 1 : -1;
+      if (sortMode === 'name') sorted.sort((a, b) => direction * a.name.localeCompare(b.name, 'zh-CN'));
+      else if (sortMode === 'date') sorted.sort((a, b) => direction * ((a.mtime ?? 0) - (b.mtime ?? 0)));
+      else sorted.sort((a, b) => direction * ((a.size ?? 0) - (b.size ?? 0)));
       return sorted;
     }
     return images;
-  }, [snapshot, currentFolderId, searchTerm, sortMode]);
+  }, [snapshot, currentFolderId, searchTerm, sortMode, sortDirection]);
 
   const childFolders = useMemo(() => {
     if (!snapshot) return [];
-    const folders = childrenOf(snapshot, currentFolderId).sort((a, b) => a.name.localeCompare(b.name));
-    return searchTerm ? folders.filter((f) => f.name.toLowerCase().includes(searchTerm)) : folders;
-  }, [snapshot, currentFolderId, searchTerm]);
+    const folders = childrenOf(snapshot, currentFolderId);
+    const filtered = searchTerm ? folders.filter((f) => f.name.toLowerCase().includes(searchTerm)) : folders;
+    if (sortMode === 'default') return filtered;
+    const direction = sortDirection === 'asc' ? 1 : -1;
+    if (sortMode === 'name') return [...filtered].sort((a, b) => direction * a.name.localeCompare(b.name, 'zh-CN'));
+    const stats = new Map<string, { bytes: number; latestModified: number }>();
+    for (const folder of filtered) {
+      const images = imagesOf(snapshot, folder.id);
+      stats.set(folder.id, {
+        bytes: images.reduce((sum, image) => sum + image.size, 0),
+        latestModified: images.reduce((latest, image) => Math.max(latest, image.mtime), 0),
+      });
+    }
+    return [...filtered].sort((a, b) => {
+      const aStats = stats.get(a.id)!;
+      const bStats = stats.get(b.id)!;
+      return sortMode === 'size'
+        ? direction * (aStats.bytes - bStats.bytes)
+        : direction * (aStats.latestModified - bStats.latestModified);
+    });
+  }, [snapshot, currentFolderId, searchTerm, sortMode, sortDirection]);
 
   const childFolderCards = useMemo(() => {
     if (!snapshot) return [];
@@ -735,8 +969,12 @@ export function MobileApp({
     collect(currentFolderId);
     const out: ImageEntry[] = [];
     for (const id of ids) out.push(...directImagesOf(snapshot, id));
+    const direction = sortDirection === 'asc' ? 1 : -1;
+    if (sortMode === 'name') out.sort((a, b) => direction * a.name.localeCompare(b.name, 'zh-CN'));
+    else if (sortMode === 'date') out.sort((a, b) => direction * ((a.mtime ?? 0) - (b.mtime ?? 0)));
+    else if (sortMode === 'size') out.sort((a, b) => direction * ((a.size ?? 0) - (b.size ?? 0)));
     return out;
-  }, [snapshot, currentFolderId]);
+  }, [snapshot, currentFolderId, sortMode, sortDirection]);
 
   /** 实际显示的图片列表：搜索 > 聚合 > 当前目录。 */
   const displayImages = aggregate && !searching ? aggregateImages : folderImages;
@@ -769,6 +1007,9 @@ export function MobileApp({
         break;
       case 'settings':
         setShowSettings(false);
+        break;
+      case 'mine':
+        setShowMine(false);
         break;
       case 'organize':
         setOrganizePreview(null);
@@ -966,6 +1207,11 @@ export function MobileApp({
     if (!replaceOverlay('drawer', 'settings')) openOverlay('settings');
   }, [openOverlay, replaceOverlay]);
 
+  const openMine = useCallback(() => {
+    setShowMine(true);
+    openOverlay('mine');
+  }, [openOverlay]);
+
   const goUp = useCallback(() => {
     const snap = snapshotRef.current;
     if (!snap) return;
@@ -1082,15 +1328,26 @@ export function MobileApp({
     if (!snapshot || childFolderCards.length === 0 || !isPrefetchEnabled()) return;
     const token = { cancelled: false };
     const covers: FileRef[] = [];
+    const pinnedCoverFiles: FileRef[] = [];
     for (const card of childFolderCards.slice(0, 16)) {
-      if (card.coverImage) covers.push(imageToFileRef(card.coverImage));
+      if (card.coverImage) {
+        covers.push(imageToFileRef(card.coverImage));
+        if (pinnedCovers[card.folder.id] === card.coverImage.id) pinnedCoverFiles.push(imageToFileRef(card.coverImage));
+      }
       for (const img of imagesOf(snapshot, card.folder.id).slice(0, 8)) covers.push(imageToFileRef(img));
     }
     if (covers.length > 0) preloadThumbnails(store, covers, { priority: THUMB_PRIORITY_SUBFOLDER, shouldStop: () => token.cancelled });
+    if (pinnedCoverFiles.length > 0) {
+      preloadThumbnails(store, pinnedCoverFiles, {
+        maxSize: COVER_THUMBNAIL_SIZE,
+        priority: THUMB_PRIORITY_SUBFOLDER,
+        shouldStop: () => token.cancelled,
+      });
+    }
     return () => {
       token.cancelled = true;
     };
-  }, [snapshot, childFolderCards, store]);
+  }, [snapshot, childFolderCards, pinnedCovers, store]);
 
   useEffect(() => {
     if (!snapshot || !isPrefetchEnabled()) return;
@@ -1365,7 +1622,7 @@ export function MobileApp({
         } else if (prompt.kind === 'batch-move') {
           // 批量移动：在当前目录新建子文件夹，把选中的图片移进去。
           const created = await createSubfolder(store, selectedFolder?.relPath ?? '', value);
-          const targets = folderImages.filter((img) => selectedIds.has(img.id));
+          const targets = displayImages.filter((img) => selectedIds.has(img.id));
           let moved = 0;
           for (const img of targets) {
             try {
@@ -1389,7 +1646,7 @@ export function MobileApp({
         notify(`操作失败：${String(err)}`, 'error');
       }
     },
-    [promptState, store, refresh, notify, closeOverlay, navigateToFolder, selectedFolder, folderImages, selectedIds, exitSelectMode],
+    [promptState, store, refresh, notify, closeOverlay, navigateToFolder, selectedFolder, displayImages, selectedIds, exitSelectMode],
   );
 
   const toggleImageBlur = useCallback(
@@ -1512,46 +1769,6 @@ export function MobileApp({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [blurredImages, navigateToFolder, toggleFolderBlur, openOrganizeFor, handleExport, copyText, openOverlay],
   );
-
-  const openMoreActions = useCallback(() => {
-    const folder = selectedFolder;
-    const actions: SheetAction[] = [
-      { label: '导入相册', icon: '⬇️', onSelect: () => void handleImport() },
-      { label: '新建子文件夹', icon: '📁', onSelect: () => folder && openPrompt({ kind: 'create-folder', folder }) },
-      { label: '整理本目录', icon: '🧹', onSelect: () => folder && openOrganizeFor(folder) },
-      ...(folderImages.length > 0 ? [{ label: '多选', icon: '✅', onSelect: handleEnterSelectMode }] : []),
-      ...(lastManifest ? [{ label: '撤销整理', icon: '↩️', onSelect: () => void handleUndoOrganize() }] : []),
-      { label: '导出本目录 ZIP', icon: '📦', onSelect: () => folder && void handleExport(folder) },
-      { label: '刷新', icon: '🔄', onSelect: () => void refresh().then(() => notify('已刷新', 'success')) },
-      { label: sortMode === 'default' ? '✓ 默认顺序' : '默认顺序', icon: '↩️', onSelect: () => setSortMode('default') },
-      { label: sortMode === 'name' ? '✓ 按名称' : '按名称', icon: '🔤', onSelect: () => setSortMode('name') },
-      { label: sortMode === 'date' ? '✓ 按日期' : '按日期', icon: '🕐', onSelect: () => setSortMode('date') },
-      { label: sortMode === 'size' ? '✓ 按大小' : '按大小', icon: '📐', onSelect: () => setSortMode('size') },
-      { label: aggregate ? '✓ 包含子目录' : '包含子目录', icon: '📚', onSelect: () => setAggregate((v) => !v) },
-      {
-        label: viewMode === 'list' ? '切换为网格视图' : '切换为列表视图',
-        icon: viewMode === 'list' ? '🔳' : '☰',
-        onSelect: () => {
-          const next = viewMode === 'list' ? 'grid' : 'list';
-          setViewMode(next);
-          localStorage.setItem('kanitsu.viewMode', next);
-        },
-      },
-      {
-        label: showFileNames ? '隐藏文件名' : '显示文件名',
-        icon: '🏷️',
-        onSelect: () => {
-          const next = !showFileNames;
-          setShowFileNames(next);
-          localStorage.setItem('kanitsu.showFileNames', next ? '1' : '0');
-        },
-      },
-      ...(importReport ? [{ label: '查看导入报告', icon: '📋', onSelect: () => { setShowReport(true); openOverlay('report'); } }] : []),
-      { label: '设置', icon: '⚙️', onSelect: openSettings },
-    ];
-    setSheet({ title: folder?.name || '全部相册', actions });
-    openOverlay('sheet');
-  }, [selectedFolder, handleImport, openOrganizeFor, lastManifest, handleUndoOrganize, handleExport, refresh, notify, importReport, openOverlay, showFileNames, sortMode, folderImages.length, handleEnterSelectMode]);
 
   // ===== 打开各 UI 层（history 栈配对）=====
   const openViewer = useCallback(
@@ -1688,12 +1905,13 @@ export function MobileApp({
               <button className="m-icon-button" onClick={openSearch} aria-label="搜索">
                 <MobileIcon name="🔍" className="w-5 h-5" />
               </button>
-              <button className="m-icon-button" onClick={openMoreActions} aria-label="更多">
-                <svg viewBox="0 0 24 24" className="w-5 h-5" fill="currentColor">
-                  <circle cx="12" cy="5" r="1.5" />
-                  <circle cx="12" cy="12" r="1.5" />
-                  <circle cx="12" cy="19" r="1.5" />
-                </svg>
+              <button
+                className={`m-icon-button m-refresh-button ${refreshing ? 'is-loading' : ''}`}
+                disabled={refreshing}
+                onClick={() => void handleRefresh()}
+                aria-label="刷新当前目录"
+              >
+                <MobileIcon name="🔄" className="w-5 h-5" />
               </button>
             </div>
           )}
@@ -1710,9 +1928,19 @@ export function MobileApp({
           <section className="m-library-intro">
             <div className="m-eyebrow-row">
               <span className="m-eyebrow">本地图书馆</span>
-              <button className="m-index-state" onClick={openDrawer}>
-                查看目录
-              </button>
+              <div className="m-library-head-actions">
+                <button
+                  className={`m-mini-icon-button m-refresh-button ${refreshing ? 'is-loading' : ''}`}
+                  disabled={refreshing}
+                  onClick={() => void handleRefresh()}
+                  aria-label="刷新图库"
+                >
+                  <MobileIcon name="🔄" className="w-4 h-4" />
+                </button>
+                <button className="m-index-state" onClick={openDrawer}>
+                  查看目录
+                </button>
+              </div>
             </div>
             <h1>全部图包</h1>
             <div className="m-library-stats">
@@ -1728,29 +1956,47 @@ export function MobileApp({
                 <span>搜索图包或文件名</span>
                 <small>本地</small>
               </button>
-              <button className="m-square-button" onClick={openMoreActions} aria-label="更多图库操作">
-                <svg viewBox="0 0 24 24" className="w-5 h-5" fill="currentColor">
-                  <circle cx="12" cy="5" r="1.5" />
-                  <circle cx="12" cy="12" r="1.5" />
-                  <circle cx="12" cy="19" r="1.5" />
+            </div>
+            {childFolders.length === 0 && (
+              <button className="m-import-launch" onClick={() => void handleImport()}>
+                <span className="m-import-launch-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                    <path d="M12 5v14M5 12h14" />
+                  </svg>
+                </span>
+                <span className="m-import-launch-copy">
+                  <strong>导入图包</strong>
+                  <small>从设备选择文件夹，自动建立本地图库</small>
+                </span>
+                <svg viewBox="0 0 24 24" className="m-import-launch-arrow" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M5 12h14M13 6l6 6-6 6" />
                 </svg>
               </button>
-            </div>
-            <button className="m-import-launch" onClick={() => void handleImport()}>
-              <span className="m-import-launch-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                  <path d="M12 5v14M5 12h14" />
-                </svg>
-              </span>
-              <span className="m-import-launch-copy">
-                <strong>导入图包</strong>
-                <small>从设备选择文件夹，自动建立本地图库</small>
-              </span>
-              <svg viewBox="0 0 24 24" className="m-import-launch-arrow" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M5 12h14M13 6l6 6-6 6" />
-              </svg>
-            </button>
+            )}
           </section>
+        )}
+
+        {snapshot && !isRoot && !searchActive && !selectMode && (lastManifest || importReport) && (
+          <div className={`m-recent-actions ${isRoot ? 'is-root' : ''}`}>
+            {lastManifest && (
+              <button className="m-recent-action" disabled={organizing} onClick={() => void handleUndoOrganize()}>
+                <MobileIcon name="↩️" className="w-4 h-4" />
+                <span>撤销上次整理</span>
+              </button>
+            )}
+            {importReport && (
+              <button
+                className="m-recent-action"
+                onClick={() => {
+                  setShowReport(true);
+                  openOverlay('report');
+                }}
+              >
+                <MobileIcon name="📋" className="w-4 h-4" />
+                <span>查看导入报告</span>
+              </button>
+            )}
+          </div>
         )}
 
         {!snapshot ? (
@@ -1773,27 +2019,44 @@ export function MobileApp({
                   <h3 className="m-section-label">
                     匹配的文件夹 <span className="tabular-nums">{searchFolders.length}</span>
                   </h3>
-                  <VirtualGrid
-                    items={searchFolderCards}
-                    cols={searchFolderCols}
-                    rowHeight={searchFolderRowHeight}
-                    gap={FOLDER_GAP}
-                    scrollTop={scrollTop}
-                    viewportH={viewportH}
-                    sectionTop={sectionTops.folder}
-                    getKey={(c) => c.folder.id}
-                    renderItem={(card) => (
-                      <FolderCard
-                        folder={card.folder}
-                        coverImage={card.coverImage}
-                        store={store}
-                        pinned={pinnedCovers[card.folder.id] != null}
-                        blurred={card.coverImage ? isImageBlurred(card.coverImage.relPath, blurredImages) : false}
-                        onOpen={() => navigateToFolder(card.folder.id)}
-                        onActions={() => openFolderActions(card.folder)}
-                      />
-                    )}
-                  />
+                  {viewMode === 'list' ? (
+                    <div className="flex flex-col gap-1 px-0.5 pb-2">
+                      {searchFolderCards.map((card) => (
+                        <FolderListRow
+                          key={card.folder.id}
+                          folder={card.folder}
+                          coverImage={card.coverImage}
+                          store={store}
+                          pinned={pinnedCovers[card.folder.id] != null}
+                          blurred={card.coverImage ? isImageBlurred(card.coverImage.relPath, blurredImages) : false}
+                          onOpen={() => navigateToFolder(card.folder.id)}
+                          onActions={() => openFolderActions(card.folder)}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <VirtualGrid
+                      items={searchFolderCards}
+                      cols={searchFolderCols}
+                      rowHeight={searchFolderRowHeight}
+                      gap={FOLDER_GAP}
+                      scrollTop={scrollTop}
+                      viewportH={viewportH}
+                      sectionTop={sectionTops.folder}
+                      getKey={(c) => c.folder.id}
+                      renderItem={(card) => (
+                        <FolderCard
+                          folder={card.folder}
+                          coverImage={card.coverImage}
+                          store={store}
+                          pinned={pinnedCovers[card.folder.id] != null}
+                          blurred={card.coverImage ? isImageBlurred(card.coverImage.relPath, blurredImages) : false}
+                          onOpen={() => navigateToFolder(card.folder.id)}
+                          onActions={() => openFolderActions(card.folder)}
+                        />
+                      )}
+                    />
+                  )}
                 </section>
               )}
               {searchImages.length > 0 && (
@@ -1846,7 +2109,7 @@ export function MobileApp({
               )}
             </div>
           )
-        ) : childFolders.length === 0 && displayImages.length === 0 ? (
+        ) : childFolders.length === 0 && (isRoot || displayImages.length === 0) ? (
           <div className="m-empty-state">
             <div>
             {searchTerm ? (
@@ -1860,47 +2123,185 @@ export function MobileApp({
                 <span className="m-empty-icon"><MobileIcon name="🖼️" className="w-6 h-6" /></span>
                 <div className="m-empty-title">{isRoot ? '图库还是空的' : '该目录暂无图片'}</div>
                 <div className="m-empty-copy">{isRoot ? '导入照片，开始整理你的图库' : '返回上级或导入新内容'}</div>
-                <button className="m-primary-button" onClick={() => void handleImport()}>
-                  导入相册
-                </button>
+                {!isRoot && (
+                  <div className="m-empty-actions">
+                    <button className="m-primary-button" onClick={() => void handleImport()}>
+                      导入相册
+                    </button>
+                    {selectedFolder && (
+                      <button className="m-button" onClick={() => openPrompt({ kind: 'create-folder', folder: selectedFolder })}>
+                        新建子文件夹
+                      </button>
+                    )}
+                  </div>
+                )}
               </>
             )}
             </div>
           </div>
         ) : (
           <div className="m-content-pad">
-            {childFolders.length > 0 && (
-              <section ref={folderSectionRef} className="m-section">
-                <h3 className="m-section-label">子文件夹 <span>{childFolders.length}</span></h3>
-                <VirtualGrid
-                  items={childFolderCards}
-                  cols={folderCols}
-                  rowHeight={folderRowHeight}
-                  gap={FOLDER_GAP}
-                  scrollTop={scrollTop}
-                  viewportH={viewportH}
-                  sectionTop={sectionTops.folder}
-                  getKey={(c) => c.folder.id}
-                  renderItem={(card) => (
-                    <FolderCard
-                      folder={card.folder}
-                      coverImage={card.coverImage}
-                      store={store}
-                      pinned={pinnedCovers[card.folder.id] != null}
-                      blurred={card.coverImage ? isImageBlurred(card.coverImage.relPath, blurredImages) : false}
-                      onOpen={() => navigateToFolder(card.folder.id)}
-                      onActions={() => openFolderActions(card.folder)}
-                    />
-                  )}
-                />
-              </section>
+            {!selectMode && (
+              <div className="m-directory-toolbar">
+                <span>{isRoot ? '图包排列' : '内容排列'}</span>
+                <div className="m-directory-controls">
+                  <label className="m-sort-picker">
+                    <MobileIcon name="📐" className="w-4 h-4" />
+                    <select
+                      value={sortMode}
+                      onChange={(e) => {
+                        const next = e.target.value as SortMode;
+                        setSortMode(next);
+                        if (next === 'name') setSortDirection('asc');
+                        else if (next === 'date' || next === 'size') setSortDirection('desc');
+                      }}
+                      aria-label="图包和图片排序方式"
+                    >
+                      <option value="default">默认顺序</option>
+                      <option value="name">按名称</option>
+                      <option value="date">按日期</option>
+                      <option value="size">按大小</option>
+                    </select>
+                  </label>
+                  <button
+                    className="m-sort-direction"
+                    disabled={sortMode === 'default'}
+                    onClick={() => setSortDirection((direction) => (direction === 'asc' ? 'desc' : 'asc'))}
+                    aria-label={sortDirection === 'asc' ? '当前升序，切换为降序' : '当前降序，切换为升序'}
+                  >
+                    <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      {sortDirection === 'asc' ? <path d="M12 19V5M7 10l5-5 5 5" /> : <path d="M12 5v14M7 14l5 5 5-5" />}
+                    </svg>
+                    <span>{sortDirection === 'asc' ? '升序' : '降序'}</span>
+                  </button>
+                  <div className="m-view-switch" aria-label="图包和图片布局">
+                    <button
+                      className={viewMode === 'grid' ? 'is-active' : ''}
+                      onClick={() => {
+                        setViewMode('grid');
+                        localStorage.setItem('kanitsu.viewMode', 'grid');
+                      }}
+                      aria-label="网格视图"
+                      aria-pressed={viewMode === 'grid'}
+                    >
+                      <MobileIcon name="🔳" className="w-4 h-4" />
+                    </button>
+                    <button
+                      className={viewMode === 'list' ? 'is-active' : ''}
+                      onClick={() => {
+                        setViewMode('list');
+                        localStorage.setItem('kanitsu.viewMode', 'list');
+                      }}
+                      aria-label="列表视图"
+                      aria-pressed={viewMode === 'list'}
+                    >
+                      <MobileIcon name="☰" className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              </div>
             )}
-            {displayImages.length > 0 && (
+            <section ref={folderSectionRef} className="m-section">
+              <div className="m-section-heading">
+                <h3 className="m-section-label">{isRoot ? '图包' : '子文件夹'} <span>{childFolders.length}</span></h3>
+                {!selectMode && selectedFolder && (
+                  <div className="m-section-actions">
+                    {isRoot && childFolders.length > 0 && (
+                      <button className="m-section-action" onClick={() => void handleImport()}>
+                        <MobileIcon name="⬇️" className="w-4 h-4" />
+                        <span>导入</span>
+                      </button>
+                    )}
+                    <button className="m-section-action" onClick={() => openPrompt({ kind: 'create-folder', folder: selectedFolder })}>
+                      <MobileIcon name="📁" className="w-4 h-4" />
+                      <span>新建</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+              {childFolders.length > 0 && (
+                viewMode === 'list' ? (
+                  <div className="flex flex-col gap-1 px-0.5 pb-2">
+                    {childFolderCards.map((card) => (
+                      <FolderListRow
+                        key={card.folder.id}
+                        folder={card.folder}
+                        coverImage={card.coverImage}
+                        store={store}
+                        pinned={pinnedCovers[card.folder.id] != null}
+                        blurred={card.coverImage ? isImageBlurred(card.coverImage.relPath, blurredImages) : false}
+                        onOpen={() => navigateToFolder(card.folder.id)}
+                        onActions={() => openFolderActions(card.folder)}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <VirtualGrid
+                    items={childFolderCards}
+                    cols={folderCols}
+                    rowHeight={folderRowHeight}
+                    gap={FOLDER_GAP}
+                    scrollTop={scrollTop}
+                    viewportH={viewportH}
+                    sectionTop={sectionTops.folder}
+                    getKey={(c) => c.folder.id}
+                    renderItem={(card) => (
+                      <FolderCard
+                        folder={card.folder}
+                        coverImage={card.coverImage}
+                        store={store}
+                        pinned={pinnedCovers[card.folder.id] != null}
+                        blurred={card.coverImage ? isImageBlurred(card.coverImage.relPath, blurredImages) : false}
+                        onOpen={() => navigateToFolder(card.folder.id)}
+                        onActions={() => openFolderActions(card.folder)}
+                      />
+                    )}
+                  />
+                )
+              )}
+            </section>
+            {!isRoot && (folderImages.length > 0 || aggregateImages.length > 0) && (
               <section ref={imageSectionRef} className="m-section">
-                <h3 className="m-section-label">
-                  {aggregate ? '全部图片（含子目录）' : '图片'} <span className="tabular-nums">{displayImages.length}</span>
-                </h3>
-                {viewMode === 'list' ? (
+                <div className="m-section-heading">
+                  <h3 className="m-section-label">
+                    {aggregate ? '全部图片' : '当前目录图片'} <span className="tabular-nums">{displayImages.length}</span>
+                  </h3>
+                  {!selectMode && (
+                    <button className="m-section-action" disabled={displayImages.length === 0} onClick={handleEnterSelectMode}>
+                      <MobileIcon name="✅" className="w-4 h-4" />
+                      <span>选择</span>
+                    </button>
+                  )}
+                </div>
+                {!selectMode && (
+                  <div className="m-view-toolbar" role="group" aria-label="图片显示选项">
+                    <button
+                      className={`m-tool-button ${aggregate ? 'is-active' : ''}`}
+                      disabled={!aggregate && aggregateImages.length === folderImages.length}
+                      onClick={() => setAggregate((value) => !value)}
+                      aria-pressed={aggregate}
+                    >
+                      <MobileIcon name="📚" className="w-4 h-4" />
+                      <span>子目录</span>
+                    </button>
+                    <button
+                      className={`m-tool-button ${showFileNames && viewMode === 'grid' ? 'is-active' : ''}`}
+                      disabled={viewMode === 'list'}
+                      onClick={() => {
+                        const next = !showFileNames;
+                        setShowFileNames(next);
+                        localStorage.setItem('kanitsu.showFileNames', next ? '1' : '0');
+                      }}
+                      aria-pressed={showFileNames}
+                    >
+                      <MobileIcon name="🏷️" className="w-4 h-4" />
+                      <span>文件名</span>
+                    </button>
+                  </div>
+                )}
+                {displayImages.length === 0 ? (
+                  <div className="m-inline-empty">当前目录没有图片，开启“子目录”可查看全部图片</div>
+                ) : viewMode === 'list' ? (
                   <div className="flex flex-col gap-0.5 px-0.5 pb-2">
                     {displayImages.map((img) => (
                       <ImageListRow
@@ -1983,21 +2384,14 @@ export function MobileApp({
                 <MobileIcon name="🏠" className="w-5 h-5" />
                 <span>图库</span>
               </button>
-              <button className="m-dock-button" onClick={openSearch}>
-                <MobileIcon name="🔍" className="w-5 h-5" />
-                <span>搜索</span>
-              </button>
-              <button
-                className="m-dock-button"
-                onClick={openSettings}
-              >
-                <MobileIcon name="⚙️" className="w-5 h-5" />
-                <span>设置</span>
+              <button className="m-dock-button" onClick={openMine}>
+                <MobileIcon name="👤" className="w-5 h-5" />
+                <span>我的</span>
               </button>
             </>
           ) : (
             <>
-              <button className="m-dock-button" disabled={folderImages.length === 0} onClick={handleEnterSelectMode}>
+              <button className="m-dock-button" disabled={displayImages.length === 0} onClick={handleEnterSelectMode}>
                 <MobileIcon name="✅" className="w-5 h-5" />
                 <span>选择</span>
               </button>
@@ -2062,18 +2456,6 @@ export function MobileApp({
                 />
               )}
             </div>
-            <div className="m-drawer-footer shrink-0" style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 8px)' }}>
-              <button
-                className="m-drawer-footer-button"
-                onClick={openSettings}
-              >
-                <svg viewBox="0 0 24 24" className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="12" cy="12" r="3" />
-                  <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09a1.65 1.65 0 00-1-1.51 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09a1.65 1.65 0 001.51-1 1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33h0a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51h0a1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82v0a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z" />
-                </svg>
-                <span className="m-tree-title">设置</span>
-              </button>
-            </div>
           </aside>
         </div>
       )}
@@ -2085,7 +2467,6 @@ export function MobileApp({
           images={viewerImages}
           index={viewerIndex}
           store={store}
-          isBlurred={(img) => blurredImages.has(img.relPath)}
           onClose={() => closeOverlay('viewer')}
           onNavigate={(id) => setViewerImageId(id)}
           onShowActions={(img) => openImageActions(img, true)}
@@ -2126,6 +2507,28 @@ export function MobileApp({
       )}
 
       {/* 设置 */}
+      {showMine && (
+        <MobileMineScreen
+          onBack={() => closeOverlay('mine')}
+          onOpenSettings={openSettings}
+          rootFolder={rootFolder}
+          imageCount={libraryStats.imageCount}
+          importReport={importReport}
+          lastManifest={lastManifest}
+          organizing={organizing}
+          onOrganize={() => {
+            if (rootFolder) openOrganizeFor(rootFolder);
+          }}
+          onExport={() => {
+            if (rootFolder) void handleExport(rootFolder);
+          }}
+          onUndo={() => void handleUndoOrganize()}
+          onShowReport={() => {
+            setShowReport(true);
+            openOverlay('report');
+          }}
+        />
+      )}
       {showSettings && (
         <MobileSettingsScreen rules={customRules} onChange={handleCustomRulesChange} onBack={() => closeOverlay('settings')} />
       )}

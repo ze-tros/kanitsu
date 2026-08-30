@@ -35,6 +35,7 @@ const SEARCH = <g><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3" /></
 const IMAGE = <g><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="M21 15l-5-5L5 21" /></g>;
 const HOME = <path d="M3 10.5L12 3l9 7.5V21H3z" />;
 const UPLOAD = <g><path d="M12 15V3" /><path d="M7 8l5-5 5 5" /><path d="M4 21h16" /></g>;
+const USER = <g><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></g>;
 
 /** emoji → SVG 内容（未收录的返回 null，由调用方回退为字符）。 */
 const ICON_PATHS: Record<string, ReactNode> = {
@@ -65,6 +66,7 @@ const ICON_PATHS: Record<string, ReactNode> = {
   '🖼️': IMAGE,
   '🏠': HOME,
   '⬆️': UPLOAD,
+  '👤': USER,
 };
 
 /** 渲染一个图标：emoji 命中映射时输出 SVG，否则回退为字符文本。 */

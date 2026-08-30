@@ -427,7 +427,13 @@ public class KanitsuPlugin extends Plugin {
     // ------------------------------------------------------------------
 
     private ProgressEmitter importEmitter() {
+        final long[] lastEmitAt = { 0L };
         return (scanned, copied, skipped, current) -> {
+            long now = System.nanoTime();
+            if (lastEmitAt[0] != 0L && now - lastEmitAt[0] < 100_000_000L) {
+                return;
+            }
+            lastEmitAt[0] = now;
             JSObject o = new JSObject();
             o.put("scanned", scanned);
             o.put("copied", copied);

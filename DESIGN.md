@@ -193,7 +193,7 @@ npm test --workspaces --if-present
 
 ```bash
 npm run build:web
-npm run build:mobile
+npm run build:android
 ```
 
 关键人工回归：

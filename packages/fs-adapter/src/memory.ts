@@ -43,7 +43,7 @@ function extOfName(name: string): string {
   return idx < 0 ? '' : name.slice(idx + 1).toLowerCase();
 }
 
-const SUPPORTED_IMAGE_EXT = new Set(['jpg', 'jpeg', 'png', 'webp', 'avif', 'bmp', 'gif']);
+const SUPPORTED_IMAGE_EXT = new Set(['jpg', 'jpe', 'jpeg', 'png', 'webp', 'avif', 'bmp', 'gif']);
 
 function toFolderRef(node: MemNode, id: string): FolderRef {
   return { id, name: node.name, kind: 'folder' };

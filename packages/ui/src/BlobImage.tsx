@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { FileRef, LibraryStore } from '../../fs-adapter/src/types';
-import { getThumbnailBlob, peekThumbnailBlob } from './thumbnailCache';
+import { DEFAULT_THUMBNAIL_SIZE, getThumbnailBlob, peekThumbnailBlob } from './thumbnailCache';
 import { observeVisibility } from './visibleObserver';
 import { acquireObjectUrl, releaseObjectUrl } from './objectUrlPool';
 
@@ -12,6 +12,7 @@ export function BlobImage({
   thumbnail = false,
   lazy = false,
   blur = false,
+  thumbnailSize = DEFAULT_THUMBNAIL_SIZE,
 }: {
   store: LibraryStore;
   fileRef: FileRef;
@@ -20,8 +21,9 @@ export function BlobImage({
   thumbnail?: boolean;
   lazy?: boolean;
   blur?: boolean;
+  thumbnailSize?: number;
 }) {
-  const resourceKey = `${fileRef.id}\u0000${fileRef.mtime ?? ''}\u0000${fileRef.size ?? ''}\u0000${thumbnail ? 'thumb' : 'full'}`;
+  const resourceKey = `${fileRef.id}\u0000${fileRef.mtime ?? ''}\u0000${fileRef.size ?? ''}\u0000${thumbnail ? `thumb-${thumbnailSize}` : 'full'}`;
   const [loaded, setLoaded] = useState<{ key: string; url: string } | null>(null);
   const [failedKey, setFailedKey] = useState<string | null>(null);
   const [visible, setVisible] = useState(!lazy);
@@ -52,14 +54,14 @@ export function BlobImage({
     setFailedKey((current) => (current === resourceKey ? null : current));
     // 缩略图走内存缓存：同一文件切走再切回时直接复用已生成的 Blob，
     // 不再触发 IPC / 磁盘解码 / 重新编码（见 thumbnailCache.ts）。
-    const cached = thumbnail ? peekThumbnailBlob(fileRef, 512) : null;
+    const cached = thumbnail ? peekThumbnailBlob(fileRef, thumbnailSize) : null;
     if (cached) {
       const next = acquireObjectUrl(cached);
       ownedUrl = next;
       setLoaded({ key: resourceKey, url: next });
       return () => releaseObjectUrl(next);
     }
-    const load = thumbnail ? getThumbnailBlob(store, fileRef, 512) : Promise.resolve(store.readBlob(fileRef));
+    const load = thumbnail ? getThumbnailBlob(store, fileRef, thumbnailSize) : Promise.resolve(store.readBlob(fileRef));
     load
       .then((blob) => {
         if (cancelled) return;
@@ -74,7 +76,7 @@ export function BlobImage({
       cancelled = true;
       if (ownedUrl) releaseObjectUrl(ownedUrl);
     };
-  }, [store, fileRef.id, fileRef.mtime, fileRef.size, resourceKey, shouldLoad, thumbnail]);
+  }, [store, fileRef.id, fileRef.mtime, fileRef.size, resourceKey, shouldLoad, thumbnail, thumbnailSize]);
 
   // 缩略图优先显示图像靠上的部分（object-cover 裁剪默认居中，会裁掉主体所在的
   // 上半部）；原图查看不受影响。

@@ -344,11 +344,13 @@ function MobileLogSection() {
             <strong>日志等级</strong>
             <span>控制渲染端与 Android 原生桥记录的详细程度。</span>
           </span>
-          <select className="m-select m-log-level-select" value={level} onChange={(e) => setLevel(e.target.value as LogLevel)}>
-            {LEVEL_LABELS.map(([v, label]) => (
-              <option key={v} value={v}>{label}</option>
-            ))}
-          </select>
+          <span className="m-select-wrap m-log-level-wrap">
+            <select className="m-select m-log-level-select" value={level} onChange={(e) => setLevel(e.target.value as LogLevel)}>
+              {LEVEL_LABELS.map(([v, label]) => (
+                <option key={v} value={v}>{label}</option>
+              ))}
+            </select>
+          </span>
         </label>
         <div className="m-settings-actions is-three">
           <button className="m-button" onClick={() => setShowLogs((v) => !v)}>{showLogs ? '收起日志' : '查看日志'}</button>

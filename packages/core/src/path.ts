@@ -48,7 +48,7 @@ export function extOf(name: string): string {
   return idx < 0 ? '' : name.slice(idx + 1).toLowerCase();
 }
 
-const SUPPORTED_IMAGE_EXT = new Set(['jpg', 'jpeg', 'png', 'webp', 'avif', 'bmp', 'gif']);
+const SUPPORTED_IMAGE_EXT = new Set(['jpg', 'jpe', 'jpeg', 'png', 'webp', 'avif', 'bmp', 'gif']);
 
 export function isSupportedImage(name: string): boolean {
   return SUPPORTED_IMAGE_EXT.has(extOf(name));

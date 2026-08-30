@@ -22,7 +22,7 @@ import org.json.JSONArray;
 
 /** SAF (Storage Access Framework) source tree reader and native importer. */
 public final class SafSource {
-    private static final Set<String> IMAGE_EXT = new HashSet<>(Arrays.asList("jpg", "jpeg", "png", "webp", "avif", "bmp", "gif"));
+    private static final Set<String> IMAGE_EXT = new HashSet<>(Arrays.asList("jpg", "jpe", "jpeg", "png", "webp", "avif", "bmp", "gif"));
 
     private final Context context;
     private Uri treeUri;
@@ -162,8 +162,13 @@ public final class SafSource {
                 String ext = AlbumLibrary.extOf(child.name);
                 if (IMAGE_EXT.contains(ext)) {
                     try {
-                        byte[] data = readBytes(child.id);
-                        albums.write(dstDir, child.name, data);
+                        Uri docUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, child.id);
+                        try (InputStream input = context.getContentResolver().openInputStream(docUri)) {
+                            if (input == null) {
+                                throw new IOException("无法打开文件");
+                            }
+                            albums.write(dstDir, child.name, input);
+                        }
                         copied[0]++;
                     } catch (Exception e) {
                         errors.add(child.name + ": " + String.valueOf(e.getMessage()));

@@ -66,7 +66,7 @@ export async function importFolder(
       task.skippedCount = result.skippedCount;
       task.skippedFiles = result.skippedFiles;
       task.errors = result.errors;
-      task.status = 'done';
+       task.status = result.canceled ? 'canceled' : 'done';
       task.finishedAt = Date.now();
       return task;
     }

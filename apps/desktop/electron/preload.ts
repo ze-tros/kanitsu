@@ -11,6 +11,16 @@ type DesktopEntry = {
   height?: number;
 };
 
+type NativeImportResult = {
+  canceled?: boolean;
+  targetTopFolder: string;
+  scannedFileCount: number;
+  copiedImageCount: number;
+  skippedCount: number;
+  skippedFiles: Array<{ path: string; reason: 'no-extension' | 'unsupported-format' }>;
+  errors: string[];
+};
+
 type ThumbnailDebugStats = {
   queuedByPriority: number[];
   inFlight: number;
@@ -40,6 +50,14 @@ const bridge = {
   listSourceChildren: (folder: DesktopEntry): Promise<DesktopEntry[]> =>
     ipcRenderer.invoke('import:listChildren', folder),
   readSourceBlob: (file: DesktopEntry): Promise<Uint8Array> => ipcRenderer.invoke('import:readBlob', file),
+  importSourceTree: (source: DesktopEntry, targetTopName: string, cancelToken?: string): Promise<NativeImportResult> =>
+    ipcRenderer.invoke('import:tree', source, targetTopName, cancelToken),
+  onImportProgress: (callback: (progress: { scanned: number; copied: number; skipped: number; current?: string }) => void): (() => void) => {
+    const listener = (_event: unknown, progress: { scanned: number; copied: number; skipped: number; current?: string }) => callback(progress);
+    ipcRenderer.on('import:progress', listener);
+    return () => ipcRenderer.removeListener('import:progress', listener);
+  },
+  cancelTask: (token: string): Promise<void> => ipcRenderer.invoke('import:cancel', token),
   releaseSource: (): Promise<void> => ipcRenderer.invoke('import:releaseSource'),
   getLibraryRoot: (): Promise<DesktopEntry> => ipcRenderer.invoke('library:getRoot'),
   ensureLibraryRoot: (): Promise<DesktopEntry> => ipcRenderer.invoke('library:ensureRoot'),

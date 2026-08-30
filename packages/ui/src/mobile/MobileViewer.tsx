@@ -75,7 +75,6 @@ export function MobileViewer({
   images,
   index,
   store,
-  isBlurred,
   onClose,
   onNavigate,
   onShowActions,
@@ -83,7 +82,6 @@ export function MobileViewer({
   images: ImageEntry[];
   index: number;
   store: LibraryStore;
-  isBlurred: (image: ImageEntry) => boolean;
   onClose: () => void;
   onNavigate: (id: string) => void;
   onShowActions: (image: ImageEntry) => void;
@@ -296,13 +294,6 @@ export function MobileViewer({
   const [dragX, setDragX] = useState(0); // 手势中跟手偏移
   const [animating, setAnimating] = useState(false);
 
-  // 静止态自愈：非动画状态强制 dragX 归零，避免任何路径残留导致当前页偏移
-  //（表现为图片偏左、右侧露出下一张）。
-  useEffect(() => {
-    if (!animating && dragX !== 0) setDragX(0);
-  }, [animating, dragX]);
-
-
   const clampPan = useCallback(
     (scale: number, tx: number, ty: number) => {
       const p = current ? pagesRef.current.get(current.id) : undefined;
@@ -396,8 +387,10 @@ export function MobileViewer({
         resetTransform();
         return;
       }
-      setAnimating(true);
-      setDragX(dir === 1 ? -containerSize.w : containerSize.w);
+      // 先提交手指松开时的位置，再在下一帧提交目标位置。否则 React 可能把
+      // 两次 state 更新合并，浏览器看不到过渡起点，表现就会像直接跳页。
+      setAnimating(false);
+      setDragX(Math.max(-containerSize.w, Math.min(containerSize.w, fromOffset)));
       // 用 transitionend 驱动切图，慢设备上动画真正结束后才切换，避免闪烁；
       // transition 在子页面元素上，需用 capture 监听容器并只校验 propertyName；
       // 事件丢失时由兜底定时器（动画 240ms + 余量）兜底，防止卡死。
@@ -417,9 +410,13 @@ export function MobileViewer({
         if (ev.propertyName !== 'transform') return;
         finish();
       };
-      const timer = window.setTimeout(finish, 300);
+      let timer = 0;
       el?.addEventListener('transitionend', onEnd, true);
-      void fromOffset;
+      window.requestAnimationFrame(() => {
+        setAnimating(true);
+        setDragX(dir === 1 ? -containerSize.w : containerSize.w);
+        timer = window.setTimeout(finish, 360);
+      });
     },
     [images, index, containerSize.w, onNavigate, resetTransform],
   );
@@ -651,7 +648,7 @@ export function MobileViewer({
               className="absolute inset-0"
               style={{
                 transform: `translateX(${x})`,
-                transition: animating ? 'transform 240ms cubic-bezier(0.25, 0.8, 0.3, 1)' : 'none',
+                transition: animating ? 'transform 320ms cubic-bezier(0.22, 1, 0.36, 1)' : 'none',
                 visibility: Math.abs(offsetPages) > 1 ? 'hidden' : 'visible',
               }}
             >
@@ -681,7 +678,7 @@ export function MobileViewer({
                       src={p.thumbUrl}
                       alt=""
                       draggable={false}
-                      className={`object-contain ${isBlurred(img) ? 'blur-preview' : ''}`}
+                      className="object-contain"
                       style={{ pointerEvents: 'none', width: d.iw, height: d.ih }}
                     />
                   </div>
@@ -700,7 +697,7 @@ export function MobileViewer({
                       alt={img.name}
                       draggable={false}
                       decoding="async"
-                      className={`object-contain ${isBlurred(img) ? 'blur-preview' : ''}`}
+                      className="object-contain"
                       style={{
                         pointerEvents: 'none',
                         width: d.iw,

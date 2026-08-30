@@ -9,6 +9,8 @@ export const THUMB_PRIORITY_DIRECTIONAL = 1;
 export const THUMB_PRIORITY_CURRENT_DIR = 2;
 export const THUMB_PRIORITY_SUBFOLDER = 3;
 export const THUMB_PRIORITY_WARMUP = 4;
+export const DEFAULT_THUMBNAIL_SIZE = 512;
+export const COVER_THUMBNAIL_SIZE = 1024;
 
 /**
  * 会话级缩略图内存缓存（LRU）。
@@ -402,9 +404,9 @@ export interface PreloadThumbnailsOptions {
    * 下一屏等于没被优先生成。默认 false。
    */
   recheck?: boolean;
+  /** 输出尺寸，封面预热使用更清晰的尺寸。 */
+  maxSize?: number;
 }
-
-const DEFAULT_PRELOAD_MAX_SIZE = 512;
 
 /**
  * 后台预加载一组缩略图（fire-and-forget，失败静默）。
@@ -429,7 +431,7 @@ export function preloadThumbnails(store: LibraryStore, files: FileRef[], options
       if (options.shouldStop?.()) return;
       active++;
       counters.prefetchScheduled++;
-      getThumbnailBlob(store, file, DEFAULT_PRELOAD_MAX_SIZE, {
+      getThumbnailBlob(store, file, options.maxSize ?? DEFAULT_THUMBNAIL_SIZE, {
         priority,
         recheck,
         shouldCancel: options.shouldStop,

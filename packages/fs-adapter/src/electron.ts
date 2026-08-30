@@ -1,4 +1,13 @@
-import type { FileRef, FolderRef, FsEntry, ImportSourcePicker, LibraryStore, ZipExportResult } from './types';
+import type {
+  FileRef,
+  FolderRef,
+  FsEntry,
+  ImportSourcePicker,
+  LibraryStore,
+  NativeImportProgress,
+  NativeImportResult,
+  ZipExportResult,
+} from './types';
 
 export interface DesktopFsEntry {
   id: string;
@@ -40,6 +49,9 @@ export interface KanitsuDesktopBridge {
   pickSourceFolder(): Promise<DesktopFsEntry | null>;
   listSourceChildren(folder: DesktopFsEntry): Promise<DesktopFsEntry[]>;
   readSourceBlob(file: DesktopFsEntry): Promise<Uint8Array>;
+  importSourceTree(source: DesktopFsEntry, targetTopName: string, cancelToken?: string): Promise<NativeImportResult>;
+  onImportProgress(callback: (progress: NativeImportProgress) => void): () => void;
+  cancelTask(token: string): Promise<void>;
   releaseSource(): Promise<void>;
   getLibraryRoot(): Promise<DesktopFsEntry>;
   ensureLibraryRoot(): Promise<DesktopFsEntry>;
@@ -158,6 +170,21 @@ export class ElectronLibraryStore implements LibraryStore {
     return new Blob([data as BlobPart]);
   }
 
+  async importSourceTree(
+    source: FolderRef,
+    targetTopName: string,
+    onProgress?: (p: NativeImportProgress) => void,
+    cancelToken?: string,
+  ): Promise<NativeImportResult> {
+    const bridge = requireBridge();
+    const off = bridge.onImportProgress((progress) => onProgress?.(progress));
+    try {
+      return await bridge.importSourceTree(toEntry(source), targetTopName, cancelToken);
+    } finally {
+      off();
+    }
+  }
+
   async readThumbnail(file: FileRef, maxSize = 512, options?: { priority?: number }): Promise<Blob> {
     const data = await requireBridge().readLibraryThumbnail(toEntry(file), maxSize, options?.priority ?? 0);
     return new Blob([data as BlobPart]);
@@ -185,6 +212,10 @@ export class ElectronLibraryStore implements LibraryStore {
 
   async remove(entry: FsEntry): Promise<void> {
     await requireBridge().removeLibraryEntry(toEntry(entry));
+  }
+
+  async cancelTask(token: string): Promise<void> {
+    await requireBridge().cancelTask(token);
   }
 
   async zipLibrary(targetRelPath: string, onProgress?: (done: number, total: number) => void): Promise<ZipExportResult> {

@@ -3,6 +3,8 @@ package com.kanitsu.viewer.kanitsu;
 import android.content.Context;
 import android.webkit.MimeTypeMap;
 import java.io.ByteArrayOutputStream;
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -74,10 +76,26 @@ public final class AlbumLibrary {
     public AndroidEntry write(File dir, String name, byte[] data) throws IOException {
         assertInside(dir);
         File out = new File(dir, name);
-        try (FileOutputStream fos = new FileOutputStream(out)) {
+        try (BufferedOutputStream fos = new BufferedOutputStream(new FileOutputStream(out), 256 * 1024)) {
             fos.write(data);
         }
         return AndroidEntry.file(out.getAbsolutePath(), name, data.length, out.lastModified(), 0, 0);
+    }
+
+    public AndroidEntry write(File dir, String name, InputStream input) throws IOException {
+        assertInside(dir);
+        File out = new File(dir, name);
+        long bytes = 0;
+        byte[] buffer = new byte[256 * 1024];
+        try (BufferedInputStream in = new BufferedInputStream(input, buffer.length);
+             BufferedOutputStream fos = new BufferedOutputStream(new FileOutputStream(out), buffer.length)) {
+            int n;
+            while ((n = in.read(buffer)) >= 0) {
+                fos.write(buffer, 0, n);
+                bytes += n;
+            }
+        }
+        return AndroidEntry.file(out.getAbsolutePath(), name, bytes, out.lastModified(), 0, 0);
     }
 
     public List<AndroidEntry> listChildren(File dir) throws IOException {

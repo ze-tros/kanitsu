@@ -4,7 +4,7 @@ import type { FileRef, LibraryStore } from '../../fs-adapter/src/types';
 import { childrenOf, directImagesOf, imagesOf } from '../../core/src/index';
 import { pickCover } from '../../cover-picker/src/index';
 import { BlobImage } from './BlobImage';
-import { preloadThumbnails, THUMB_PRIORITY_DIRECTIONAL, THUMB_PRIORITY_SUBFOLDER } from './thumbnailCache';
+import { COVER_THUMBNAIL_SIZE, preloadThumbnails, THUMB_PRIORITY_DIRECTIONAL, THUMB_PRIORITY_SUBFOLDER } from './thumbnailCache';
 
 const MAX_PREVIEW = 500;
 
@@ -132,6 +132,7 @@ export function CoverPickerModal({
                         alt={folder.name}
                         className="w-full h-full object-cover"
                         thumbnail
+                        thumbnailSize={pinnedCovers?.[folder.id] === cover.imageId ? COVER_THUMBNAIL_SIZE : undefined}
                         lazy
                       />
                     ) : (

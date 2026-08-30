@@ -37,6 +37,7 @@ describe('importFolder', () => {
     const picker = new MockPicker(async function* (folder) {
       if (folder.id !== 'src') return;
       yield { id: 'src/good.jpg', name: 'good.jpg', kind: 'file' } as FileRef;
+      yield { id: 'src/legacy.jpe', name: 'legacy.jpe', kind: 'file' } as FileRef;
       yield { id: 'src/bad.jpg', name: 'bad.jpg', kind: 'file' } as FileRef;
     }, async (file) => {
       if (file.name === 'bad.jpg') throw new Error('read failed');
@@ -46,15 +47,16 @@ describe('importFolder', () => {
 
     const task = await importFolder(picker, store);
 
-    assert.equal(task.copiedImageCount, 1);
+     assert.equal(task.copiedImageCount, 2);
     assert.equal(task.errors.length, 1);
     assert.match(task.errors[0]!, /bad.jpg/);
     assert.equal(picker.released, true);
 
     const snapshot = await scanLibrary(store);
     const images = Object.values(snapshot.images);
-    assert.equal(images.length, 1);
-    assert.ok(images.some((image) => image.name === 'good.jpg'));
+     assert.equal(images.length, 2);
+     assert.ok(images.some((image) => image.name === 'good.jpg'));
+     assert.ok(images.some((image) => image.name === 'legacy.jpe'));
   });
 
   test('cleans up the created top folder when traversal fails', async () => {
