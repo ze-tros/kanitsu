@@ -27,14 +27,23 @@ export function MobileActionSheet({
 }) {
   const [closing, setClosing] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
+  const closeTimerRef = useRef<number | null>(null);
   const dragRef = useRef<{ startY: number; dy: number } | null>(null);
 
-  const requestClose = () => {
+  const requestClose = (afterClose?: () => void) => {
     if (closing) return;
     setClosing(true);
-    // 与 CSS 过渡时长一致
-    window.setTimeout(onClose, 180);
+    // 与 CSS 过渡时长一致；动作在面板真正卸载前执行，避免新 overlay 与旧层竞态。
+    closeTimerRef.current = window.setTimeout(() => {
+      closeTimerRef.current = null;
+      onClose();
+      afterClose?.();
+    }, 180);
   };
+
+  useEffect(() => () => {
+    if (closeTimerRef.current != null) window.clearTimeout(closeTimerRef.current);
+  }, []);
 
   // 面板下滑关闭
   const onHandleTouchStart = (e: React.TouchEvent) => {
@@ -63,7 +72,7 @@ export function MobileActionSheet({
 
   return (
     <div className={`m-sheet-mask fixed inset-0 ${closing ? 'm-closing' : ''}`} style={{ zIndex: Z_SHEET }}>
-      <div className="m-overlay-scrim absolute inset-0" onClick={requestClose} />
+      <div className="m-overlay-scrim absolute inset-0" onClick={() => requestClose()} />
       <div
         ref={panelRef}
         className="m-sheet-panel absolute left-0 right-0 bottom-0 flex flex-col max-h-[78vh]"
@@ -91,9 +100,7 @@ export function MobileActionSheet({
               disabled={action.disabled}
               onClick={() => {
                 if (action.disabled) return;
-                requestClose();
-                // 面板关闭动画后再执行动作（动作可能打开新层）
-                window.setTimeout(() => action.onSelect(), 190);
+                requestClose(action.onSelect);
               }}
             >
               {action.icon && (
@@ -106,7 +113,7 @@ export function MobileActionSheet({
           ))}
         </div>
         <div className="m-sheet-footer">
-          <button className="m-sheet-cancel" onClick={requestClose}>
+          <button className="m-sheet-cancel" onClick={() => requestClose()}>
             取消
           </button>
         </div>

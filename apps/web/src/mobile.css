@@ -110,6 +110,22 @@ html[data-theme='light'] .mobile-studio {
   cursor: pointer;
 }
 
+/* 触控界面不应把长按误判成 WebView 文本选择；输入控件保留原生选取能力。 */
+.mobile-studio button,
+.mobile-studio [role='button'],
+.mobile-studio img,
+.mobile-studio svg {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.mobile-studio input,
+.mobile-studio textarea,
+.mobile-studio select {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
 .mobile-studio button:disabled {
   cursor: default;
   opacity: 0.38;

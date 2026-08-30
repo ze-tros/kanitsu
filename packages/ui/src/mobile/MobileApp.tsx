@@ -608,6 +608,10 @@ export function MobileApp({
 
   const snapshotRef = useRef(snapshot);
   snapshotRef.current = snapshot;
+  const selectedFolderIdRef = useRef(selectedFolderId);
+  selectedFolderIdRef.current = selectedFolderId;
+  const selectModeRef = useRef(selectMode);
+  selectModeRef.current = selectMode;
 
   // 搜索防抖：输入停止 180ms 后才更新查询，避免每击一键重算数千张图的过滤。
   useEffect(() => {
@@ -617,7 +621,11 @@ export function MobileApp({
 
   const applySnapshot = useCallback((next: LibrarySnapshot) => {
     setSnapshot(next);
-    setSelectedFolderId((prev) => (prev && next.folders[prev] ? prev : next.rootId));
+    setSelectedFolderId((prev) => {
+      const folderId = prev && next.folders[prev] ? prev : next.rootId;
+      selectedFolderIdRef.current = folderId;
+      return folderId;
+    });
   }, []);
 
   // ===== 启动加载 =====
@@ -737,7 +745,8 @@ export function MobileApp({
   const viewerOpen = viewerImageId != null && viewerIndex >= 0;
 
   // ===== 返回键混合栈（folder 导航 + overlay 层）=====
-  // 以 history.state 中的栈快照为唯一权威：pushState 写入完整栈快照，popstate
+  // 以 history.state 中的栈快照为唯一权威：目录导航使用 pushState，overlay
+  // 使用 replaceState 写入当前快照，不制造额外的浏览器历史项。popstate
   // 按快照对账（差量关闭 overlay / 回退文件夹），不再用 consumedPops 计数器——
   // 它是快速连续返回 / 主动关闭与硬件返回交错时栈错乱的竞态根源。
   const stackRef = useRef<StackEntry[]>([]);
@@ -803,19 +812,30 @@ export function MobileApp({
         if (e.type === 'overlay') closeOverlayUI(e.layer);
       }
       const topFolder = [...target].reverse().find((e): e is { type: 'folder'; folderId: string } => e.type === 'folder');
-      setSelectedFolderId(topFolder ? topFolder.folderId : snapshotRef.current?.rootId ?? '');
+      const folderId = topFolder ? topFolder.folderId : snapshotRef.current?.rootId ?? '';
+      selectedFolderIdRef.current = folderId;
+      setSelectedFolderId(folderId);
     };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
   }, [closeOverlayUI, readStackSnapshot]);
 
   const openOverlay = useCallback((layer: OverlayLayer) => {
+    // 同一 UI 层只能存在一次。快速双击或 WebView 合成重复 click 时，重复入栈会
+    // 产生肉眼不可见的 phantom overlay，导致返回键看似“失效”。
+    if (stackRef.current.some((entry) => entry.type === 'overlay' && entry.layer === layer)) return;
     const next: StackEntry[] = [...stackRef.current, { type: 'overlay', layer }];
     stackRef.current = next;
-    window.history.pushState({ kanitsuStack: next }, '');
+    // Overlay 不是页面导航：原地更新快照，避免主动关闭后留下重复 history entry。
+    window.history.replaceState({ kanitsuStack: next }, '');
   }, []);
 
-  /** 主动关闭某 overlay：同步更新栈 + 回退对应步数的 history，popstate 对账后自然忽略。 */
+  /**
+   * 主动关闭某 overlay：原地替换当前 history state。
+   *
+   * Overlay 本身不创建 history entry，因此关闭时只需同步更新快照；这也让动作面板
+   * 关闭动画结束后打开的新层不会与异步 history.go() 发生竞态。
+   */
   const closeOverlay = useCallback(
     (layer: OverlayLayer) => {
       const stack = stackRef.current;
@@ -833,8 +853,58 @@ export function MobileApp({
         const e = stack[k]!;
         if (e.type === 'overlay') closeOverlayUI(e.layer);
       }
-      const delta = stack.length - next.length;
-      if (delta > 0) window.history.go(-delta);
+      window.history.replaceState({ kanitsuStack: next }, '');
+    },
+    [closeOverlayUI],
+  );
+
+  // Android hardware back is routed here by MainActivity. Keeping the event
+  // cancelable lets the native layer distinguish "close the current UI layer"
+  // from "leave the app" without duplicating the navigation stack in Java.
+  useEffect(() => {
+    const onAndroidBack = (event: Event) => {
+      // 多选不是 history 层：先退出多选，避免硬件返回把当前图包直接退回根目录。
+      if (selectModeRef.current) {
+        event.preventDefault();
+        setSelectMode(false);
+        setSelectedIds(new Set());
+        return;
+      }
+      const top = stackRef.current[stackRef.current.length - 1];
+      if (top?.type === 'overlay') {
+        event.preventDefault();
+        closeOverlay(top.layer);
+        return;
+      }
+      if (stackRef.current.length === 0) return;
+      event.preventDefault();
+      window.history.back();
+    };
+    window.addEventListener('kanitsu:android-back', onAndroidBack);
+    return () => window.removeEventListener('kanitsu:android-back', onAndroidBack);
+  }, [closeOverlay]);
+
+  /**
+   * Replace an open overlay in-place. This avoids racing history.go() when a
+   * drawer action opens settings or a folder in the same tap.
+   */
+  const replaceOverlay = useCallback(
+    (from: OverlayLayer, to: OverlayLayer): boolean => {
+      const stack = stackRef.current;
+      const idx = stack
+        .map((entry, index) => (entry.type === 'overlay' && entry.layer === from ? index : -1))
+        .filter((index) => index >= 0)
+        .pop();
+      if (idx == null) return false;
+
+      const next = [...stack.slice(0, idx), { type: 'overlay' as const, layer: to }];
+      stackRef.current = next;
+      for (let k = idx; k < stack.length; k++) {
+        const entry = stack[k]!;
+        if (entry.type === 'overlay') closeOverlayUI(entry.layer);
+      }
+      window.history.replaceState({ kanitsuStack: next }, '');
+      return true;
     },
     [closeOverlayUI],
   );
@@ -844,10 +914,13 @@ export function MobileApp({
       const snap = snapshotRef.current;
       if (!snap) return;
       const target = folderId || snap.rootId;
-      if (target === (selectedFolderId || snap.rootId)) return;
+      // 使用同步 ref 而不是 render 闭包，防止一次触摸被 WebView 合成为两次 click
+      // 时连续 push 两个相同目录历史项。
+      if (target === (selectedFolderIdRef.current || snap.rootId)) return;
       const next: StackEntry[] = [...stackRef.current, { type: 'folder', folderId: target }];
       stackRef.current = next;
       window.history.pushState({ kanitsuStack: next }, '');
+      selectedFolderIdRef.current = target;
       setSelectedFolderId(target);
       const folder = snap.folders[target];
       if (folder && folder.childCount > 0) {
@@ -857,21 +930,64 @@ export function MobileApp({
       setSearchInput('');
       setSearchActive(false);
     },
-    [selectedFolderId],
+    [],
   );
+
+  const navigateFromDrawer = useCallback(
+    (folderId: string) => {
+      const snap = snapshotRef.current;
+      if (!snap) return;
+      const target = folderId || snap.rootId;
+      const stack = stackRef.current;
+      const idx = stack
+        .map((entry, index) => (entry.type === 'overlay' && entry.layer === 'drawer' ? index : -1))
+        .filter((index) => index >= 0)
+        .pop();
+
+      if (idx == null) {
+        setDrawerOpen(false);
+        navigateToFolder(target);
+        return;
+      }
+
+      // 抽屉本身不占浏览器历史项：先原地移除抽屉，再按普通目录导航 push。
+      // 不能直接把 drawer replace 成 folder，否则该目录没有可返回的前一项。
+      const base = stack.slice(0, idx);
+      stackRef.current = base;
+      closeOverlayUI('drawer');
+      window.history.replaceState({ kanitsuStack: base }, '');
+      navigateToFolder(target);
+    },
+    [closeOverlayUI, navigateToFolder],
+  );
+
+  const openSettings = useCallback(() => {
+    setShowSettings(true);
+    if (!replaceOverlay('drawer', 'settings')) openOverlay('settings');
+  }, [openOverlay, replaceOverlay]);
 
   const goUp = useCallback(() => {
     const snap = snapshotRef.current;
-    const folder = snap?.folders[selectedFolderId || snap?.rootId || ''];
-    const parentId = folder?.parentId ?? null;
+    if (!snap) return;
+    const folder = snap.folders[selectedFolderIdRef.current || snap.rootId];
+    const target = folder?.parentId ?? snap.rootId;
     const stack = stackRef.current;
     const top = stack[stack.length - 1];
     if (top && top.type === 'folder') {
-      stackRef.current = stack.slice(0, -1);
-      window.history.back();
+      const previous = [...stack.slice(0, -1)].reverse().find((entry): entry is { type: 'folder'; folderId: string } => entry.type === 'folder');
+      const previousId = previous?.folderId ?? snap.rootId;
+      if (previousId === target) {
+        stackRef.current = stack.slice(0, -1);
+        window.history.back();
+      } else {
+        const next = [...stack.slice(0, -1), { type: 'folder' as const, folderId: target }];
+        stackRef.current = next;
+        window.history.replaceState({ kanitsuStack: next }, '');
+      }
     }
-    setSelectedFolderId(parentId ?? snap?.rootId ?? '');
-  }, [selectedFolderId]);
+    selectedFolderIdRef.current = target;
+    setSelectedFolderId(target);
+  }, []);
 
   // ===== 滚动 + 虚拟化度量 =====
   const mainScrollRef = useRef<HTMLDivElement>(null);
@@ -886,8 +1002,14 @@ export function MobileApp({
 
   const imageCardSize = contentW > 0 ? (contentW - IMAGE_GAP * (IMAGE_COLS - 1)) / IMAGE_COLS : 0;
   const imageRowHeight = imageCardSize + IMAGE_GAP + (showFileNames ? IMAGE_NAME_H : 0);
-  const folderCardWidth = contentW > 0 ? (contentW - FOLDER_GAP * (FOLDER_COLS - 1)) / FOLDER_COLS : 0;
+  // 只有一个图包时使用整行，避免根页面留下半屏空白；多个图包仍保持紧凑两列。
+  const folderCols = childFolderCards.length === 1 ? 1 : FOLDER_COLS;
+  const folderCardWidth = contentW > 0 ? (contentW - FOLDER_GAP * (folderCols - 1)) / folderCols : 0;
   const folderRowHeight = folderCardWidth > 0 ? folderCardWidth * 0.625 + FOLDER_CAPTION_H + FOLDER_GAP : 0;
+  const searchFolderCols = searchFolderCards.length === 1 ? 1 : FOLDER_COLS;
+  const searchFolderCardWidth = contentW > 0 ? (contentW - FOLDER_GAP * (searchFolderCols - 1)) / searchFolderCols : 0;
+  const searchFolderRowHeight =
+    searchFolderCardWidth > 0 ? searchFolderCardWidth * 0.625 + FOLDER_CAPTION_H + FOLDER_GAP : 0;
 
   const onMainScroll = useCallback(() => {
     const el = mainScrollRef.current;
@@ -923,7 +1045,19 @@ export function MobileApp({
     const top = (el: HTMLElement | null) =>
       el ? el.getBoundingClientRect().top - main.getBoundingClientRect().top + main.scrollTop : 0;
     setSectionTops({ folder: top(folderSectionRef.current), image: top(imageSectionRef.current) });
-  }, [childFolderCards.length, folderImages.length, searchTerm, currentFolderId, contentW]);
+  }, [
+    childFolderCards.length,
+    folderImages.length,
+    searchFolderCards.length,
+    searchImages.length,
+    searchTerm,
+    searching,
+    currentFolderId,
+    contentW,
+    viewMode,
+    showFileNames,
+    aggregate,
+  ]);
 
   // 切换目录后恢复滚动位置
   useLayoutEffect(() => {
@@ -1413,7 +1547,7 @@ export function MobileApp({
         },
       },
       ...(importReport ? [{ label: '查看导入报告', icon: '📋', onSelect: () => { setShowReport(true); openOverlay('report'); } }] : []),
-      { label: '设置', icon: '⚙️', onSelect: () => { setShowSettings(true); openOverlay('settings'); } },
+      { label: '设置', icon: '⚙️', onSelect: openSettings },
     ];
     setSheet({ title: folder?.name || '全部相册', actions });
     openOverlay('sheet');
@@ -1621,14 +1755,14 @@ export function MobileApp({
           ) : (
             <div className="m-content-pad">
               {searchFolders.length > 0 && (
-                <section className="m-section">
+                <section ref={folderSectionRef} className="m-section">
                   <h3 className="m-section-label">
                     匹配的文件夹 <span className="tabular-nums">{searchFolders.length}</span>
                   </h3>
                   <VirtualGrid
                     items={searchFolderCards}
-                    cols={FOLDER_COLS}
-                    rowHeight={folderRowHeight}
+                    cols={searchFolderCols}
+                    rowHeight={searchFolderRowHeight}
                     gap={FOLDER_GAP}
                     scrollTop={scrollTop}
                     viewportH={viewportH}
@@ -1649,7 +1783,7 @@ export function MobileApp({
                 </section>
               )}
               {searchImages.length > 0 && (
-                <section className="m-section">
+                <section ref={imageSectionRef} className="m-section">
                   <h3 className="m-section-label">
                     匹配的图片 <span className="tabular-nums">{searchImages.length}</span>
                   </h3>
@@ -1726,7 +1860,7 @@ export function MobileApp({
                 <h3 className="m-section-label">子文件夹 <span>{childFolders.length}</span></h3>
                 <VirtualGrid
                   items={childFolderCards}
-                  cols={FOLDER_COLS}
+                  cols={folderCols}
                   rowHeight={folderRowHeight}
                   gap={FOLDER_GAP}
                   scrollTop={scrollTop}
@@ -1843,10 +1977,7 @@ export function MobileApp({
               </button>
               <button
                 className="m-dock-button"
-                onClick={() => {
-                  setShowSettings(true);
-                  openOverlay('settings');
-                }}
+                onClick={openSettings}
               >
                 <MobileIcon name="⚙️" className="w-5 h-5" />
                 <span>设置</span>
@@ -1889,8 +2020,8 @@ export function MobileApp({
                 <button
                   className={`m-tree-row m-tree-root ${isRoot ? 'is-selected' : ''}`}
                   onClick={() => {
-                    closeOverlay('drawer');
-                    if (!isRoot) navigateToFolder(rootFolder.id);
+                    if (isRoot) closeOverlay('drawer');
+                    else navigateFromDrawer(rootFolder.id);
                   }}
                 >
                   <svg viewBox="0 0 24 24" className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1907,8 +2038,7 @@ export function MobileApp({
                   selectedFolderId={currentFolderId}
                   expandedFolders={expandedFolders}
                   onSelect={(folder) => {
-                    closeOverlay('drawer');
-                    navigateToFolder(folder.id);
+                    navigateFromDrawer(folder.id);
                   }}
                   onToggle={toggleFolderExpand}
                   depth={0}
@@ -1918,11 +2048,7 @@ export function MobileApp({
             <div className="m-drawer-footer shrink-0" style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 8px)' }}>
               <button
                 className="m-drawer-footer-button"
-                onClick={() => {
-                  closeOverlay('drawer');
-                  setShowSettings(true);
-                  openOverlay('settings');
-                }}
+                onClick={openSettings}
               >
                 <svg viewBox="0 0 24 24" className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <circle cx="12" cy="12" r="3" />
