@@ -1,13 +1,10 @@
 # Kanitsu icon assets
 
-The production icon is a deterministic SVG reconstruction of the selected layered archive-card concept.
+`kanitsu-icon.svg` is the canonical vector source for the Kanitsu application icon. It is a hand-redrawn vector interpretation of the selected three-layer card composition: a transparent canvas, warm ivory back card, blue middle card, cream front card, and coral accent tab.
 
-## Source files
+`kanitsu-icon-source.png` is retained as the original raster reference supplied during the icon design process. It is not used by the generator.
 
-- `kanitsu-icon.svg`: full application icon with a transparent exterior.
-- `kanitsu-icon-foreground.svg`: foreground-only artwork for Android adaptive icons.
-
-## Generated files
+## Generate derived assets
 
 Run from the repository root:
 
@@ -15,12 +12,4 @@ Run from the repository root:
 npm run generate:icons
 ```
 
-The generator exports the 1024 px PNG, multi-resolution Windows ICO, Web favicon, density-aware Android adaptive foreground and legacy launcher icons, adaptive-icon XML, and a small-size preview sheet.
-
-## Palette
-
-- Background: `#181A1F`
-- Front card: `#E7E3D9`
-- Middle card: `#68749A`
-- Rear card: `#C8C1B4`
-- Index tab: `#C46B5C`
+The generator rasterizes the SVG source into the 1024 px application PNG, multi-resolution Windows ICO, Web favicon and Apple touch icon, density-aware Android launcher/adaptive foreground images, adaptive-icon XML, and a small-size preview sheet. All generated platform assets are derived from the same vector source so they remain visually consistent and preserve transparent pixels outside the artwork.

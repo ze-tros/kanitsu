@@ -5,57 +5,13 @@ import sharp from 'sharp';
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(scriptDir, '../../..');
-
-const palette = {
-  background: '#181A1F',
-  backgroundEdge: '#2A2E37',
-  rear: '#C8C1B4',
-  middle: '#68749A',
-  front: '#E7E3D9',
-  tab: '#C46B5C',
-};
-
-const shadowDefs = `
-  <defs>
-    <filter id="card-shadow" x="-20%" y="-20%" width="140%" height="150%" color-interpolation-filters="sRGB">
-      <feDropShadow dx="0" dy="8" stdDeviation="8" flood-color="#000000" flood-opacity="0.20" />
-    </filter>
-  </defs>`;
-
-const mark = `
-  <g id="kanitsu-mark" shape-rendering="geometricPrecision">
-    <rect x="184" y="416" width="480" height="420" rx="34" fill="${palette.rear}" filter="url(#card-shadow)" />
-    <rect x="282" y="306" width="462" height="474" rx="34" fill="${palette.middle}" filter="url(#card-shadow)" />
-    <rect x="754" y="418" width="46" height="106" rx="18" fill="${palette.tab}" />
-    <path
-      d="M468 194H766A34 34 0 0 1 800 228V398C800 410 795 418 785 424L771 433C763 438 758 447 758 457V483C758 493 763 502 771 507L785 516C795 522 800 530 800 542V684A34 34 0 0 1 766 718H468A34 34 0 0 1 434 684V228A34 34 0 0 1 468 194Z"
-      fill="${palette.front}"
-      filter="url(#card-shadow)"
-    />
-  </g>`;
-
-const backgroundSquircle = `
-  <path
-    d="M248 24C112 24 24 112 24 248V776C24 912 112 1000 248 1000H776C912 1000 1000 912 1000 776V248C1000 112 912 24 776 24H248Z"
-    fill="${palette.background}"
-    stroke="${palette.backgroundEdge}"
-    stroke-width="2"
-  />`;
-
-const backgroundCircle = `
-  <circle cx="512" cy="512" r="488" fill="${palette.background}" />`;
-
-function wrapSvg(content) {
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-${shadowDefs}
-${content}
-</svg>
-`;
-}
-
-const appIconSvg = wrapSvg(`${backgroundSquircle}\n${mark}`);
-const roundIconSvg = wrapSvg(`${backgroundCircle}\n${mark}`);
-const foregroundSvg = wrapSvg(mark);
+const assetsDir = path.join(rootDir, 'assets');
+const sourceIconPath = path.join(assetsDir, 'kanitsu-icon.svg');
+const webPublicDir = path.join(rootDir, 'apps/web/public');
+const androidResDir = path.join(rootDir, 'apps/mobile/android/app/src/main/res');
+const androidAdaptiveDir = path.join(androidResDir, 'mipmap-anydpi-v26');
+const androidValuesDir = path.join(androidResDir, 'values');
+const previewDir = path.join(assetsDir, 'previews');
 
 const adaptiveIconXml = `<?xml version="1.0" encoding="utf-8"?>
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
@@ -66,14 +22,27 @@ const adaptiveIconXml = `<?xml version="1.0" encoding="utf-8"?>
 
 const androidColorsXml = `<?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="kanitsu_icon_background">${palette.background}</color>
+    <color name="kanitsu_icon_background">#00000000</color>
 </resources>
 `;
 
-async function renderPng(svg, outputPath, size) {
-  await sharp(Buffer.from(svg))
+const pngOptions = {
+  compressionLevel: 9,
+  adaptiveFiltering: true,
+};
+
+const densities = {
+  mdpi: { launcher: 48, foreground: 108 },
+  hdpi: { launcher: 72, foreground: 162 },
+  xhdpi: { launcher: 96, foreground: 216 },
+  xxhdpi: { launcher: 144, foreground: 324 },
+  xxxhdpi: { launcher: 192, foreground: 432 },
+};
+
+function renderPng(inputPath, outputPath, size) {
+  return sharp(inputPath)
     .resize(size, size, { fit: 'fill', kernel: sharp.kernel.lanczos3 })
-    .png({ compressionLevel: 9, adaptiveFiltering: true })
+    .png(pngOptions)
     .toFile(outputPath);
 }
 
@@ -114,7 +83,10 @@ async function createPreview(iconPath, outputPath) {
   const composites = [];
 
   for (const size of sizes) {
-    const buffer = await sharp(iconPath).resize(size, size).png().toBuffer();
+    const buffer = await sharp(iconPath)
+      .resize(size, size, { fit: 'fill', kernel: sharp.kernel.lanczos3 })
+      .png()
+      .toBuffer();
     const top = Math.round((canvasHeight - size) / 2) - 12;
     composites.push({ input: buffer, left: x, top });
 
@@ -139,17 +111,24 @@ async function createPreview(iconPath, outputPath) {
 }
 
 async function main() {
-  const assetsDir = path.join(rootDir, 'assets');
-  const webPublicDir = path.join(rootDir, 'apps/web/public');
-  const androidResDir = path.join(rootDir, 'apps/mobile/android/app/src/main/res');
-  const androidAdaptiveDir = path.join(androidResDir, 'mipmap-anydpi-v26');
-  const androidValuesDir = path.join(androidResDir, 'values');
-  const obsoleteAndroidForegroundPath = path.join(
-    androidResDir,
-    'drawable-nodpi',
-    'kanitsu_icon_foreground.png',
-  );
-  const previewDir = path.join(rootDir, 'assets/previews');
+  const sourceMetadata = await sharp(sourceIconPath).metadata();
+  if (!sourceMetadata.width || !sourceMetadata.height) {
+    throw new Error(`Unable to read icon source dimensions: ${sourceIconPath}`);
+  }
+  if (sourceMetadata.width !== sourceMetadata.height) {
+    throw new Error(
+      `Icon source must be square, got ${sourceMetadata.width}x${sourceMetadata.height}: ${sourceIconPath}`,
+    );
+  }
+
+  const masterPngPath = path.join(assetsDir, 'kanitsu-icon.png');
+  const icoPath = path.join(assetsDir, 'kanitsu-icon.ico');
+  const faviconPath = path.join(webPublicDir, 'favicon.png');
+  const favicon32Path = path.join(webPublicDir, 'favicon-32.png');
+  const appleTouchIconPath = path.join(webPublicDir, 'apple-touch-icon.png');
+  const obsoleteGeneratedPaths = [
+    path.join(androidResDir, 'drawable-nodpi', 'kanitsu_icon_foreground.png'),
+  ];
 
   await Promise.all([
     mkdir(assetsDir, { recursive: true }),
@@ -157,63 +136,43 @@ async function main() {
     mkdir(androidAdaptiveDir, { recursive: true }),
     mkdir(androidValuesDir, { recursive: true }),
     mkdir(previewDir, { recursive: true }),
+    ...obsoleteGeneratedPaths.map((filePath) => rm(filePath, { force: true })),
   ]);
 
-  const masterSvgPath = path.join(assetsDir, 'kanitsu-icon.svg');
-  const foregroundSvgPath = path.join(assetsDir, 'kanitsu-icon-foreground.svg');
-  const masterPngPath = path.join(assetsDir, 'kanitsu-icon.png');
-
   await Promise.all([
-    writeFile(masterSvgPath, appIconSvg),
-    writeFile(foregroundSvgPath, foregroundSvg),
-    writeFile(path.join(webPublicDir, 'favicon.svg'), appIconSvg),
+    renderPng(sourceIconPath, masterPngPath, 1024),
+    renderPng(sourceIconPath, faviconPath, 256),
+    renderPng(sourceIconPath, favicon32Path, 32),
+    renderPng(sourceIconPath, appleTouchIconPath, 180),
     writeFile(path.join(androidAdaptiveDir, 'kanitsu_launcher.xml'), adaptiveIconXml),
     writeFile(path.join(androidAdaptiveDir, 'kanitsu_launcher_round.xml'), adaptiveIconXml),
     writeFile(path.join(androidValuesDir, 'kanitsu_colors.xml'), androidColorsXml),
-    rm(obsoleteAndroidForegroundPath, { force: true }),
-  ]);
-
-  await Promise.all([
-    renderPng(appIconSvg, masterPngPath, 1024),
-    renderPng(appIconSvg, path.join(webPublicDir, 'favicon-32.png'), 32),
   ]);
 
   const icoSizes = [16, 24, 32, 48, 64, 128, 256];
   const icoFrames = await Promise.all(icoSizes.map(async (size) => ({
     size,
-    buffer: await sharp(Buffer.from(appIconSvg))
-      .resize(size, size, { kernel: sharp.kernel.lanczos3 })
-      .png({ compressionLevel: 9, adaptiveFiltering: true })
+    buffer: await sharp(sourceIconPath)
+      .resize(size, size, { fit: 'fill', kernel: sharp.kernel.lanczos3 })
+      .png(pngOptions)
       .toBuffer(),
   })));
-  await writeFile(path.join(assetsDir, 'kanitsu-icon.ico'), buildIco(icoFrames));
-
-  const densities = {
-    mdpi: { launcher: 48, foreground: 108 },
-    hdpi: { launcher: 72, foreground: 162 },
-    xhdpi: { launcher: 96, foreground: 216 },
-    xxhdpi: { launcher: 144, foreground: 324 },
-    xxxhdpi: { launcher: 192, foreground: 432 },
-  };
+  await writeFile(icoPath, buildIco(icoFrames));
 
   for (const [density, sizes] of Object.entries(densities)) {
     const densityDir = path.join(androidResDir, `mipmap-${density}`);
     await mkdir(densityDir, { recursive: true });
     await Promise.all([
-      renderPng(appIconSvg, path.join(densityDir, 'kanitsu_launcher.png'), sizes.launcher),
-      renderPng(roundIconSvg, path.join(densityDir, 'kanitsu_launcher_round.png'), sizes.launcher),
-      renderPng(
-        foregroundSvg,
-        path.join(densityDir, 'kanitsu_icon_foreground.png'),
-        sizes.foreground,
-      ),
+      renderPng(sourceIconPath, path.join(densityDir, 'kanitsu_launcher.png'), sizes.launcher),
+      renderPng(sourceIconPath, path.join(densityDir, 'kanitsu_launcher_round.png'), sizes.launcher),
+      renderPng(sourceIconPath, path.join(densityDir, 'kanitsu_icon_foreground.png'), sizes.foreground),
     ]);
   }
 
   await createPreview(masterPngPath, path.join(previewDir, 'kanitsu-icon-sizes.png'));
 
-  console.log('Kanitsu icon assets generated.');
-  console.log(`Master SVG: ${masterSvgPath}`);
+  console.log('Kanitsu icon assets generated from the vector source.');
+  console.log(`Source: ${sourceIconPath}`);
   console.log(`Master PNG: ${masterPngPath}`);
 }
 
