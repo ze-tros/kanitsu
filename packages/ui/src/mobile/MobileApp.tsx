@@ -84,6 +84,9 @@ const IMAGE_NAME_H = 16;
 const FOLDER_COLS = FOLDER_GRID.cols;
 const FOLDER_GAP = FOLDER_GRID.gap;
 const FOLDER_CAPTION_H = 50;
+// 移动端极高速惯性滚动一帧内可能跨过多行；缓冲 8 行避免视口追上窗口时
+// 露出空白，同时仍只保留有限的图片 DOM。
+const MOBILE_OVERSCAN_ROWS = Math.max(OVERSCAN_ROWS, 8);
 
 type OverlayLayer = 'drawer' | 'sheet' | 'viewer' | 'settings' | 'mine' | 'organize' | 'cover' | 'dialog' | 'report' | 'search';
 type StackEntry = { type: 'folder'; folderId: string } | { type: 'overlay'; layer: OverlayLayer };
@@ -222,8 +225,8 @@ function VirtualGrid<T>({
   const totalRows = Math.ceil(items.length / cols);
   if (totalRows === 0 || rowHeight <= 0) return null;
   const gs = Math.max(0, scrollTop - sectionTop);
-  const first = Math.max(0, Math.floor(gs / rowHeight) - OVERSCAN_ROWS);
-  const last = Math.min(totalRows, Math.ceil((gs + viewportH) / rowHeight) + OVERSCAN_ROWS);
+  const first = Math.max(0, Math.floor(gs / rowHeight) - MOBILE_OVERSCAN_ROWS);
+  const last = Math.min(totalRows, Math.ceil((gs + viewportH) / rowHeight) + MOBILE_OVERSCAN_ROWS);
   // 可视行号窗口：窗口未变时复用同一数组，避免每次滚动都重建（万级图时减少 GC）。
   const rowIndexes = useMemo(() => {
     const out: number[] = [];
@@ -321,14 +324,15 @@ function ImageCard({
             {selected ? '✓' : ''}
           </div>
         )}
+        {/* VirtualGrid 已经限制了挂载窗口，卡片内不再叠加 IntersectionObserver。 */}
         <BlobImage
           store={store}
           fileRef={imageToFileRef(image)}
           alt={image.name}
-           className="w-full h-full object-cover"
-           thumbnail
-           lazy
-           blur={blurred}
+            className="w-full h-full object-cover"
+            thumbnail
+            lazy={false}
+            blur={blurred}
         />
       </div>
       {showName && (
@@ -495,6 +499,22 @@ function FolderCard({
       </div>
     </div>
   );
+}
+
+function virtualWindowKey(
+  scrollTop: number,
+  sectionTop: number,
+  viewportH: number,
+  rowHeight: number,
+  cols: number,
+  itemCount: number,
+): string {
+  if (rowHeight <= 0 || viewportH <= 0 || cols <= 0 || itemCount <= 0) return 'empty';
+  const totalRows = Math.ceil(itemCount / cols);
+  const gs = Math.max(0, scrollTop - sectionTop);
+  const first = Math.max(0, Math.floor(gs / rowHeight) - MOBILE_OVERSCAN_ROWS);
+  const last = Math.min(totalRows, Math.ceil((gs + viewportH) / rowHeight) + MOBILE_OVERSCAN_ROWS);
+  return `${first}:${last}`;
 }
 
 /** 文件夹列表行（封面 + 名称 + 递归图片/子目录计数）。 */
@@ -1239,6 +1259,7 @@ export function MobileApp({
   const mainScrollRef = useRef<HTMLDivElement>(null);
   const scrollPositionsRef = useRef(new Map<string, number>());
   const scrollSaveFrameRef = useRef<number | null>(null);
+  const virtualWindowKeyRef = useRef('');
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportH, setViewportH] = useState(0);
   const [contentW, setContentW] = useState(0);
@@ -1260,16 +1281,47 @@ export function MobileApp({
   const onMainScroll = useCallback(() => {
     const el = mainScrollRef.current;
     if (!el) return;
+    const st = el.scrollTop;
+    // 滚动位置本身不需要驱动 React；只有虚拟行窗口变化时才更新，避免
+    // 高刷设备每个滚动事件都重渲染整页。
+    const folderKey = searching
+      ? virtualWindowKey(st, sectionTops.folder, viewportH, searchFolderRowHeight, searchFolderCols, searchFolderCards.length)
+      : virtualWindowKey(st, sectionTops.folder, viewportH, folderRowHeight, folderCols, childFolderCards.length);
+    const imageKey = virtualWindowKey(
+      st,
+      sectionTops.image,
+      viewportH,
+      imageRowHeight,
+      IMAGE_COLS,
+      searching ? searchImages.length : displayImages.length,
+    );
+    const nextWindowKey = `${searching ? 'search' : 'library'}:${folderKey}|${imageKey}`;
+    if (virtualWindowKeyRef.current !== nextWindowKey) {
+      virtualWindowKeyRef.current = nextWindowKey;
+      setScrollTop(st);
+    }
     if (scrollSaveFrameRef.current != null) return;
     scrollSaveFrameRef.current = requestAnimationFrame(() => {
       scrollSaveFrameRef.current = null;
       const node = mainScrollRef.current;
       if (!node) return;
-      const st = node.scrollTop;
-      scrollPositionsRef.current.set(currentFolderId, st);
-      setScrollTop(st);
+      scrollPositionsRef.current.set(currentFolderId, node.scrollTop);
     });
-  }, [currentFolderId]);
+  }, [
+    childFolderCards.length,
+    displayImages.length,
+    folderCols,
+    folderRowHeight,
+    imageRowHeight,
+    searchFolderCards.length,
+    searchFolderCols,
+    searchFolderRowHeight,
+    searchImages.length,
+    searching,
+    sectionTops,
+    viewportH,
+    currentFolderId,
+  ]);
 
   useEffect(() => {
     const el = mainScrollRef.current;

@@ -4,6 +4,18 @@ import { DEFAULT_THUMBNAIL_SIZE, getThumbnailBlob, peekThumbnailBlob } from './t
 import { observeVisibility } from './visibleObserver';
 import { acquireObjectUrl, releaseObjectUrl } from './objectUrlPool';
 
+type LoadedImage = { key: string; url: string; animate: boolean };
+
+// 虚拟列表会反复挂载同一张图片。记录已经出场过的资源，避免每次滚动回到
+// 同一行时重新触发淡入动画；key 包含 mtime/size，文件更新后会重新播放一次。
+const animatedImageKeys = new Set<string>();
+
+function takeAnimation(key: string): boolean {
+  if (animatedImageKeys.has(key)) return false;
+  animatedImageKeys.add(key);
+  return true;
+}
+
 export function BlobImage({
   store,
   fileRef,
@@ -24,9 +36,14 @@ export function BlobImage({
   thumbnailSize?: number;
 }) {
   const resourceKey = `${fileRef.id}\u0000${fileRef.mtime ?? ''}\u0000${fileRef.size ?? ''}\u0000${thumbnail ? `thumb-${thumbnailSize}` : 'full'}`;
-  const [loaded, setLoaded] = useState<{ key: string; url: string } | null>(null);
+  const [loaded, setLoaded] = useState<LoadedImage | null>(null);
   const [failedKey, setFailedKey] = useState<string | null>(null);
-  const [visible, setVisible] = useState(!lazy);
+  const [visible, setVisible] = useState(() => {
+    if (!lazy) return true;
+    // 懒加载只应延迟冷缓存请求；已经生成好的缩略图可以直接进入加载流程，
+    // 避免虚拟列表滚回时还要等待 IntersectionObserver 再闪一遍占位。
+    return thumbnail && peekThumbnailBlob(fileRef, thumbnailSize) !== null;
+  });
   const containerRef = useRef<HTMLDivElement>(null);
   const url = loaded?.key === resourceKey ? loaded.url : null;
   const failed = failedKey === resourceKey;
@@ -58,7 +75,7 @@ export function BlobImage({
     if (cached) {
       const next = acquireObjectUrl(cached);
       ownedUrl = next;
-      setLoaded({ key: resourceKey, url: next });
+      setLoaded({ key: resourceKey, url: next, animate: takeAnimation(resourceKey) });
       return () => releaseObjectUrl(next);
     }
     const load = thumbnail ? getThumbnailBlob(store, fileRef, thumbnailSize) : Promise.resolve(store.readBlob(fileRef));
@@ -67,7 +84,7 @@ export function BlobImage({
         if (cancelled) return;
         const next = acquireObjectUrl(blob);
         ownedUrl = next;
-        setLoaded({ key: resourceKey, url: next });
+        setLoaded({ key: resourceKey, url: next, animate: takeAnimation(resourceKey) });
       })
       .catch(() => {
         if (!cancelled) setFailedKey(resourceKey);
@@ -81,14 +98,14 @@ export function BlobImage({
   // 缩略图优先显示图像靠上的部分（object-cover 裁剪默认居中，会裁掉主体所在的
   // 上半部）；原图查看不受影响。
   const coverClass = thumbnail ? ' object-top' : '';
-  const imageClass = `${className ?? ''}${blur ? ' blur-preview' : ''}${coverClass}${url ? ' kanitsu-image-in' : ''}`;
+  const imageClass = `${className ?? ''}${blur ? ' blur-preview' : ''}${coverClass}${loaded?.animate ? ' kanitsu-image-in' : ''}`;
   return (
     <div
       className={`blob-image w-full h-full${url ? ' is-ready' : ''}${failed ? ' failed' : ''}`}
       ref={containerRef}
       aria-label={!url && !failed ? '加载中' : undefined}
     >
-      <img src={url ?? undefined} alt={alt ?? fileRef.name} className={imageClass} loading="lazy" />
+      <img src={url ?? undefined} alt={alt ?? fileRef.name} className={imageClass} loading="eager" />
       <div className="blob-image-shimmer" aria-hidden="true" />
       <div className="blob-image-spinner" aria-hidden="true" />
       <span className="blob-image-error text-sm opacity-60">图片读取失败</span>
