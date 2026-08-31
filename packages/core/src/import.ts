@@ -78,33 +78,35 @@ export async function importFolder(
     async function copyFolder(srcFolder: FolderRef, dstFolder: FolderRef, relPath: string): Promise<void> {
       for await (const child of picker.listChildren(srcFolder)) {
         if (options.shouldCancel?.()) throw new ImportCancelledError();
-        task.scannedFileCount++;
         if (child.kind === 'folder') {
           const nextDst = await store.createFolder(dstFolder, child.name);
           await copyFolder(child, nextDst, joinRelPath(relPath, child.name));
-        } else if (isSupportedImage(child.name)) {
-          try {
-            const blob = await picker.readBlob(child);
-            await store.writeBlob(dstFolder, child.name, blob);
-            task.copiedImageCount++;
-          } catch (err) {
-            task.errors.push(`${child.name}: ${String(err)}`);
-          }
         } else {
-          const ext = extOf(child.name);
-          task.skippedCount++;
-          task.skippedFiles.push({
-            path: joinRelPath(relPath, child.name),
-            reason: ext ? 'unsupported-format' : 'no-extension',
+          task.scannedFileCount++;
+          if (isSupportedImage(child.name)) {
+            try {
+              const blob = await picker.readBlob(child);
+              await store.writeBlob(dstFolder, child.name, blob);
+              task.copiedImageCount++;
+            } catch (err) {
+              task.errors.push(`${child.name}: ${String(err)}`);
+            }
+          } else {
+            const ext = extOf(child.name);
+            task.skippedCount++;
+            task.skippedFiles.push({
+              path: joinRelPath(relPath, child.name),
+              reason: ext ? 'unsupported-format' : 'no-extension',
+            });
+          }
+          options.onProgress?.({
+            status: 'copying',
+            scanned: task.scannedFileCount,
+            copied: task.copiedImageCount,
+            skipped: task.skippedCount,
+            current: child.name,
           });
         }
-        options.onProgress?.({
-          status: 'copying',
-          scanned: task.scannedFileCount,
-          copied: task.copiedImageCount,
-          skipped: task.skippedCount,
-          current: child.name,
-        });
       }
     }
 

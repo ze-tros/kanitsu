@@ -2588,7 +2588,7 @@ export function MobileApp({
             <div className="m-sheet-header">
               <strong>导入报告</strong>
               <span>
-                来源：{importReport.sourceFolderName} · 扫描 {importReport.scannedFileCount} · 复制 {importReport.copiedImageCount} · 跳过 {importReport.skippedCount}
+                来源：{importReport.sourceFolderName} · 扫描 {importReport.scannedFileCount} · 复制 {importReport.copiedImageCount} · 跳过 {importReport.skippedCount} · 失败 {importReport.errors.length}
               </span>
             </div>
             <div className="m-sheet-content m-report-content flex-1">

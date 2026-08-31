@@ -152,13 +152,13 @@ public final class SafSource {
             if (cancel != null && cancel.get()) {
                 return;
             }
-            scanned[0]++;
             String childRel = relPath.isEmpty() ? child.name : relPath + "/" + child.name;
             if (child.kind.equals("folder")) {
                 File sub = new File(dstDir, child.name);
                 sub.mkdirs();
                 walk(child.id, sub, childRel, scanned, copied, skipped, skippedFiles, errors, albums, emitter, cancel);
             } else {
+                scanned[0]++;
                 String ext = AlbumLibrary.extOf(child.name);
                 if (IMAGE_EXT.contains(ext)) {
                     try {

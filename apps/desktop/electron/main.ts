@@ -197,7 +197,6 @@ async function importSourceTreeNative(
       const sourcePath = path.join(sourceDir, entry.name);
       const targetPath = path.join(targetDir, entry.name);
       const childRelPath = relPath ? path.join(relPath, entry.name).split(path.sep).join('/') : entry.name;
-      state.scanned++;
 
       if (entry.isDirectory()) {
         await ensureDir(targetPath);
@@ -205,6 +204,7 @@ async function importSourceTreeNative(
         continue;
       }
 
+      state.scanned++;
       const ext = path.extname(entry.name).toLowerCase().slice(1);
       if (IMAGE_EXT.has(ext)) {
         try {
