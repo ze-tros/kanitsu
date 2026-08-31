@@ -2887,11 +2887,13 @@ html[data-theme="light"][data-accent="graphite"] {
 
 .viewer-placeholder-image {
   position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
+  top: 50%;
+  left: 50%;
+  right: auto;
+  bottom: auto;
   object-fit: contain;
-  opacity: 0.88;
+  opacity: 1;
+  transform: translate(-50%, -50%);
 }
 
 .viewer-nav {
@@ -3086,6 +3088,17 @@ html[data-theme="light"][data-accent="graphite"] {
 .viewer-filmstrip {
   display: block;
   overflow-y: hidden;
+}
+
+.viewer-filmstrip-overlay {
+  position: fixed;
+  z-index: 102;
+  inset: 0;
+  pointer-events: none;
+}
+
+.viewer-filmstrip-overlay .viewer-filmstrip {
+  pointer-events: auto;
 }
 
 .viewer-filmstrip-virtual-surface {

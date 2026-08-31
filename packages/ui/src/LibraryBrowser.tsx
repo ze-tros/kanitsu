@@ -83,6 +83,7 @@ import { KanitsuLogo } from './KanitsuLogo';
 import {
   COVER_THUMBNAIL_SIZE,
   getThumbnailBlob,
+  peekThumbnailBlob,
   preloadThumbnails,
   THUMB_PRIORITY_CURRENT_DIR,
   THUMB_PRIORITY_DIRECTIONAL,
@@ -2055,15 +2056,22 @@ export function LibraryBrowser({
       </div>
 
       {viewerImageId && viewerIndex >= 0 ? (
-        <Viewer
-          images={viewerImages}
-          index={viewerIndex}
-          store={store}
-          onClose={() => setViewerImageId(null)}
-          onNavigate={(id) => setViewerImageId(id)}
-          onSwitchSibling={handleViewerSwitchSibling}
-          onImageContextMenu={(event, image) => openContextMenu(event, buildImageMenu(image))}
-        />
+        <>
+          <Viewer
+            key={viewerImageId}
+            images={viewerImages}
+            index={viewerIndex}
+            store={store}
+            onClose={() => setViewerImageId(null)}
+            onNavigate={(id) => setViewerImageId(id)}
+            onSwitchSibling={handleViewerSwitchSibling}
+            onImageContextMenu={(event, image) => openContextMenu(event, buildImageMenu(image))}
+            showFilmstrip={false}
+          />
+          <div className="viewer-filmstrip-overlay">
+            <ViewerFilmstrip images={viewerImages} activeIndex={viewerIndex} store={store} onNavigate={setViewerImageId} />
+          </div>
+        </>
       ) : (
         <div className="toast toast-end">
           {message && <div className={`alert alert-${messageKind} shadow-lg`}><span>{message}</span></div>}
@@ -2659,6 +2667,14 @@ export function prefetchOriginal(url: string, estWidth?: number, estHeight?: num
   img.src = url;
 }
 
+/** 返回已预解码的原图尺寸，让查看器可以跳过第二次等待。 */
+export function peekPrefetchedOriginal(url: string): { w: number; h: number } | null {
+  const img = ORIGINAL_POOL.get(url);
+  if (!img || !img.complete || !img.naturalWidth || !img.naturalHeight) return null;
+  originalPoolTouch(url);
+  return { w: img.naturalWidth, h: img.naturalHeight };
+}
+
 const VIEWER_FILMSTRIP_ITEM_WIDTH = 64;
 const VIEWER_FILMSTRIP_GAP = 6;
 const VIEWER_FILMSTRIP_PADDING = 14;
@@ -2837,6 +2853,7 @@ function Viewer({
   onNavigate,
   onSwitchSibling,
   onImageContextMenu,
+  showFilmstrip = true,
 }: {
   images: ImageEntry[];
   index: number;
@@ -2845,13 +2862,16 @@ function Viewer({
   onNavigate: (id: string) => void;
   onSwitchSibling: (dir: number) => void;
   onImageContextMenu: (event: ReactMouseEvent, image: ImageEntry) => void;
+  showFilmstrip?: boolean;
 }) {
   const image = images[index];
-  // displayUrl：当前正在显示的图（只在确已解码完成后换入，切换期间旧图保持可见，
-  // 不会黑屏）；pendingUrl：下一张正在后台解码的隐式加载器；thumbUrl：缩略图占位。
+  // displayUrl：当前正在显示的图（只在确已解码完成后换入）；pendingUrl：当前图正在
+  // 后台解码的隐式加载器；thumbUrl：当前图的缩略图占位。
   const [displayUrl, setDisplayUrl] = useState<string | null>(null);
+  const [displayImageId, setDisplayImageId] = useState<string | null>(null);
   const [pendingUrl, setPendingUrl] = useState<string | null>(null);
   const [thumbUrl, setThumbUrl] = useState<string | null>(null);
+  const [thumbImageId, setThumbImageId] = useState<string | null>(null);
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
   const [originalFailed, setOriginalFailed] = useState(false);
   const [zoom, setZoom] = useState(1);
@@ -2897,7 +2917,7 @@ function Viewer({
 
   // 原图解码完成后换入显示（旧图在换入前始终保持可见，切换不黑屏）。
   const swapIn = useCallback(
-    (url: string, w: number, h: number) => {
+    (imageId: string, url: string, w: number, h: number) => {
       if (displayUrlRef.current && displayUrlRef.current !== url) {
         store.releaseViewerUrl(displayUrlRef.current);
       }
@@ -2905,6 +2925,7 @@ function Viewer({
       pendingUrlRef.current = null;
       setPendingUrl(null);
       setOriginalFailed(false);
+      setDisplayImageId(imageId);
       setDisplayUrl(url);
       setNatural({ w, h });
     },
@@ -2920,6 +2941,11 @@ function Viewer({
         store.releaseViewerUrl(url);
         return;
       }
+      const prefetched = peekPrefetchedOriginal(url);
+      if (prefetched) {
+        swapIn(image.id, url, prefetched.w, prefetched.h);
+        return;
+      }
       pendingUrlRef.current = url;
       setPendingUrl(url);
     });
@@ -2929,6 +2955,7 @@ function Viewer({
         store.releaseViewerUrl(pendingUrlRef.current);
         pendingUrlRef.current = null;
       }
+      setPendingUrl(null);
     };
   }, [image, store]);
 
@@ -2939,35 +2966,47 @@ function Viewer({
     };
   }, [store]);
 
-  // 切换图片时先加载缩略图占位（走缩略图缓存，已看过的图瞬时可用），
-  // 覆盖在仍在显示的旧图之上；原图在加载器里解码完成后换入。
+  // 切换图片时先加载当前图片的缩略图占位（走缩略图缓存，已看过的图瞬时可用），
+  // 原图在后台解码完成后换入；显示层始终绑定当前图片 ID。
   useEffect(() => {
     if (!image) return;
     let cancelled = false;
     let thumbObjectUrl: string | null = null;
     setThumbUrl(null);
-    getThumbnailBlob(store, fileRefFor(image), 512)
-      .then((blob) => {
-        if (cancelled) return;
-        thumbObjectUrl = URL.createObjectURL(blob);
-        setThumbUrl(thumbObjectUrl);
-      })
-      .catch(() => {
-        // 缩略图失败时静默；原图会照常加载。
-      });
+    setThumbImageId(null);
+    const fileRef = fileRefFor(image);
+    const cached = peekThumbnailBlob(fileRef, 512);
+    if (cached) {
+      thumbObjectUrl = URL.createObjectURL(cached);
+      setThumbImageId(image.id);
+      setThumbUrl(thumbObjectUrl);
+    } else {
+      getThumbnailBlob(store, fileRef, 512)
+        .then((blob) => {
+          if (cancelled) return;
+          thumbObjectUrl = URL.createObjectURL(blob);
+          setThumbImageId(image.id);
+          setThumbUrl(thumbObjectUrl);
+        })
+        .catch(() => {
+          // 缩略图失败时静默；原图会照常加载。
+        });
+    }
     return () => {
       cancelled = true;
       if (thumbObjectUrl) URL.revokeObjectURL(thumbObjectUrl);
     };
   }, [image, store]);
 
-  useEffect(() => {
-    // natural 跟随当前显示的图，切换期间旧图仍显示，因此不重置 natural。
+  useLayoutEffect(() => {
+    // 切图在浏览器绘制前重置尺寸与缩放，避免上一张图的 1:1 状态
+    // 短暂继承到新图，造成大图从适应窗口跳到 100%。
     setZoom(1);
     setRotate(0);
     setPan({ x: 0, y: 0 });
     setOriginalFailed(false);
-  }, [image?.id]);
+    setNatural(image?.width && image?.height ? { w: image.width, h: image.height } : null);
+  }, [image?.id, image?.width, image?.height]);
 
   // 预解码相邻原图（先 ±1、再 ±2，错峰执行）：位图保留在 ORIGINAL_POOL 里，
   // ←/→ 切换时直接复用已解码像素，不再等 Chromium 现场解码大图。
@@ -3001,36 +3040,36 @@ function Viewer({
       // 每步隔一个宏任务，解码错峰，避免瞬时并发解码多张大图。
       setTimeout(step, 60);
     };
-    if (typeof requestIdleCallback === 'function') {
-      requestIdleCallback(step, { timeout: 800 });
-    } else {
-      setTimeout(step, 0);
-    }
+    // 同级前后图片是切换的关键路径，立即开始；step 内部仍按 60ms 错峰，
+    // 避免相邻图片同时解码抢占当前图片。
+    setTimeout(step, 0);
     return () => {
       cancelled = true;
     };
   }, [image?.id, images, index, store]);
 
+  const effectiveNatural = natural ?? (image.width && image.height ? { w: image.width, h: image.height } : null);
+
   const baseFit = useMemo(() => {
-    if (!natural || !containerSize.w || !containerSize.h) return 1;
-    const s = Math.min(containerSize.w / natural.w, containerSize.h / natural.h);
+    if (!effectiveNatural || !containerSize.w || !containerSize.h) return 1;
+    const s = Math.min(containerSize.w / effectiveNatural.w, containerSize.h / effectiveNatural.h);
     return Math.max(0.05, Math.min(1, s));
-  }, [natural, containerSize]);
+  }, [effectiveNatural, containerSize]);
 
   const displayed = useMemo(() => {
-    const w = (natural?.w ?? 1) * baseFit * zoom;
-    const h = (natural?.h ?? 1) * baseFit * zoom;
+    const w = (effectiveNatural?.w ?? 1) * baseFit * zoom;
+    const h = (effectiveNatural?.h ?? 1) * baseFit * zoom;
     return { w, h };
-  }, [natural, baseFit, zoom]);
+  }, [effectiveNatural, baseFit, zoom]);
 
   // The transform below uses scale(zoom). Keep the img's layout box at the
   // fit-to-window size so the browser's max-width:100% (Tailwind preflight)
   // does NOT shrink it a second time on top of the transform scale.
   const fitSize = useMemo(() => {
-    const w = (natural?.w ?? 1) * baseFit;
-    const h = (natural?.h ?? 1) * baseFit;
+    const w = (effectiveNatural?.w ?? 1) * baseFit;
+    const h = (effectiveNatural?.h ?? 1) * baseFit;
     return { w, h };
-  }, [natural, baseFit]);
+  }, [effectiveNatural, baseFit]);
 
   const clamp = (v: number, m: number) => Math.max(-m, Math.min(m, v));
   const maxX = Math.max(0, (displayed.w - containerSize.w) / 2);
@@ -3114,7 +3153,9 @@ function Viewer({
 
   // 缩略图“替换”显示层的条件：新图正在加载（pendingUrl 非空）、或尚无显示图、
   // 或原图加载失败——此时只显示缩略图，与旧图互斥，不叠放。
-  const showThumbReplace = thumbUrl != null && (pendingUrl != null || displayUrl == null || originalFailed);
+  const hasCurrentDisplay = displayUrl != null && displayImageId === image.id;
+  const hasCurrentThumb = thumbUrl != null && thumbImageId === image.id;
+  const showThumbReplace = hasCurrentThumb && (pendingUrl != null || !hasCurrentDisplay || originalFailed);
   const previousImage = images[(index - 1 + images.length) % images.length]!;
   const nextImage = images[(index + 1) % images.length]!;
   const scalePercent = Math.round(baseFit * zoom * 100);
@@ -3169,7 +3210,7 @@ function Viewer({
         </button>
         {/* 缩略图就绪后“替换”旧图（不是叠放）：显示层与缩略图层互斥，避免快速
         切换时新缩略图叠在旧图上。旧图在缩略图就绪前保持显示，保证不黑屏。 */}
-        {(displayUrl && !showThumbReplace) && (
+        {(hasCurrentDisplay && !showThumbReplace) && (
           <img
             className="viewer-image"
             src={displayUrl}
@@ -3193,7 +3234,7 @@ function Viewer({
             onLoad={(e) => {
               const el = e.currentTarget;
               if (pendingUrlRef.current !== pendingUrl) return;
-              swapIn(pendingUrl, el.naturalWidth, el.naturalHeight);
+               swapIn(image.id, pendingUrl, el.naturalWidth, el.naturalHeight);
             }}
             onError={() => {
               if (pendingUrlRef.current !== pendingUrl) return;
@@ -3211,10 +3252,11 @@ function Viewer({
             src={thumbUrl}
             alt=""
             aria-hidden="true"
+            style={{ width: fitSize.w, height: fitSize.h }}
           />
         )}
         {/* 初始打开、显示层与缩略图都未就绪时的加载指示。 */}
-        {!displayUrl && !thumbUrl && (
+        {!hasCurrentDisplay && !hasCurrentThumb && (
           <div className="viewer-loading" role="status" aria-label="正在载入图片">
             <span />
           </div>
@@ -3234,7 +3276,7 @@ function Viewer({
           </aside>
         )}
       </div>
-      <ViewerFilmstrip images={images} activeIndex={index} store={store} onNavigate={onNavigate} />
+      {showFilmstrip && <ViewerFilmstrip images={images} activeIndex={index} store={store} onNavigate={onNavigate} />}
       </div>
     </div>
   );
