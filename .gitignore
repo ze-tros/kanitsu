@@ -17,4 +17,5 @@ apps/desktop/.portable-staging-*/
 
 # Local agent tooling
 .agents/
+AGENTS.md
 skills-lock.json
