@@ -1,6 +1,28 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import { MobileIcon } from './mobileIcons';
 import { Z_DIALOG, Z_PROGRESS, Z_SHEET, Z_TOAST } from './zindex';
+
+const FOCUSABLE_SELECTOR = 'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])';
+
+function trapFocus(event: ReactKeyboardEvent<HTMLElement>, container: HTMLElement | null): void {
+  if (event.key !== 'Tab' || !container) return;
+  const focusable = [...container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)]
+    .filter((element) => element.offsetParent !== null);
+  if (focusable.length === 0) {
+    event.preventDefault();
+    return;
+  }
+  const first = focusable[0]!;
+  const last = focusable[focusable.length - 1]!;
+  const active = document.activeElement;
+  if (event.shiftKey && active === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && active === last) {
+    event.preventDefault();
+    first.focus();
+  }
+}
 
 /**
  * 移动端底部动作面板（替代桌面右键菜单）。
@@ -29,6 +51,21 @@ export function MobileActionSheet({
   const panelRef = useRef<HTMLDivElement>(null);
   const closeTimerRef = useRef<number | null>(null);
   const dragRef = useRef<{ startY: number; dy: number } | null>(null);
+  const restoreFocusRef = useRef<HTMLElement | null>(
+    typeof document !== 'undefined' && document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null,
+  );
+  const titleId = useId();
+  const subtitleId = useId();
+
+  useEffect(() => {
+    const firstAction = panelRef.current?.querySelector<HTMLButtonElement>('button:not([disabled])');
+    firstAction?.focus();
+    return () => {
+      restoreFocusRef.current?.focus({ preventScroll: true });
+    };
+  }, []);
 
   const requestClose = (afterClose?: () => void) => {
     if (closing) return;
@@ -77,6 +114,16 @@ export function MobileActionSheet({
         ref={panelRef}
         className="m-sheet-panel absolute left-0 right-0 bottom-0 flex flex-col max-h-[78vh]"
         style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 8px)' }}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title ? undefined : '操作'}
+        aria-labelledby={title ? titleId : undefined}
+        aria-describedby={subtitle ? subtitleId : undefined}
+        tabIndex={-1}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') requestClose();
+          trapFocus(e, panelRef.current);
+        }}
       >
         <div
           className="m-sheet-handle-wrap"
@@ -88,8 +135,8 @@ export function MobileActionSheet({
         </div>
         {(title || subtitle) && (
           <div className="m-sheet-header">
-            {title && <strong>{title}</strong>}
-            {subtitle && <span>{subtitle}</span>}
+            {title && <strong id={titleId}>{title}</strong>}
+            {subtitle && <span id={subtitleId}>{subtitle}</span>}
           </div>
         )}
         <div className="m-sheet-content">
@@ -136,12 +183,40 @@ export function MobileConfirmDialog({
   onConfirm: () => void;
   onCancel: () => void;
 }) {
+  const titleId = useId();
+  const bodyId = useId();
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const restoreFocusRef = useRef<HTMLElement | null>(
+    typeof document !== 'undefined' && document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null,
+  );
+
+  useEffect(() => {
+    dialogRef.current?.querySelector<HTMLButtonElement>('button:not([disabled])')?.focus();
+    return () => {
+      restoreFocusRef.current?.focus({ preventScroll: true });
+    };
+  }, []);
+
   return (
     <div className="m-dialog-mask fixed inset-0 flex items-center justify-center p-8" style={{ zIndex: Z_DIALOG }}>
       <div className="m-overlay-scrim absolute inset-0" onClick={onCancel} />
-      <div className="m-dialog relative w-full max-w-sm p-5">
-        <h3 className="m-dialog-title">{title}</h3>
-        <p className="m-dialog-copy">{body}</p>
+      <div
+        ref={dialogRef}
+        className="m-dialog relative w-full max-w-sm p-5"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={bodyId}
+        tabIndex={-1}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') onCancel();
+          trapFocus(e, dialogRef.current);
+        }}
+      >
+        <h3 id={titleId} className="m-dialog-title">{title}</h3>
+        <p id={bodyId} className="m-dialog-copy">{body}</p>
         <div className="m-dialog-actions">
           <button className="m-button" onClick={onCancel}>
             取消
@@ -173,6 +248,14 @@ export function MobilePromptDialog({
 }) {
   const [value, setValue] = useState(initialValue);
   const inputRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const restoreFocusRef = useRef<HTMLElement | null>(
+    typeof document !== 'undefined' && document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null,
+  );
+  const titleId = useId();
+  const labelId = useId();
 
   useEffect(() => {
     // 延迟聚焦，等弹窗动画与输入法就绪
@@ -180,7 +263,10 @@ export function MobilePromptDialog({
       inputRef.current?.focus();
       inputRef.current?.select();
     }, 220);
-    return () => window.clearTimeout(t);
+    return () => {
+      window.clearTimeout(t);
+      restoreFocusRef.current?.focus({ preventScroll: true });
+    };
   }, []);
 
   const submit = () => {
@@ -191,12 +277,24 @@ export function MobilePromptDialog({
   return (
     <div className="m-dialog-mask fixed inset-0 flex items-center justify-center p-8" style={{ zIndex: Z_DIALOG }}>
       <div className="m-overlay-scrim absolute inset-0" onClick={onCancel} />
-      <div className="m-dialog relative w-full max-w-sm p-5">
-        <h3 className="m-dialog-title">{title}</h3>
+      <div
+        ref={dialogRef}
+        className="m-dialog relative w-full max-w-sm p-5"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') onCancel();
+          trapFocus(e, dialogRef.current);
+        }}
+      >
+        <h3 id={titleId} className="m-dialog-title">{title}</h3>
         <div className="mt-3">
-          <span className="m-dialog-label">{label}</span>
+          <label htmlFor={labelId} className="m-dialog-label">{label}</label>
           <input
             ref={inputRef}
+            id={labelId}
             className="m-input mt-1.5"
             value={value}
             onChange={(e) => setValue(e.target.value)}
@@ -230,6 +328,9 @@ export function MobileToast({ text, kind }: { text: string; kind: 'info' | 'succ
     <div
       className="m-toast fixed left-1/2 -translate-x-1/2 pointer-events-none max-w-[86vw]"
       style={{ bottom: 'calc(env(safe-area-inset-bottom, 0px) + 88px)', zIndex: Z_TOAST }}
+      role="status"
+      aria-live={kind === 'error' ? 'assertive' : 'polite'}
+      aria-atomic="true"
     >
       <div className={`m-toast-card ${cls}`}>{text}</div>
     </div>
@@ -256,6 +357,9 @@ export function MobileProgressCard({
     <div
       className="fixed left-3 right-3"
       style={{ bottom: 'calc(env(safe-area-inset-bottom, 0px) + 16px)', zIndex: Z_PROGRESS }}
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
     >
       <div className="m-progress-card">
         <div className="flex items-center gap-3">
@@ -281,7 +385,17 @@ export function MobileProgressCard({
           )}
         </div>
         {hasProgress && (
-          <div className="m-progress-track"><span style={{ width: `${progressPct}%` }} /></div>
+          <div
+            className="m-progress-track"
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={total}
+            aria-valuenow={Math.min(total, Math.max(0, done))}
+            aria-valuetext={`${done} / ${total}`}
+            aria-label={title}
+          >
+            <span style={{ width: `${progressPct}%` }} />
+          </div>
         )}
       </div>
     </div>

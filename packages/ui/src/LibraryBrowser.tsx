@@ -2073,7 +2073,12 @@ export function LibraryBrowser({
           </div>
         </>
       ) : (
-        <div className="toast toast-end">
+        <div
+          className="toast toast-end"
+          role="status"
+          aria-live={messageKind === 'error' ? 'assertive' : 'polite'}
+          aria-atomic="true"
+        >
           {message && <div className={`alert alert-${messageKind} shadow-lg`}><span>{message}</span></div>}
           {exporting && exportProgress && (
             <div className="alert alert-info shadow-lg">

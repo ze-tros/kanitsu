@@ -71,7 +71,7 @@ function FileList({ files, onEditFile, showAll = false }: { files: PreviewFile[]
           <span className="w-1 h-1 rounded-full bg-current opacity-40" />
           <span className="truncate flex-1 min-w-0">{file.name}</span>
           <button
-            className="btn btn-ghost btn-xs opacity-0 group-hover/file:opacity-100"
+            className="btn btn-ghost btn-xs opacity-0 group-hover/file:opacity-100 focus-visible:opacity-100"
             title="调整该文件的目标位置"
             onClick={() => onEditFile(file)}
           >
@@ -101,7 +101,7 @@ function FolderTreeNode({
         <span className="opacity-60 text-xs">▸</span>
         <span className="text-sm font-medium truncate flex-1 min-w-0">{node.name}</span>
         <button
-          className="btn btn-ghost btn-xs opacity-0 group-hover:opacity-100"
+          className="btn btn-ghost btn-xs opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
           title="重命名该分组"
           onClick={(event) => {
             event.preventDefault();

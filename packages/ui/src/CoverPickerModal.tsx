@@ -6,7 +6,7 @@ import { pickCover } from '../../cover-picker/src/index';
 import { BlobImage } from './BlobImage';
 import { COVER_THUMBNAIL_SIZE, preloadThumbnails, THUMB_PRIORITY_DIRECTIONAL, THUMB_PRIORITY_SUBFOLDER } from './thumbnailCache';
 
-const MAX_PREVIEW = 500;
+const PAGE_SIZE = 120;
 
 /**
  * 图包封面选择弹窗：层次化浏览 —— 展示当前目录的直属图片与子文件夹，
@@ -37,6 +37,8 @@ export function CoverPickerModal({
   const [selectedId, setSelectedId] = useState<string | null>(
     currentCoverId && snapshot.images[currentCoverId] ? currentCoverId : null,
   );
+  const [query, setQuery] = useState('');
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
 
   const currentId = chain[chain.length - 1];
   const targetName = snapshot.folders[folderId]?.name ?? '';
@@ -48,12 +50,25 @@ export function CoverPickerModal({
   }));
 
   const directImages = directImagesOf(snapshot, currentId);
-  const previewImages = directImages.slice(0, MAX_PREVIEW);
-  const truncated = directImages.length > MAX_PREVIEW;
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  const matchingImages = normalizedQuery
+    ? directImages.filter((img) => `${img.name} ${img.relPath ?? ''}`.toLocaleLowerCase().includes(normalizedQuery))
+    : directImages;
+  const previewImages = matchingImages.slice(0, visibleCount);
+  const hasMoreImages = previewImages.length < matchingImages.length;
   const selectedImage = selectedId ? snapshot.images[selectedId] : undefined;
 
   const goTo = (index: number) => setChain((prev) => prev.slice(0, index + 1));
   const enterChild = (id: string) => setChain((prev) => [...prev, id]);
+
+  useEffect(() => {
+    setQuery('');
+    setVisibleCount(PAGE_SIZE);
+  }, [currentId]);
+
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE);
+  }, [query]);
 
   // 与主视图同款低优先级预热：打开弹窗或切换浏览目录时，把当前目录的直属图片
   // （优先级 1＝滚动方向预取档，仅次于可见）与子文件夹封面（优先级 3）排入同一
@@ -90,9 +105,9 @@ export function CoverPickerModal({
             {chain.map((id, i) => (
               <li key={id}>
                 {i < chain.length - 1 ? (
-                  <a className="link link-hover" onClick={() => goTo(i)}>
+                  <button type="button" className="link link-hover" onClick={() => goTo(i)}>
                     {snapshot.folders[id]?.name ?? '…'}
-                  </a>
+                  </button>
                 ) : (
                   <span className="font-semibold">{snapshot.folders[id]?.name ?? '…'}</span>
                 )}
@@ -112,11 +127,15 @@ export function CoverPickerModal({
                   <div
                     role="button"
                     tabIndex={0}
+                    aria-label={`进入“${folder.name}”`}
                     className="relative aspect-[4/3] w-full overflow-hidden cursor-pointer group"
                     title={`进入“${folder.name}”`}
                     onClick={() => enterChild(folder.id)}
                     onKeyDown={(event) => {
-                      if (event.key === 'Enter' || event.key === ' ') enterChild(folder.id);
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        enterChild(folder.id);
+                      }
                     }}
                   >
                     {cover ? (
@@ -159,9 +178,21 @@ export function CoverPickerModal({
         )}
 
         <section className="mt-3">
-          <h4 className="text-xs font-semibold opacity-70 mb-2">
-            图片（{directImages.length} 张{truncated ? `，仅显示前 ${MAX_PREVIEW} 张` : ''}）
-          </h4>
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <h4 className="text-xs font-semibold opacity-70">
+              图片（{normalizedQuery ? `${matchingImages.length} / ` : ''}{directImages.length} 张）
+            </h4>
+            {directImages.length > 0 && (
+              <input
+                type="search"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="搜索图片"
+                aria-label="搜索当前目录图片"
+                className="input input-bordered input-xs w-36"
+              />
+            )}
+          </div>
           {previewImages.length > 0 ? (
             <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2">
               {previewImages.map((img) => {
@@ -192,8 +223,21 @@ export function CoverPickerModal({
                 );
               })}
             </div>
+          ) : normalizedQuery ? (
+            <p className="text-sm opacity-60 py-3 text-center">没有匹配的图片。</p>
           ) : (
             <p className="text-sm opacity-60 py-3 text-center">本目录暂无图片，可进入子文件夹挑选。</p>
+          )}
+          {hasMoreImages && (
+            <div className="flex justify-center mt-3">
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => setVisibleCount((count) => count + PAGE_SIZE)}
+              >
+                加载更多（剩余 {matchingImages.length - previewImages.length} 张）
+              </button>
+            </div>
           )}
         </section>
 

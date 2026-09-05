@@ -22,6 +22,8 @@
   --m-accent-text: #a9bdf2;
   --m-accent-soft: #1b2948;
   --m-accent-line: #526da9;
+  --m-focus-ring: #b9c9f5;
+  --m-focus-halo: rgb(120 148 220 / 24%);
   --m-danger: #e87872;
   --m-danger-soft: #342020;
   --m-warning: #dbab62;
@@ -80,6 +82,8 @@ html[data-theme='light'] .mobile-studio {
   --m-accent-text: #365996;
   --m-accent-soft: #e3eafa;
   --m-accent-line: #a9b9dc;
+  --m-focus-ring: #365996;
+  --m-focus-halo: rgb(69 104 174 / 18%);
   --m-danger: #b94d48;
   --m-danger-soft: #f7e5e3;
   --m-warning: #966617;
@@ -147,13 +151,17 @@ html[data-theme='light'] .mobile-studio {
 
 .mobile-studio button:focus-visible,
 .mobile-studio [tabindex]:focus-visible {
-  outline: 2px solid var(--m-accent-text);
+  outline: 1px solid var(--m-focus-ring);
   outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--m-focus-halo);
 }
 
 .mobile-studio input:focus-visible,
-.mobile-studio select:focus-visible {
+.mobile-studio select:focus-visible,
+.mobile-studio textarea:focus-visible {
   outline: 0;
+  border-color: var(--m-focus-ring);
+  box-shadow: 0 0 0 3px var(--m-focus-halo);
 }
 
 .mobile-studio img,
@@ -1451,6 +1459,12 @@ html[data-theme='light'] .mobile-studio {
 .m-select:focus {
   border-color: var(--m-line);
   box-shadow: none;
+}
+
+.m-input:focus-visible,
+.m-select:focus-visible {
+  border-color: var(--m-focus-ring);
+  box-shadow: 0 0 0 3px var(--m-focus-halo);
 }
 
 .m-dialog-actions {
