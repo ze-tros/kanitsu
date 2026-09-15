@@ -221,7 +221,7 @@ body {
   border-color: rgba(255, 255, 255, 0.4);
 }
 .filmstrip-thumb.active {
-  border-color: var(--color-primary, #4f8cff);
+  border-color: var(--color-primary, #ff785e);
 }
 
 /* Visible loading state for thumbnails / covers: shimmer sweep + spinner.
@@ -386,7 +386,7 @@ body {
 }
 .context-menu-item:hover:not(:disabled),
 .context-menu-item:focus-visible {
-  background: color-mix(in srgb, var(--color-primary, #4f8cff) 14%, transparent);
+  background: color-mix(in srgb, var(--color-primary, #ff785e) 14%, transparent);
 }
 .context-menu-item:disabled {
   opacity: 0.4;
@@ -429,6 +429,108 @@ body {
   .kanitsu-image-in {
     animation: none !important;
   }
+}
+
+/* ===========================================================================
+   Formal workspace redesign
+   The production LibraryBrowser keeps its existing state and DOM contracts;
+   this layer replaces the previous visual system with the reviewed Kanitsu
+   studio language: ink black, warm paper surfaces, and a single coral accent.
+   =========================================================================== */
+.desktop-library {
+  --desktop-font-sans: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif;
+  --desktop-font-display: "Segoe UI Variable Display", "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif;
+  --desktop-titlebar-height: 68px;
+  --desktop-inspector-width: 286px;
+  --desktop-radius-panel: 12px;
+  --desktop-radius-control: 9px;
+  --desktop-radius-tight: 6px;
+  --desktop-app: #111112;
+  --desktop-canvas: #121213;
+  --desktop-surface-1: #18181a;
+  --desktop-surface-2: #202023;
+  --desktop-surface-3: #29292c;
+  --desktop-surface-4: #333337;
+  --desktop-line: rgba(255,255,255,.085);
+  --desktop-line-strong: rgba(255,255,255,.17);
+  --desktop-text: #f3f0eb;
+  --desktop-text-soft: #d3cfca;
+  --desktop-muted: #a09b9b;
+  --desktop-faint: #6f6b70;
+  --desktop-accent-fill: #ff785e;
+  --desktop-accent-ink: #241411;
+  --desktop-accent-text: #ff9b89;
+  --desktop-accent-soft: rgba(255,120,94,.14);
+  --desktop-accent-line: rgba(255,120,94,.42);
+  --desktop-danger: #ff8f82;
+  --desktop-danger-soft: rgba(255,105,92,.13);
+  --desktop-shadow-raised: 0 18px 45px rgba(0,0,0,.23);
+  --desktop-shadow-dialog: 0 30px 90px rgba(0,0,0,.5);
+}
+.desktop-library button,
+.desktop-library input,
+.desktop-library select { font-family: inherit; }
+.desktop-library > .app-titlebar { min-height: var(--desktop-titlebar-height); }
+.desktop-brand-mark { transform: rotate(-8deg); }
+.desktop-brand-lockup > div > span { letter-spacing: .15em; font-weight: 650; }
+.desktop-global-search { max-width: 520px; flex: 1; }
+.desktop-global-search input { font-size: 12px; }
+.desktop-titlebar-actions { margin-left: auto; }
+.desktop-icon-button { align-items: center; justify-content: center; border: 1px solid transparent; }
+.desktop-button { font-size: 12px; }
+.desktop-button.primary { padding: 0 14px; border: 0; }
+.desktop-button.primary:hover { transform: translateY(-1px); }
+.desktop-button.secondary { border: 1px solid var(--desktop-line-strong); }
+.desktop-window-controls { border-left-color: var(--desktop-line); }
+.desktop-content-shell { background: var(--desktop-canvas); }
+.desktop-drawer-side, .desktop-sidebar { background: var(--desktop-surface-1); }
+.desktop-sidebar-heading span, .desktop-panel-label { color: var(--desktop-faint); font-size: 9px; letter-spacing: .17em; font-weight: 700; text-transform: uppercase; }
+.desktop-sidebar-heading strong { letter-spacing: -.02em; }
+.desktop-sidebar-nav-item, .desktop-sidebar-settings { font-size: 12px; }
+.desktop-sidebar-nav-item.is-active > svg:first-child { color: var(--desktop-accent-fill); }
+.desktop-panel-label { margin: 5px 10px 8px; border: 0; }
+.desktop-tree-row { min-height: 34px; }
+.desktop-tree-target { font-size: 11px; }
+.desktop-breadcrumb-item button { color: var(--desktop-faint); }
+.desktop-workspace-title-row { align-items: end; padding: 34px 0 31px; }
+.desktop-sort-control:hover { background: rgba(255,255,255,.06); color: var(--desktop-text); }
+.desktop-sort-control select { font-size: 11px; }
+.desktop-media-canvas { background: var(--desktop-canvas); }
+.desktop-section-heading { text-transform: uppercase; }
+.desktop-package-target, .desktop-photo-target { border-radius: 10px; }
+.desktop-package-cover, .desktop-photo-frame { border-color: rgba(255,255,255,.1); border-radius: 10px; background: #242427; box-shadow: 0 7px 22px rgba(0,0,0,.18); }
+.desktop-package-card:hover .desktop-package-cover, .desktop-package-target:focus-visible .desktop-package-cover, .desktop-photo-card:hover .desktop-photo-frame, .desktop-photo-target:focus-visible .desktop-photo-frame { border-color: rgba(255,255,255,.24); box-shadow: 0 18px 45px rgba(0,0,0,.25); transform: translateY(-2px); }
+.desktop-package-card:hover .desktop-package-cover-image, .desktop-photo-card:hover .desktop-photo-image:not(.blur-preview) { transform: scale(1.045); }
+.desktop-package-title strong { color: var(--desktop-text-soft); }
+.desktop-package-card:hover .desktop-package-title svg { color: var(--desktop-accent-fill); transform: translateX(3px); }
+.desktop-photo-meta, .desktop-photo-size { color: var(--desktop-faint); font-size: 9px; }
+.desktop-selection-mark { border-color: rgba(255,255,255,.5); }
+.desktop-empty-icon { border-color: var(--desktop-line-strong); }
+.desktop-inspector { border-left-color: var(--desktop-line); }
+.desktop-inspector-header { border-bottom-color: var(--desktop-line); }
+.desktop-inspector-header span { color: var(--desktop-faint); font-size: 9px; letter-spacing: .14em; font-weight: 700; text-transform: uppercase; }
+.desktop-inspector-cover, .desktop-inspector-image { border-color: var(--desktop-line); }
+.desktop-inspector-quick-actions button { border-color: var(--desktop-line) !important; }
+.desktop-inspector-section { border-top-color: var(--desktop-line); }
+.desktop-data-list > div { border-bottom-color: var(--desktop-line); }
+.desktop-organize-callout { border-color: var(--desktop-accent-line); }
+.desktop-selection-toolbar { border-color: var(--desktop-line-strong); }
+.desktop-library .modal-box { border-color: var(--desktop-line-strong); }
+
+/* Keep the viewer in the same material language while preserving its neutral
+   dark stage, keyboard navigation, filmstrip and no-drag Electron contract. */
+.viewer-toolbar { border-bottom-color: var(--viewer-line); }
+.viewer-info { border-color: var(--viewer-line); }
+.filmstrip, .viewer-filmstrip { border-top-color: var(--viewer-line); }
+
+@media (max-width: 1023px) {
+  .desktop-library > .app-titlebar { min-height: 60px; }.desktop-brand-lockup > div > span { display: none; }
+  .desktop-global-search { max-width: none; }
+  .desktop-workspace-title-row { align-items: flex-start; flex-direction: column; padding: 28px 0 24px; }.desktop-view-controls { width: 100%; }
+}
+@media (max-width: 640px) {
+  .desktop-titlebar-actions > .desktop-icon-button { display: none; }.desktop-import-button { width: 35px; padding: 0; justify-content: center; font-size: 0; }.desktop-import-button svg { width: 17px; }.desktop-section-heading { margin-bottom: 11px; }.desktop-photo-meta, .desktop-photo-size { display: block; margin-top: 4px; }
+  .desktop-selection-toolbar { overflow-x: auto; }.desktop-selection-toolbar > strong { padding-inline: 6px; }.desktop-selection-toolbar button { padding-inline: 7px; }
 }
 
 /* ===========================================================================
@@ -1052,13 +1154,6 @@ html[data-theme="light"][data-accent="graphite"] {
   white-space: nowrap;
 }
 
-.desktop-sidebar-nav-item > strong {
-  color: currentColor;
-  font-size: 10px;
-  font-weight: 600;
-  opacity: 0.72;
-}
-
 .desktop-nav-activity {
   width: 7px;
   height: 7px;
@@ -1149,52 +1244,10 @@ html[data-theme="light"][data-accent="graphite"] {
   white-space: nowrap;
 }
 
-.desktop-tree-count {
-  color: var(--desktop-faint);
-  font-size: 10px;
-}
-
-.desktop-storage-status {
-  flex: 0 0 auto;
-  padding: 11px 13px 13px;
-  border-top: 1px solid var(--desktop-line);
-}
-
-.desktop-storage-status > div:first-child {
-  display: grid;
-  grid-template-columns: 18px minmax(0, 1fr) max-content;
-  align-items: center;
-  gap: 6px;
-  color: var(--desktop-muted);
-  font-size: 11px;
-}
-
-.desktop-storage-status strong {
-  color: var(--desktop-text-soft);
-  font-weight: 600;
-}
-
-.desktop-storage-status p {
-  margin: 6px 0 0;
-  color: var(--desktop-faint);
-  font-size: 10px;
-}
-
 .desktop-sidebar-settings {
   flex: 0 0 auto;
   min-height: 42px;
   padding-inline: 13px;
-  border-top: 1px solid var(--desktop-line) !important;
-  border-radius: 0;
-}
-
-.desktop-runtime-label {
-  flex: 0 0 auto;
-  padding: 7px 13px 9px;
-  color: var(--desktop-faint);
-  font-size: 9px;
-  line-height: 1.35;
-  text-align: center;
 }
 
 .desktop-workspace {
@@ -1217,7 +1270,6 @@ html[data-theme="light"][data-accent="graphite"] {
 .desktop-workspace-title-row,
 .desktop-workspace-title,
 .desktop-view-controls,
-.desktop-history-actions,
 .desktop-breadcrumbs {
   min-width: 0;
   display: flex;
@@ -1227,17 +1279,6 @@ html[data-theme="light"][data-accent="graphite"] {
 .desktop-workspace-nav {
   min-height: 32px;
   gap: 11px;
-}
-
-.desktop-history-actions {
-  flex: 0 0 auto;
-  gap: 2px;
-}
-
-.desktop-history-actions .desktop-icon-button {
-  width: 28px;
-  height: 28px;
-  flex-basis: 28px;
 }
 
 .desktop-breadcrumbs {
@@ -1391,6 +1432,8 @@ html[data-theme="light"][data-accent="graphite"] {
   overflow-y: auto;
   overflow-x: hidden;
   padding: 18px 18px 42px;
+  /* 预留滚动条槽位：否则滚动条出现/消失时内容宽度会跳 8px，
+     虚拟网格也要跟着重新测量。 */
   scrollbar-gutter: stable;
 }
 
@@ -2350,38 +2393,11 @@ html[data-theme="light"][data-accent="graphite"] {
 /* Settings primitives are shared by the current full-page settings view and
    the composable desktop-settings-* version used by the refreshed shell. */
 .desktop-settings-page {
-  position: fixed;
-  z-index: 120;
-  inset: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
   background: var(--desktop-app);
   color: var(--desktop-text);
-}
-
-.desktop-settings-header {
-  min-height: var(--desktop-titlebar-height);
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 0 14px;
-  border-bottom: 1px solid var(--desktop-line);
-  background: var(--desktop-surface-1);
-}
-
-.desktop-settings-header h1 {
-  margin: 0;
-  font-family: var(--desktop-font-display);
-  font-size: 15px;
-  font-weight: 700;
-  letter-spacing: 0;
-}
-
-.desktop-settings-header .desktop-window-controls {
-  align-self: stretch;
-  margin-right: -14px;
-  margin-left: auto;
 }
 
 .desktop-settings-body {
@@ -2624,34 +2640,6 @@ html[data-theme="light"][data-accent="graphite"] {
 
 .desktop-settings-accent-option.is-active .is-check {
   opacity: 1;
-}
-
-/* Current SettingsPage fallback while its markup is migrated to the reusable
-   classes above. This remains scoped under the desktop application root. */
-.desktop-library > .fixed.inset-0:not(.viewer-overlay) {
-  background: var(--desktop-app) !important;
-  color: var(--desktop-text);
-}
-
-.desktop-library > .fixed.inset-0:not(.viewer-overlay) > header {
-  border-color: var(--desktop-line) !important;
-  background: var(--desktop-surface-1) !important;
-}
-
-.desktop-library > .fixed.inset-0:not(.viewer-overlay) > div > aside {
-  border-color: var(--desktop-line) !important;
-  background: var(--desktop-surface-1) !important;
-}
-
-.desktop-library > .fixed.inset-0:not(.viewer-overlay) > div > main {
-  background: var(--desktop-canvas);
-}
-
-.desktop-library > .fixed.inset-0:not(.viewer-overlay) section {
-  border-color: var(--desktop-line) !important;
-  background: var(--desktop-surface-1) !important;
-  border-radius: var(--desktop-radius-panel) !important;
-  box-shadow: 0 9px 26px rgb(2 5 11 / 8%);
 }
 
 .desktop-library .modal {
@@ -3271,7 +3259,7 @@ html[data-theme="light"][data-accent="graphite"] {
     z-index: 2;
     grid-column: 1;
     grid-row: 1;
-    width: min(82vw, 292px) !important;
+    width: min(82vw, 292px);
     max-width: 85vw !important;
     border-right-color: var(--desktop-line-strong);
     box-shadow: var(--desktop-shadow-dialog);
@@ -3392,12 +3380,6 @@ html[data-theme="light"][data-accent="graphite"] {
     min-height: 34px;
   }
 
-  .desktop-history-actions .desktop-icon-button {
-    width: 31px;
-    height: 31px;
-    flex-basis: 31px;
-  }
-
   .desktop-breadcrumb-item:not(:last-child) {
     max-width: 92px;
   }
@@ -3489,29 +3471,6 @@ html[data-theme="light"][data-accent="graphite"] {
     flex-direction: column;
     gap: 10px;
     padding: 13px 0;
-  }
-
-  .desktop-library > .fixed.inset-0:not(.viewer-overlay) > div {
-    flex-direction: column;
-  }
-
-  .desktop-library > .fixed.inset-0:not(.viewer-overlay) > div > aside {
-    width: 100% !important;
-    min-height: auto;
-    flex-direction: row;
-    overflow-x: auto;
-    padding: 8px;
-    border-right: 0 !important;
-    border-bottom: 1px solid var(--desktop-line) !important;
-  }
-
-  .desktop-library > .fixed.inset-0:not(.viewer-overlay) > div > aside button {
-    width: auto;
-    flex: 0 0 auto;
-  }
-
-  .desktop-library > .fixed.inset-0:not(.viewer-overlay) > div > main {
-    padding: 14px !important;
   }
 
   .viewer-toolbar {
@@ -3610,10 +3569,6 @@ html[data-theme="light"][data-accent="graphite"] {
 
   .desktop-window-controls button {
     width: 38px;
-  }
-
-  .desktop-history-actions .desktop-icon-button:nth-child(3) {
-    display: none;
   }
 
   .desktop-sort-control {
@@ -3749,14 +3704,6 @@ html[data-theme="light"][data-accent="graphite"] {
 .m-drawer-mask {
   animation: m-mask-in 200ms ease-out both;
 }
-.m-drawer-panel {
-  animation: m-drawer-in 240ms cubic-bezier(0.32, 0.72, 0.35, 1) both;
-}
-@keyframes m-drawer-in {
-  from { transform: translateX(-100%); }
-  to { transform: translateX(0); }
-}
-
 /* —— 居中对话框 —— */
 .m-dialog-mask {
   animation: m-mask-in 160ms ease-out both;
@@ -3850,7 +3797,6 @@ html[data-theme="light"][data-accent="graphite"] {
   .m-sheet-mask,
   .m-sheet-panel,
   .m-drawer-mask,
-  .m-drawer-panel,
   .m-dialog-mask,
   .m-dialog,
   .m-toast,
@@ -3858,5 +3804,1063 @@ html[data-theme="light"][data-accent="graphite"] {
   .m-viewer-exit,
   .m-fullscreen .modal-box {
     animation-duration: 1ms !important;
+  }
+}
+
+/* ============================================================================
+   正式版式的最终层（原 formal-overrides.css 全文搬入，未改任何声明）
+   它原本作为最后一个样式表加载以覆盖前面的旧值；搬到这里后仍是桌面样式表的
+   最后一段，而桌面树与移动树互不重叠，所以级联结果与搬移前完全一致。
+   ========================================================================== */
+/* Final proportion pass for the production workspace. Loaded after both
+   desktop and mobile theme files so these are the intentional end-state
+   geometry rules, while LibraryBrowser keeps its existing behavior. */
+
+body .desktop-library {
+  /* Codex-like chrome rhythm: compact enough to keep the workspace dominant. */
+}
+
+/* Keep persisted theme choices inside the formal palette. The legacy DaisyUI
+   tokens still exist globally for shared components, so production values are
+   scoped here and intentionally win on the library root. */
+body .desktop-library {
+  --color-primary: var(--desktop-accent-fill);
+  --color-primary-content: var(--desktop-accent-ink);
+  --color-base-100: var(--desktop-surface-1);
+  --color-base-200: var(--desktop-surface-2);
+  --color-base-300: var(--desktop-surface-3);
+  --color-base-content: var(--desktop-text);
+}
+
+html[data-theme="light"] body .desktop-library {
+  --desktop-app: #e9ebee;
+  --desktop-canvas: #f1f3f5;
+  --desktop-surface-1: #fbfcfd;
+  --desktop-surface-2: #f0f2f4;
+  --desktop-surface-3: #e5e8ec;
+  --desktop-surface-4: #d8dce2;
+  --desktop-line: rgba(25,31,39,.11);
+  --desktop-line-strong: rgba(25,31,39,.2);
+  --desktop-text: #20242a;
+  --desktop-text-soft: #454b54;
+  --desktop-muted: #69717d;
+  --desktop-faint: #8b929c;
+  --desktop-accent-fill: #c45444;
+  --desktop-accent-ink: #fff;
+  --desktop-accent-text: #a84437;
+  --desktop-accent-soft: rgba(196,84,68,.12);
+  --desktop-accent-line: rgba(196,84,68,.35);
+  --color-primary: var(--desktop-accent-fill);
+  --color-primary-content: var(--desktop-accent-ink);
+  background: var(--desktop-app);
+}
+
+html[data-theme="light"] body .desktop-library > .app-titlebar {
+  background: rgba(251,252,253,.9);
+}
+
+html[data-theme="light"] body .desktop-library .desktop-global-search {
+  background: rgba(25,31,39,.035);
+}
+
+html[data-theme="light"] body .desktop-library .desktop-package-cover,
+html[data-theme="light"] body .desktop-library .desktop-photo-frame {
+  background: #e5e8eb;
+  box-shadow: 0 7px 22px rgba(37,43,54,.11);
+}
+
+html[data-accent="cobalt"] body .desktop-library {
+  --desktop-accent-fill: #8aa4e8;
+  --desktop-accent-ink: #10172a;
+  --desktop-accent-text: #b5c7f5;
+  --desktop-accent-soft: rgba(138,164,232,.15);
+  --desktop-accent-line: rgba(138,164,232,.45);
+  --color-primary: var(--desktop-accent-fill);
+  --color-primary-content: var(--desktop-accent-ink);
+}
+
+html[data-accent="amber"] body .desktop-library {
+  --desktop-accent-fill: #e2ad55;
+  --desktop-accent-ink: #251803;
+  --desktop-accent-text: #f0c275;
+  --desktop-accent-soft: rgba(226,173,85,.15);
+  --desktop-accent-line: rgba(226,173,85,.45);
+  --color-primary: var(--desktop-accent-fill);
+  --color-primary-content: var(--desktop-accent-ink);
+}
+
+html[data-accent="graphite"] body .desktop-library {
+  --desktop-accent-fill: #c2c9d0;
+  --desktop-accent-ink: #171a1e;
+  --desktop-accent-text: #d7dce1;
+  --desktop-accent-soft: rgba(194,201,208,.15);
+  --desktop-accent-line: rgba(194,201,208,.45);
+  --color-primary: var(--desktop-accent-fill);
+  --color-primary-content: var(--desktop-accent-ink);
+}
+
+html[data-theme="light"][data-accent="cobalt"] body .desktop-library {
+  --desktop-accent-fill: #4568ae;
+  --desktop-accent-ink: #fff;
+  --desktop-accent-text: #365996;
+  --desktop-accent-soft: rgba(69,104,174,.12);
+  --desktop-accent-line: rgba(69,104,174,.35);
+  --color-primary: #4568ae;
+  --color-primary-content: #fff;
+}
+
+html[data-theme="light"][data-accent="amber"] body .desktop-library {
+  --desktop-accent-fill: #94620e;
+  --desktop-accent-ink: #fff;
+  --desktop-accent-text: #805208;
+  --desktop-accent-soft: rgba(148,98,14,.12);
+  --desktop-accent-line: rgba(148,98,14,.35);
+  --color-primary: #94620e;
+  --color-primary-content: #fff;
+}
+
+html[data-theme="light"][data-accent="graphite"] body .desktop-library {
+  --desktop-accent-fill: #505a65;
+  --desktop-accent-ink: #fff;
+  --desktop-accent-text: #404a54;
+  --desktop-accent-soft: rgba(80,90,101,.12);
+  --desktop-accent-line: rgba(80,90,101,.35);
+  --color-primary: #505a65;
+  --color-primary-content: #fff;
+}
+
+body .desktop-library .btn {
+  min-height: 34px;
+  border: 1px solid var(--desktop-line-strong);
+  border-radius: 8px;
+  color: var(--desktop-text-soft);
+  background: var(--desktop-surface-2);
+  box-shadow: none;
+  text-transform: none;
+}
+
+body .desktop-library .btn:hover {
+  border-color: var(--desktop-line-strong);
+  color: var(--desktop-text);
+  background: var(--desktop-surface-3);
+}
+
+body .desktop-library .btn-primary {
+  border-color: transparent;
+  color: var(--desktop-accent-ink);
+  background: var(--desktop-accent-fill);
+}
+
+body .desktop-library .btn-error {
+  border-color: transparent;
+  color: #fff;
+  background: var(--desktop-danger, #c94a46);
+}
+
+body .desktop-library .btn-ghost {
+  border-color: transparent;
+  color: var(--desktop-muted);
+  background: transparent;
+}
+
+body .desktop-library .input,
+body .desktop-library .select {
+  min-height: 34px;
+  border: 1px solid var(--desktop-line);
+  border-radius: 8px;
+  color: var(--desktop-text);
+  background: var(--desktop-surface-2);
+  box-shadow: none;
+}
+
+body .desktop-library .input:focus,
+body .desktop-library .select:focus {
+  border-color: var(--desktop-accent-line);
+  outline: 2px solid var(--desktop-accent-soft);
+  outline-offset: 0;
+}
+
+body .desktop-library .alert {
+  border: 1px solid var(--desktop-line-strong);
+  border-radius: 10px;
+  color: var(--desktop-text);
+  background: var(--desktop-surface-2);
+  box-shadow: 0 18px 45px rgb(0 0 0 / 22%);
+}
+
+body .desktop-library .alert-info {
+  border-color: var(--desktop-accent-line);
+  color: var(--desktop-accent-text);
+  background: var(--desktop-accent-soft);
+}
+
+body .desktop-library .alert-success {
+  border-color: rgb(117 190 148 / 35%);
+  color: #a9dfbd;
+  background: rgb(65 132 91 / 18%);
+}
+
+body .desktop-library .alert-error {
+  border-color: rgb(232 120 114 / 42%);
+  color: var(--desktop-danger, #ff8f82);
+  background: var(--desktop-danger-soft, rgb(255 105 92 / 13%));
+}
+
+body .desktop-library .desktop-sidebar {
+  /* JSX owns width so SidebarResizeHandle can update it live. */
+  min-width: 200px;
+  max-width: 360px !important;
+}
+
+body .desktop-library .desktop-window-controls {
+  height: auto;
+  align-items: center;
+  margin: 0 0 0 5px;
+  border-left: 0;
+}
+
+body .desktop-library .desktop-window-controls button {
+  flex: 0 0 34px;
+  border: 1px solid transparent;
+}
+
+body .desktop-library .desktop-window-controls button:hover {
+  background: rgba(255,255,255,.08);
+}
+
+body .desktop-library .desktop-window-controls button.is-close:hover {
+  background: rgba(201,74,70,.85);
+}
+
+body .desktop-library .desktop-workspace-header {
+  padding-top: 18px;
+}
+
+/* Keep wide layouts visually anchored like Codex while preserving the full
+   canvas at ordinary window sizes. The virtualized surfaces remain fluid
+   inside this frame, so measurement and scrolling behavior are unchanged. */
+body .desktop-library .desktop-workspace-header > .desktop-workspace-nav,
+body .desktop-library .desktop-workspace-header > .desktop-workspace-title-row,
+body .desktop-library .desktop-media-canvas > .desktop-content-section {
+  width: min(100%, 1240px);
+  margin-inline: auto;
+}
+
+body .desktop-library .desktop-workspace-title-row {
+  align-items: end;
+}
+
+body .desktop-library .desktop-workspace-title {
+  min-width: 0;
+}
+
+body .desktop-library .desktop-workspace-title h1 {
+  letter-spacing: -.045em;
+}
+
+body .desktop-library .desktop-workspace-title > span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body .desktop-library .desktop-view-controls {
+  flex: 0 0 auto;
+  padding-bottom: 1px;
+}
+
+body .desktop-library .desktop-package-cover,
+body .desktop-library .desktop-photo-frame {
+  box-shadow: 0 10px 26px rgb(0 0 0 / 16%);
+}
+
+body .desktop-library .desktop-package-body,
+body .desktop-library .desktop-photo-caption {
+  padding-top: 8px;
+}
+
+body .desktop-library .desktop-photo-name,
+body .desktop-library .desktop-package-title strong {
+  font-size: 11px;
+}
+
+body .desktop-library .desktop-photo-meta,
+body .desktop-library .desktop-package-meta,
+body .desktop-library .desktop-package-path {
+  font-size: 9px;
+}
+
+body .desktop-library .desktop-selection-toolbar {
+  min-height: 42px;
+  padding: 5px;
+}
+
+body .desktop-library .desktop-inspector-cover,
+body .desktop-library .desktop-inspector-image {
+  margin-top: 12px;
+}
+
+body .desktop-library .desktop-inspector-summary {
+  padding-top: 10px;
+}
+
+body .desktop-library .desktop-inspector-section {
+  margin-top: 8px;
+  padding-top: 10px;
+}
+
+/* 窄宽度（≤680px）下 styles.css 会把工具栏折成两行（98px），这套单行几何只在
+   宽屏成立；否则高度被压回 56px 而 flex-direction 仍是 column，第二行会溢出。 */
+@media (min-width: 681px) {
+  body .desktop-library .viewer-toolbar {
+    height: 56px;
+  }
+
+  body .desktop-library .viewer-stage {
+    inset: 56px 0 74px;
+  }
+
+  body .desktop-library .filmstrip,
+  body .desktop-library .viewer-filmstrip {
+    height: 74px;
+  }
+}
+
+@media (max-width: 1260px) and (min-width: 1024px) {
+  body .desktop-library .desktop-sidebar {
+    max-width: 360px !important;
+  }
+}
+
+@media (max-width: 1023px) {
+  body .desktop-library .desktop-sidebar {
+    max-width: 85vw !important;
+  }
+
+  body .desktop-library .desktop-workspace-header {
+    padding-top: 14px;
+  }
+}
+
+@media (max-width: 640px) {
+
+  body .desktop-library .desktop-workspace-title > span {
+    white-space: normal;
+  }
+}
+
+/* Settings uses the same application frame as the library. Only its content
+   changes; the titlebar, navigation affordance, and window controls stay in
+   the shared shell. */
+
+/* Settings layout follows the Codex settings proportions while keeping the
+   existing tab and form behavior intact. */
+body .desktop-library .desktop-settings-page {
+  background: var(--desktop-app);
+}
+
+/* 侧栏宽度列只在宽屏成立；≤680px 交给 styles.css 的竖排布局（标签栏横向滚动）。 */
+@media (min-width: 681px) {
+  body .desktop-library .desktop-settings-body {
+    grid-template-columns: var(--desktop-settings-sidebar-width, 304px) minmax(0, 1fr);
+  }
+}
+
+body .desktop-library .desktop-settings-sidebar {
+  border-right-color: var(--desktop-line);
+}
+
+body .desktop-library .desktop-settings-sidebar .desktop-panel-label {
+  margin: 2px 10px 12px;
+}
+
+body .desktop-library .desktop-settings-search {
+  height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 22px;
+  padding: 0 10px;
+  border: 1px solid var(--desktop-line);
+  border-radius: 8px;
+  color: var(--desktop-muted);
+  background: rgba(255,255,255,.045);
+}
+
+body .desktop-library .desktop-settings-search:focus-within {
+  border-color: var(--desktop-accent-line);
+  background: rgba(255,255,255,.07);
+}
+
+body .desktop-library .desktop-settings-search input {
+  min-width: 0;
+  width: 100%;
+  border: 0;
+  outline: 0;
+  color: var(--desktop-text);
+  background: transparent;
+  font-size: 11px;
+}
+
+body .desktop-library .desktop-settings-search input::placeholder {
+  color: var(--desktop-faint);
+}
+
+/* 搜索空状态：常驻挂载以便 role="status" 能播报，无匹配时才占位。 */
+body .desktop-library .desktop-settings-empty {
+  margin: 6px 10px 0;
+  color: var(--desktop-faint);
+  font-size: 11px;
+}
+
+body .desktop-library .desktop-settings-empty:empty {
+  margin: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+body .desktop-library .desktop-settings-nav button {
+  padding-inline: 11px;
+}
+
+/* The titlebar sidebar toggle controls both views. Settings keeps its own
+   navigation rail, so collapse it through the same persisted shell state. */
+@media (min-width: 681px) {
+  body .desktop-library .desktop-settings-page.is-sidebar-hidden .desktop-settings-body {
+    grid-template-columns: 0 minmax(0, 1fr);
+  }
+}
+
+body .desktop-library .desktop-settings-page.is-sidebar-hidden .desktop-settings-sidebar {
+  width: 0;
+  min-width: 0;
+  padding-inline: 0;
+  border-right: 0;
+  overflow: hidden;
+  opacity: 0;
+  /* visibility 才能把折叠后的侧栏移出焦点顺序与无障碍树；只靠 width/opacity
+     会让键盘 Tab 停在看不见的按钮上。 */
+  visibility: hidden;
+  pointer-events: none;
+}
+
+body .desktop-library .desktop-settings-shell {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--desktop-canvas);
+}
+
+body .desktop-library .desktop-media-canvas {
+  padding-top: 14px;
+}
+
+body .desktop-library .desktop-photo-card.is-selected .desktop-photo-frame {
+  border-color: var(--desktop-accent-fill);
+  box-shadow: 0 0 0 2px var(--desktop-accent-soft), 0 10px 26px rgb(0 0 0 / 16%);
+}
+
+body .desktop-library[data-view="list"] .desktop-photo-card.is-selected {
+  border-color: var(--desktop-accent-line);
+  box-shadow: inset 0 0 0 1px var(--desktop-accent-line);
+}
+
+body .desktop-library .desktop-settings-page-title {
+  margin-bottom: 28px;
+  font-size: 28px;
+  font-weight: 650;
+  letter-spacing: -.035em;
+}
+
+body .desktop-library .desktop-settings-section {
+  padding: 20px 22px 22px;
+  border-radius: 13px !important;
+  background: color-mix(in srgb, var(--desktop-surface-1) 92%, var(--desktop-canvas)) !important;
+  box-shadow: 0 16px 42px rgb(0 0 0 / 16%);
+}
+
+body .desktop-library .desktop-settings-section + .desktop-settings-section {
+  margin-top: 18px;
+}
+
+body .desktop-library .desktop-settings-section-heading h2 {
+  font-size: 15px;
+  letter-spacing: -.01em;
+}
+
+body .desktop-library .desktop-settings-row {
+  min-height: 66px;
+}
+
+@media (max-width: 1023px) {
+
+  body .desktop-library .desktop-settings-page-title {
+    font-size: 25px;
+  }
+}
+
+/* Codex-like workspace rhythm: compact chrome, readable work area, and a
+   consistent 8/12/16/24 spacing scale. These rules are intentionally last so
+   legacy responsive declarations cannot inflate the production proportions. */
+body .desktop-library {
+  --desktop-titlebar-height: 46px;
+  --desktop-inspector-width: 280px;
+}
+
+body .desktop-library > .app-titlebar {
+  height: 46px;
+  min-height: 46px;
+  padding-inline: 16px;
+  gap: 14px;
+}
+
+body .desktop-library .desktop-brand-lockup {
+  min-width: 180px;
+  gap: 9px;
+}
+
+body .desktop-library .desktop-brand-mark {
+  width: 21px;
+  height: 21px;
+}
+
+body .desktop-library .desktop-global-search {
+  height: 30px;
+  max-width: 440px;
+  border-radius: 8px;
+}
+
+body .desktop-library .desktop-titlebar-actions {
+  gap: 6px;
+}
+
+body .desktop-library .desktop-import-button,
+body .desktop-library .desktop-button {
+  min-height: 30px;
+}
+
+body .desktop-library .desktop-window-controls {
+  gap: 3px;
+  margin-left: 3px;
+}
+
+body .desktop-library .desktop-window-controls button {
+  width: 30px;
+  height: 30px;
+  min-height: 30px;
+  flex-basis: 30px;
+  border-radius: 7px;
+}
+
+body .desktop-library .desktop-workspace-header {
+  padding: 14px clamp(20px, 3vw, 44px) 0;
+}
+
+body .desktop-library .desktop-workspace-nav {
+  min-height: 28px;
+  gap: 12px;
+}
+
+body .desktop-library .desktop-workspace-title-row {
+  gap: 20px;
+  padding: 20px 0 18px;
+}
+
+body .desktop-library .desktop-workspace-title h1 {
+  max-width: none;
+  margin: 6px 0 6px;
+  font-size: clamp(30px, 2.4vw, 40px);
+  line-height: 1.02;
+}
+
+body .desktop-library .desktop-workspace-title > span {
+  max-width: 60ch;
+  font-size: 11px;
+}
+
+body .desktop-library .desktop-view-controls {
+  gap: 5px;
+}
+
+body .desktop-library .desktop-sort-control,
+body .desktop-library .desktop-segmented-control {
+  height: 30px;
+}
+
+body .desktop-library .desktop-content-section + .desktop-content-section {
+  margin-top: 24px;
+}
+
+body .desktop-library .desktop-section-heading {
+  margin-bottom: 10px;
+}
+
+body .desktop-library .desktop-sidebar-primary {
+  padding-bottom: 12px;
+}
+
+body .desktop-library .desktop-inspector-header {
+  min-height: 56px;
+}
+
+@media (max-width: 1023px) {
+  body .desktop-library > .app-titlebar {
+    height: 48px;
+    min-height: 48px;
+    --desktop-titlebar-height: 48px;
+    padding-inline: 12px;
+    gap: 8px;
+  }
+
+  body .desktop-library .desktop-brand-lockup {
+    min-width: 0;
+  }
+
+  body .desktop-library .desktop-global-search {
+    height: 30px;
+    max-width: none;
+  }
+
+  body .desktop-library .desktop-workspace-header {
+    padding: 12px 16px 0;
+  }
+
+  body .desktop-library .desktop-workspace-title-row {
+    gap: 16px;
+    padding: 18px 0 16px;
+  }
+
+  body .desktop-library .desktop-workspace-title h1 {
+    font-size: 31px;
+  }
+}
+
+@media (max-width: 640px) {
+  body .desktop-library > .app-titlebar {
+    height: 46px;
+    min-height: 46px;
+    --desktop-titlebar-height: 46px;
+  }
+
+  body .desktop-library .desktop-window-controls button {
+    width: 29px;
+    height: 29px;
+    min-height: 29px;
+    flex-basis: 29px;
+  }
+
+  body .desktop-library .desktop-workspace-title h1 {
+    font-size: 29px;
+  }
+}
+
+/* Sidebar system pass: every section follows the same Codex-like navigation
+   rhythm. The tree remains virtualized; these rules only change its surface. */
+body .desktop-library .desktop-sidebar {
+  background: var(--desktop-surface-1);
+  border-right: 1px solid var(--desktop-line);
+}
+
+body .desktop-library .desktop-sidebar-heading {
+  min-height: 60px;
+  padding: 12px 14px 10px;
+  border: 0;
+}
+
+body .desktop-library .desktop-sidebar-heading span,
+body .desktop-library .desktop-panel-label {
+  color: var(--desktop-faint);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: .04em;
+  line-height: 1.3;
+  text-transform: none;
+}
+
+body .desktop-library .desktop-sidebar-heading strong {
+  margin-top: 3px;
+  font-size: 14px;
+  letter-spacing: -.01em;
+}
+
+body .desktop-library .desktop-sidebar-primary {
+  gap: 2px;
+  padding: 4px 10px 12px;
+  border: 0;
+}
+
+body .desktop-library .desktop-sidebar-nav-item,
+body .desktop-library .desktop-sidebar-settings {
+  min-height: 34px;
+  grid-template-columns: 19px minmax(0, 1fr) max-content;
+  gap: 8px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 7px;
+  color: var(--desktop-muted);
+  font-size: 12px;
+  line-height: 1;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+
+body .desktop-library .desktop-sidebar-nav-item:hover,
+body .desktop-library .desktop-sidebar-settings:hover,
+body .desktop-library .desktop-tree-row:hover {
+  color: var(--desktop-text-soft);
+  background: var(--desktop-surface-2);
+}
+
+body .desktop-library .desktop-sidebar-nav-item.is-active,
+body .desktop-library .desktop-tree-row.is-active {
+  color: var(--desktop-text);
+  background: var(--desktop-surface-3);
+  box-shadow: inset 2px 0 0 var(--desktop-accent-fill);
+}
+
+body .desktop-library .desktop-sidebar-nav-item.is-active > svg:first-child,
+body .desktop-library .desktop-tree-row.is-active .desktop-tree-target > svg {
+  color: var(--desktop-accent-fill);
+}
+
+body .desktop-library .desktop-sidebar-nav-item:disabled {
+  color: var(--desktop-faint);
+  opacity: .48;
+}
+
+
+body .desktop-library .desktop-panel-label {
+  margin: 4px 14px 6px;
+  padding: 0;
+}
+
+body .desktop-library .desktop-folder-tree-scroll {
+  padding: 0 10px 12px;
+}
+
+body .desktop-library .desktop-tree-row {
+  height: 31px;
+  color: var(--desktop-muted);
+  transition: background-color 140ms ease, color 140ms ease;
+}
+
+body .desktop-library .desktop-tree-row > .chevron-btn {
+  color: var(--desktop-faint);
+}
+
+body .desktop-library .desktop-tree-target {
+  color: inherit;
+  font-size: 12px;
+}
+
+body .desktop-library .desktop-sidebar-settings {
+  flex: 0 0 auto;
+  border-top: 1px solid var(--desktop-line) !important;
+}
+
+@media (max-width: 1023px) {
+  body .desktop-library .desktop-sidebar-heading {
+    min-height: 60px;
+  }
+
+  body .desktop-library .desktop-sidebar-primary {
+    padding-inline: 10px;
+  }
+}
+
+/* Shared top chrome: Codex keeps navigation in the upper-left control rail.
+   The same rail is used by the settings return action, so both views keep
+   identical search, action, and window-control alignment. */
+body .desktop-library > .app-titlebar.has-nav {
+  grid-template-columns: max-content max-content minmax(200px, 440px) minmax(0, 1fr);
+}
+
+body .desktop-library .desktop-titlebar-nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  width: 91px;
+  min-width: 91px;
+  flex: 0 0 91px;
+}
+
+body .desktop-library .desktop-titlebar-nav .desktop-icon-button {
+  width: 29px;
+  height: 29px;
+  min-height: 29px;
+  flex: 0 0 29px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: var(--desktop-muted);
+  background: transparent;
+}
+
+body .desktop-library .desktop-titlebar-nav .desktop-icon-button:hover:not(:disabled) {
+  color: var(--desktop-text);
+  background: var(--desktop-surface-2);
+}
+
+body .desktop-library .desktop-titlebar-nav .desktop-icon-button:disabled {
+  color: var(--desktop-faint);
+  opacity: .42;
+}
+
+/* Settings and library navigation share one row contract. This supersedes
+   legacy settings colors and prevents the settings rail from looking like a
+   separate component family. */
+body .desktop-library .desktop-settings-sidebar {
+  padding: 12px 10px 16px;
+  background: var(--desktop-surface-1);
+  border-right: 1px solid var(--desktop-line);
+  scrollbar-gutter: auto;
+}
+
+body .desktop-library .desktop-settings-nav {
+  gap: 2px;
+}
+
+body .desktop-library .desktop-settings-nav button {
+  min-height: 34px;
+  grid-template-columns: 19px minmax(0, 1fr) max-content;
+  gap: 8px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 7px;
+  color: var(--desktop-muted);
+  background: transparent;
+  font-size: 12px;
+  transition: background-color 140ms ease, color 140ms ease, box-shadow 140ms ease;
+}
+
+body .desktop-library .desktop-settings-nav button:hover {
+  color: var(--desktop-text-soft);
+  background: var(--desktop-surface-2);
+}
+
+body .desktop-library .desktop-settings-nav button.is-active {
+  color: var(--desktop-text);
+  background: var(--desktop-surface-3);
+  box-shadow: inset 2px 0 0 var(--desktop-accent-fill);
+}
+
+body .desktop-library .desktop-settings-nav button.is-active > svg {
+  color: var(--desktop-accent-fill);
+}
+
+body .desktop-library .desktop-settings-back {
+  width: 100%;
+  gap: 8px;
+  border: 0;
+  color: var(--desktop-muted);
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1;
+  text-align: left;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+
+body .desktop-library .desktop-settings-back:hover {
+  color: var(--desktop-text-soft);
+  background: var(--desktop-surface-2);
+}
+
+body .desktop-library .desktop-sidebar-settings {
+  min-width: 0;
+  min-height: 34px;
+  display: grid;
+  grid-template-columns: 19px minmax(0, 1fr) max-content;
+  align-items: center;
+  gap: 8px;
+  width: calc(100% - 20px);
+  margin: auto 10px 0;
+  padding: 0 9px;
+  border: 0 !important;
+  border-radius: 7px;
+  color: var(--desktop-muted);
+  background: transparent;
+  font-size: 12px;
+  line-height: 1;
+}
+
+body .desktop-library .desktop-sidebar-settings:hover {
+  color: var(--desktop-text-soft);
+  background: var(--desktop-surface-2);
+}
+
+body .desktop-library .desktop-sidebar-scroll {
+  min-height: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+body .desktop-library .desktop-sidebar-footer {
+  flex: 0 0 auto;
+  border-top: 1px solid var(--desktop-line);
+  background: var(--desktop-surface-1);
+}
+
+body .desktop-library .desktop-sidebar-scroll .desktop-folder-tree-scroll {
+  flex: 0 0 auto;
+  overflow: visible;
+  padding-bottom: 12px;
+}
+
+body .desktop-library .desktop-settings-main {
+  padding: 24px clamp(20px, 3vw, 44px) 40px;
+  background: var(--desktop-canvas);
+  scrollbar-gutter: auto;
+}
+
+body .desktop-library .desktop-settings-content {
+  width: min(960px, 100%);
+  margin-inline: auto;
+}
+
+@media (max-width: 1023px) {
+  body .desktop-library > .app-titlebar.has-nav {
+    grid-template-columns: max-content max-content minmax(0, 1fr) max-content;
+  }
+}
+
+@media (max-width: 640px) {
+  /* 标题栏固定四个子项（导航 / 品牌 / 搜索 / 操作），列数不能少，否则操作区掉到第二行。 */
+  body .desktop-library > .app-titlebar.has-nav {
+    grid-template-columns: max-content max-content minmax(0, 1fr) max-content;
+  }
+
+  body .desktop-library .desktop-titlebar-nav {
+    width: auto;
+    min-width: 0;
+    flex-basis: auto;
+  }
+
+  body .desktop-library .desktop-media-canvas {
+    padding-top: 10px;
+  }
+
+  body .desktop-library .desktop-titlebar-nav .desktop-icon-button {
+    width: 28px;
+    height: 28px;
+    min-height: 28px;
+    flex-basis: 28px;
+  }
+}
+
+/* Final list breathing room. Keep this after every legacy shorthand so the
+   first package row cannot be pulled against the workspace header. */
+body .desktop-library .desktop-media-canvas {
+  padding: 14px clamp(20px, 3vw, 44px) 28px;
+}
+
+@media (max-width: 1023px) {
+  body .desktop-library .desktop-media-canvas {
+    padding: 10px 16px 28px;
+  }
+}
+
+/* Directory rows use the same 34px navigation rhythm as the functional
+   entries above. The virtualizer constant in LibraryBrowser matches this
+   height so scroll positions remain exact. */
+body .desktop-library .desktop-tree-virtual-row,
+body .desktop-library .desktop-tree-row {
+  height: 34px;
+}
+
+body .desktop-library .desktop-tree-virtual-row {
+  margin-bottom: 2px;
+}
+
+body .desktop-library .desktop-tree-row {
+  grid-template-columns: 19px minmax(0, 1fr);
+  border-radius: 7px;
+}
+
+body .desktop-library .desktop-tree-row > .chevron-btn {
+  width: 19px;
+  height: 30px;
+}
+
+body .desktop-library .desktop-tree-target {
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 8px;
+  padding: 0 9px 0 1px;
+}
+
+/* Settings occupies the same content frame below the shared titlebar. The
+   library inspector grid only applies to the gallery view and must not leave
+   an empty second column around settings. */
+body .desktop-library .desktop-settings-shell {
+  display: block !important;
+  grid-column: auto !important;
+  grid-row: auto !important;
+  grid-template-columns: none !important;
+  width: 100%;
+  height: 100%;
+  overflow: hidden !important;
+}
+
+body .desktop-library .desktop-settings-shell > .desktop-settings-page {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* The footer entry uses the exact row contract as every other sidebar item;
+   its separate section only supplies the bottom spacing and divider. */
+body .desktop-library .desktop-sidebar-footer {
+  padding: 10px 8px 16px;
+}
+
+body .desktop-library .desktop-sidebar-footer .desktop-sidebar-settings {
+  width: 100%;
+  min-height: 34px;
+  margin: 0;
+  padding: 0 9px;
+  grid-template-columns: 19px minmax(0, 1fr);
+}
+
+body .desktop-library .desktop-sidebar-primary .desktop-sidebar-nav-item:not(.has-activity) {
+  grid-template-columns: 19px minmax(0, 1fr);
+}
+
+body .desktop-library .desktop-settings-back {
+  display: grid;
+  grid-template-columns: 19px minmax(0, 1fr);
+  align-items: center;
+  min-height: 34px;
+  margin: 0 0 8px;
+  padding: 0 9px;
+  border-radius: 7px;
+}
+
+/* ≤680px：设置页交给 styles.css 的竖排布局（侧栏变成横向标签条）。这里只补齐
+   两处：标签条自身的边框/内边距，以及收起侧栏时整条隐藏、正文占满整行。 */
+@media (max-width: 680px) {
+  body .desktop-library .desktop-settings-sidebar {
+    padding: 7px 8px;
+    border-right: 0;
+    border-bottom: 1px solid var(--desktop-line);
+  }
+
+  /* 横向标签条里搜索框是最高的一项，收掉它的纵向外边距避免整条被撑高；
+     再给一个最小宽度，防止它在条内被压成只剩图标的细条。 */
+  body .desktop-library .desktop-settings-search {
+    flex: 0 0 auto;
+    min-width: 150px;
+    margin: 4px 0 8px;
+  }
+
+  body .desktop-library .desktop-settings-page.is-sidebar-hidden .desktop-settings-sidebar {
+    display: none;
+  }
+
+  body .desktop-library .desktop-settings-page.is-sidebar-hidden .desktop-settings-body {
+    grid-template-rows: minmax(0, 1fr);
   }
 }

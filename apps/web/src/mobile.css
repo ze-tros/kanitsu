@@ -5,43 +5,18 @@
 .mobile-studio {
   --m-font-sans: 'Segoe UI Variable Text', 'Segoe UI', 'Microsoft YaHei UI', 'Microsoft YaHei', system-ui, sans-serif;
   --m-font-display: 'Segoe UI Variable Display', 'Segoe UI', 'Microsoft YaHei UI', 'Microsoft YaHei', system-ui, sans-serif;
-  --m-app: #0e1014;
-  --m-canvas: #11141a;
-  --m-surface-1: #16191f;
-  --m-surface-2: #1c2027;
-  --m-surface-3: #242932;
-  --m-surface-4: #303640;
-  --m-line: #292e37;
-  --m-line-strong: #414854;
-  --m-text: #eef1f5;
-  --m-text-soft: #c8cdd5;
-  --m-muted: #9299a4;
-  --m-faint: #68717d;
-  --m-accent: #7894dc;
-  --m-accent-ink: #10172a;
-  --m-accent-text: #a9bdf2;
-  --m-accent-soft: #1b2948;
-  --m-accent-line: #526da9;
-  --m-focus-ring: #b9c9f5;
-  --m-focus-halo: rgb(120 148 220 / 24%);
   --m-danger: #e87872;
   --m-danger-soft: #342020;
   --m-warning: #dbab62;
   --m-success: #79b69b;
   --m-shadow-raised: 0 16px 42px rgb(2 5 11 / 38%);
   --m-shadow-dialog: 0 30px 90px rgb(2 5 11 / 62%);
-  --m-radius-panel: 8px;
-  --m-radius-control: 6px;
-  --m-radius-tight: 4px;
-  --m-radius-sheet: 14px;
   --m-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --m-ease-standard: cubic-bezier(0.2, 0, 0, 1);
   --color-base-100: var(--m-surface-1);
   --color-base-200: var(--m-surface-2);
   --color-base-300: var(--m-surface-3);
   --color-base-content: var(--m-text);
-  --color-primary: var(--m-accent);
-  --color-primary-content: var(--m-accent-ink);
   --color-error: var(--m-danger);
   --color-error-content: #190706;
   --radius-box: var(--m-radius-panel);
@@ -51,9 +26,6 @@
   height: 100dvh;
   min-width: 280px;
   overflow: hidden;
-  background:
-    radial-gradient(circle at 12% 2%, rgb(82 109 169 / 9%), transparent 25rem),
-    var(--m-app);
   color: var(--m-text);
   font-family: var(--m-font-sans);
   font-size: 13px;
@@ -65,25 +37,6 @@
 }
 
 html[data-theme='light'] .mobile-studio {
-  --m-app: #e7e9ed;
-  --m-canvas: #edf0f3;
-  --m-surface-1: #fafbfc;
-  --m-surface-2: #f3f5f7;
-  --m-surface-3: #e7eaee;
-  --m-surface-4: #d9dde3;
-  --m-line: #d7dbe1;
-  --m-line-strong: #bac0ca;
-  --m-text: #20242b;
-  --m-text-soft: #494f59;
-  --m-muted: #69717d;
-  --m-faint: #8a929e;
-  --m-accent: #4568ae;
-  --m-accent-ink: #ffffff;
-  --m-accent-text: #365996;
-  --m-accent-soft: #e3eafa;
-  --m-accent-line: #a9b9dc;
-  --m-focus-ring: #365996;
-  --m-focus-halo: rgb(69 104 174 / 18%);
   --m-danger: #b94d48;
   --m-danger-soft: #f7e5e3;
   --m-warning: #966617;
@@ -195,13 +148,10 @@ html[data-theme='light'] .mobile-studio {
 
 .m-context-header {
   border-bottom: 1px solid var(--m-line);
-  background: color-mix(in srgb, var(--m-app) 94%, transparent);
-  box-shadow: 0 8px 28px rgb(2 5 11 / 7%);
   backdrop-filter: blur(18px);
 }
 
 .m-context-bar {
-  min-height: 58px;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -215,7 +165,6 @@ html[data-theme='light'] .mobile-studio {
   display: inline-grid;
   flex: none;
   place-items: center;
-  border-radius: var(--m-radius-control);
   background: transparent;
   color: var(--m-muted);
 }
@@ -276,15 +225,12 @@ html[data-theme='light'] .mobile-studio {
   align-items: center;
   gap: 9px;
   border: 1px solid var(--m-line);
-  border-radius: var(--m-radius-control);
-  background: var(--m-surface-1);
   color: var(--m-muted);
   padding: 0 10px;
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 2.5%);
 }
 
 .m-search-field:focus-within {
-  background: var(--m-surface-2);
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 2.5%);
 }
 
@@ -398,8 +344,6 @@ html[data-theme='light'] .mobile-studio {
   color: var(--m-text);
   font-family: var(--m-font-display);
   font-size: 29px;
-  font-weight: 650;
-  letter-spacing: -0.045em;
   line-height: 1.08;
 }
 
@@ -1034,10 +978,8 @@ html[data-theme='light'] .mobile-studio {
   grid-template-columns: 1fr 1.18fr 1fr;
   gap: 4px;
   border-top: 1px solid var(--m-line);
-  background: color-mix(in srgb, var(--m-surface-1) 94%, transparent);
   padding: 7px 10px calc(env(safe-area-inset-bottom, 0px) + 7px);
   box-shadow: 0 -12px 34px rgb(2 5 11 / 12%);
-  backdrop-filter: blur(18px);
 }
 
 .m-bottom-dock.is-library {
@@ -1050,15 +992,9 @@ html[data-theme='light'] .mobile-studio {
   place-items: center;
   align-content: center;
   gap: 3px;
-  border-radius: var(--m-radius-control);
   background: transparent;
   color: var(--m-faint);
   font-size: 9px;
-}
-
-.m-dock-button.is-active {
-  background: var(--m-surface-2);
-  color: var(--m-text);
 }
 
 .m-dock-button.is-primary {
@@ -1150,13 +1086,6 @@ html[data-theme='light'] .mobile-studio {
   backdrop-filter: blur(2px);
 }
 
-.m-drawer-panel {
-  border-right: 1px solid var(--m-line-strong);
-  background: var(--m-surface-1);
-  color: var(--m-text);
-  box-shadow: 24px 0 70px rgb(2 5 11 / 48%);
-}
-
 .m-drawer-brand {
   min-height: 62px;
   display: flex;
@@ -1204,11 +1133,6 @@ html[data-theme='light'] .mobile-studio {
   align-items: center;
   border-radius: var(--m-radius-control);
   color: var(--m-muted);
-}
-
-.m-tree-row.is-selected {
-  background: var(--m-accent-soft);
-  color: var(--m-accent-text);
 }
 
 .m-tree-row:not(.is-selected):active {
@@ -2237,6 +2161,20 @@ html[data-theme='light'] .m-log-panel {
   color: var(--m-viewer-text);
 }
 
+/* 查看器自带深色调色板，但强调色仍继承应用主题：浅色主题下 --m-accent/--m-accent-text
+   会翻成深红，落在 #050608 的深底上几乎没有对比度（激活按钮、加载环都会看不清）。
+   这里把浅色主题下的强调色钉回深色取值。 */
+html[data-theme='light'] .m-viewer-root {
+  --m-accent: #ff785e;
+  --m-accent-ink: #241411;
+  --m-accent-text: #ff9b89;
+  --m-accent-soft: rgba(255,120,94,.14);
+  --m-accent-line: rgba(255,120,94,.42);
+  /* 焦点环在声明处就已用 var(--m-accent-text) 求值，必须一并钉回深色取值。 */
+  --m-focus-ring: #ff9b89;
+  --m-focus-halo: rgba(255,120,94,.24);
+}
+
 .m-viewer-stage {
   min-height: 0;
   background:
@@ -2288,7 +2226,7 @@ html[data-theme='light'] .m-log-panel {
 .m-viewer-button.is-active {
   border-color: color-mix(in srgb, var(--m-accent) 52%, transparent);
   background: color-mix(in srgb, var(--m-accent) 20%, rgb(255 255 255 / 5%));
-  color: #c7d4f7;
+  color: var(--m-accent-text);
 }
 
 .m-viewer-heading {
@@ -2323,7 +2261,7 @@ html[data-theme='light'] .m-log-panel {
   height: 24px;
   display: block;
   border: 2px solid rgb(255 255 255 / 15%);
-  border-top-color: #a9bdf2;
+  border-top-color: var(--m-accent);
   border-radius: 50%;
   animation: m-spin 760ms linear infinite;
 }
@@ -2443,9 +2381,9 @@ html[data-theme='light'] .m-log-panel {
 }
 
 .m-filmstrip-item.is-active {
-  border-color: #9eb4ec;
+  border-color: var(--m-accent);
   opacity: 1;
-  box-shadow: 0 0 0 1px rgb(158 180 236 / 22%), 0 10px 28px rgb(0 0 0 / 36%);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--m-accent) 22%, transparent), 0 10px 28px rgb(0 0 0 / 36%);
   transform: translateY(-2px);
 }
 
@@ -2572,10 +2510,6 @@ html[data-theme='light'] .m-log-panel {
     backdrop-filter: none;
   }
 
-  .m-context-header {
-    background: var(--m-app);
-  }
-
   .m-bottom-dock,
   .m-batch-bar,
   .m-progress-card {
@@ -2613,8 +2547,6 @@ html[data-theme='light'] .m-log-panel {
   margin-top: 16px;
   padding: 14px 15px;
   border: 1px solid var(--m-accent-line);
-  border-radius: 10px;
-  background: linear-gradient(135deg, var(--m-accent-soft), color-mix(in srgb, var(--m-surface-2) 82%, var(--m-accent-soft)));
   color: var(--m-accent-text);
   text-align: left;
   box-shadow: 0 10px 24px rgb(2 5 11 / 15%);
@@ -2626,9 +2558,6 @@ html[data-theme='light'] .m-log-panel {
   width: 34px;
   height: 34px;
   flex: none;
-  border-radius: 8px;
-  background: var(--m-accent);
-  color: var(--m-accent-ink);
 }
 .m-import-launch-copy { display: grid; gap: 2px; min-width: 0; flex: 1; }
 .m-import-launch-copy strong { color: var(--m-text); font-size: 13px; font-weight: 700; }
@@ -2653,4 +2582,138 @@ html[data-theme='light'] .m-log-panel {
 .m-directory-panel .m-tree-row { min-height: 50px; }
 @media (min-width: 700px) {
   .m-directory-panel .m-drawer-tree { max-width: 720px; width: 100%; margin: 0 auto; }
+}
+
+/* Formal mobile theme: same ink/coral material as the desktop workspace. */
+.mobile-studio {
+  --m-app: #111112;
+  --m-canvas: #121213;
+  --m-surface-1: #18181a;
+  --m-surface-2: #202023;
+  --m-surface-3: #29292c;
+  --m-surface-4: #333337;
+  --m-line: rgba(255,255,255,.085);
+  --m-line-strong: rgba(255,255,255,.17);
+  --m-text: #f3f0eb;
+  --m-text-soft: #d3cfca;
+  --m-muted: #a09b9b;
+  --m-faint: #6f6b70;
+  --m-accent: #ff785e;
+  --m-accent-ink: #241411;
+  --m-accent-text: #ff9b89;
+  --m-accent-soft: rgba(255,120,94,.14);
+  --m-accent-line: rgba(255,120,94,.42);
+  --m-focus-ring: var(--m-accent-text);
+  --m-focus-halo: color-mix(in srgb, var(--m-accent) 24%, transparent);
+  --m-radius-panel: 12px;
+  --m-radius-control: 9px;
+  --m-radius-tight: 6px;
+  --m-radius-sheet: 16px;
+  background: var(--m-app);
+}
+html[data-theme='light'] .mobile-studio {
+  --m-app: #e9ebee;
+  --m-canvas: #f1f3f5;
+  --m-surface-1: #fbfcfd;
+  --m-surface-2: #f0f2f4;
+  --m-surface-3: #e5e8ec;
+  --m-surface-4: #d8dce2;
+  --m-line: rgba(25,31,39,.11);
+  --m-line-strong: rgba(25,31,39,.2);
+  --m-text: #20242a;
+  --m-text-soft: #454b54;
+  --m-muted: #69717d;
+  --m-faint: #8b929c;
+  --m-accent: #c45444;
+  --m-accent-ink: #fff;
+  --m-accent-text: #a84437;
+  --m-accent-soft: rgba(196,84,68,.12);
+  --m-accent-line: rgba(196,84,68,.35);
+  --m-focus-ring: var(--m-accent-text);
+  --m-focus-halo: color-mix(in srgb, var(--m-accent) 18%, transparent);
+}
+.mobile-studio { background-image: radial-gradient(circle at 92% -8%, color-mix(in srgb, var(--m-accent) 8%, transparent), transparent 18rem); }
+.m-context-header { background: color-mix(in srgb, var(--m-app) 92%, transparent); box-shadow: 0 10px 30px rgba(0,0,0,.12); }
+.m-context-bar { min-height: 62px; padding-inline: 12px; }
+.m-icon-button, .m-viewer-button { border-radius: 10px; }
+.m-search-field { border-color: var(--m-line); border-radius: 10px; background: color-mix(in srgb, var(--m-text) 3.5%, transparent); }
+.m-search-field:focus-within { border-color: var(--m-accent-line); background: color-mix(in srgb, var(--m-text) 6%, transparent); }
+.m-eyebrow { color: var(--m-accent); letter-spacing: .16em; }
+.m-library-intro h1 { letter-spacing: -.045em; font-weight: 650; }
+.m-library-tools, .m-directory-toolbar, .m-view-toolbar { border-color: var(--m-line); }
+.m-folder-card, .m-image-card { border-radius: 10px; }
+.m-folder-cover, .m-image-card > div:first-child { border-color: color-mix(in srgb, var(--m-text) 10%, transparent); border-radius: 10px; background: var(--m-surface-2); box-shadow: 0 12px 30px rgba(0,0,0,.2); }
+/* 浅色画布上纯黑阴影过重（对齐桌面端 rgba(37,43,54,.11) 的观感）。 */
+html[data-theme='light'] .m-context-header { box-shadow: 0 10px 30px rgba(37,43,54,.1); }
+html[data-theme='light'] .m-folder-cover, html[data-theme='light'] .m-image-card > div:first-child { box-shadow: 0 12px 30px rgba(37,43,54,.14); }
+.m-folder-card:active .m-folder-cover img, .m-image-card:active > div:first-child img { transform: scale(.98); }
+.m-bottom-dock { border-top-color: var(--m-line); background: color-mix(in srgb, var(--m-surface-1) 92%, transparent); backdrop-filter: blur(22px); }
+.m-dock-button { border-radius: 10px; }
+.m-dock-button.is-active { color: var(--m-accent-text); background: var(--m-accent-soft); }
+/* 底色与文字色由既有的包内视图规则（.m-bottom-dock.is-package .m-dock-button.is-primary）
+   决定，这里只补光晕——重复声明那两个属性会被 0,4,0 的规则压掉，等于死代码。 */
+.m-dock-button.is-primary { box-shadow: 0 8px 20px color-mix(in srgb, var(--m-accent) 20%, transparent); }
+.m-import-launch { border-color: var(--m-accent-line); border-radius: 12px; background: linear-gradient(135deg, var(--m-accent-soft), color-mix(in srgb, var(--m-surface-2) 82%, var(--m-accent-soft))); }
+.m-import-launch-icon { border-radius: 9px; background: var(--m-accent); color: var(--m-accent-ink); }
+.m-sheet-panel, .m-dialog { border-color: var(--m-line-strong); background: var(--m-surface-1); box-shadow: var(--m-shadow-dialog); }
+.m-tree-row.is-selected { color: var(--m-text); background: var(--m-accent-soft); }
+.m-sheet-action:hover:not(:active), .m-mine-entry:hover:not(:active) { background: color-mix(in srgb, var(--m-text) 6%, transparent); }
+
+html[data-accent='cobalt'] .mobile-studio { --m-accent: #8aa4e8; --m-accent-ink: #10172a; --m-accent-text: #b5c7f5; --m-accent-soft: rgba(138,164,232,.15); --m-accent-line: rgba(138,164,232,.45); }
+html[data-accent='amber'] .mobile-studio { --m-accent: #e2ad55; --m-accent-ink: #251803; --m-accent-text: #f0c275; --m-accent-soft: rgba(226,173,85,.15); --m-accent-line: rgba(226,173,85,.45); }
+html[data-accent='graphite'] .mobile-studio { --m-accent: #c2c9d0; --m-accent-ink: #171a1e; --m-accent-text: #d7dce1; --m-accent-soft: rgba(194,201,208,.15); --m-accent-line: rgba(194,201,208,.45); }
+html[data-theme='light'][data-accent='cobalt'] .mobile-studio { --m-accent: #4568ae; --m-accent-ink: #fff; --m-accent-text: #365996; --m-accent-soft: rgba(69,104,174,.12); --m-accent-line: rgba(69,104,174,.35); }
+html[data-theme='light'][data-accent='amber'] .mobile-studio { --m-accent: #94620e; --m-accent-ink: #fff; --m-accent-text: #805208; --m-accent-soft: rgba(148,98,14,.12); --m-accent-line: rgba(148,98,14,.35); }
+html[data-theme='light'][data-accent='graphite'] .mobile-studio { --m-accent: #505a65; --m-accent-ink: #fff; --m-accent-text: #404a54; --m-accent-soft: rgba(80,90,101,.12); --m-accent-line: rgba(80,90,101,.35); }
+
+/* 降低透明度偏好必须压过上面的正式主题层：本块放在文件末尾，靠源码顺序胜出。
+   （前面的 @media (prefers-reduced-transparency: reduce) 块被追加层以同优先级覆盖了。） */
+@media (prefers-reduced-transparency: reduce) {
+  .m-context-header {
+    background: var(--m-app);
+  }
+
+  .m-bottom-dock {
+    background: var(--m-surface-2);
+    backdrop-filter: none;
+  }
+}
+
+/* ============================================================================
+   正式版式的最终层（原 formal-overrides.css 全文搬入，未改任何声明）
+   它原本作为最后一个样式表加载以覆盖前面的旧值；搬到这里后仍是移动端样式表的
+   最后一段，而桌面树与移动树互不重叠，所以级联结果与搬移前完全一致。
+   ========================================================================== */
+/* The mobile shell shares the same visual rhythm but keeps touch targets. */
+.mobile-studio {
+  --color-primary: var(--m-accent);
+  --color-primary-content: var(--m-accent-ink);
+}
+
+.mobile-studio .m-library-intro {
+  padding-top: 20px;
+}
+
+.mobile-studio .m-library-intro h1 {
+  font-size: clamp(28px, 8vw, 38px);
+  line-height: 1.05;
+}
+
+.mobile-studio .m-library-stats {
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.mobile-studio .m-section {
+  margin-top: 22px;
+}
+
+@media (max-width: 430px) {
+  .mobile-studio .m-library-intro h1 {
+    font-size: 29px;
+  }
+
+  .mobile-studio .m-library-stats {
+    gap: 11px;
+  }
 }

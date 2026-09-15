@@ -12,8 +12,10 @@ if (!existsSync(wrapperPath)) {
 }
 
 const command = process.platform === 'win32' ? process.env.ComSpec ?? 'cmd.exe' : wrapperPath;
+// 必须传绝对路径：设置了 NoDefaultCurrentDirectoryInExePath 的环境下，cmd 不会
+// 从当前目录解析 gradlew.bat，裸文件名会直接报"不是内部或外部命令"。
 const args = process.platform === 'win32'
-  ? ['/d', '/c', wrapper, '--no-daemon', 'assembleDebug']
+  ? ['/d', '/c', wrapperPath, '--no-daemon', 'assembleDebug']
   : ['--no-daemon', 'assembleDebug'];
 const result = spawnSync(command, args, { cwd: androidDir, stdio: 'inherit' });
 
