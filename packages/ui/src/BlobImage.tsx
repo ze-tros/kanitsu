@@ -78,7 +78,9 @@ export function BlobImage({
       setLoaded({ key: resourceKey, url: next, animate: takeAnimation(resourceKey) });
       return () => releaseObjectUrl(next);
     }
-    const load = thumbnail ? getThumbnailBlob(store, fileRef, thumbnailSize) : Promise.resolve(store.readBlob(fileRef));
+    const load = thumbnail
+      ? getThumbnailBlob(store, fileRef, thumbnailSize, { shouldCancel: () => cancelled })
+      : Promise.resolve(store.readBlob(fileRef));
     load
       .then((blob) => {
         if (cancelled) return;

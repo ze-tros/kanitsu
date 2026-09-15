@@ -13,7 +13,15 @@ import {
   type LogEntry,
   type LogLevel,
 } from '../debugLog';
-import { applyThemeMode, formatBytes, loadThemeMode, type ThemeMode } from './mobileShared';
+import { ACCENT_OPTIONS, type AccentMode } from '../accents';
+import {
+  applyAccentMode,
+  applyThemeMode,
+  formatBytes,
+  loadAccentMode,
+  loadThemeMode,
+  type ThemeMode,
+} from './mobileShared';
 import { Z_SETTINGS } from './zindex';
 
 const LEVEL_LABELS: ReadonlyArray<[LogLevel, string]> = [
@@ -98,10 +106,15 @@ export function MobileSettingsScreen({
   onBack: () => void;
 }) {
   const [theme, setTheme] = useState<ThemeMode>(() => loadThemeMode());
+  const [accent, setAccent] = useState<AccentMode>(() => loadAccentMode());
 
   useEffect(() => {
     applyThemeMode(theme);
   }, [theme]);
+
+  useEffect(() => {
+    applyAccentMode(accent);
+  }, [accent]);
 
   return (
     <div className="m-settings-screen fixed inset-0 flex flex-col" style={{ zIndex: Z_SETTINGS }}>
@@ -134,7 +147,7 @@ export function MobileSettingsScreen({
               <span className="m-settings-row-icon"><SettingsGlyph name="appearance" /></span>
               <span className="m-settings-row-copy">
                 <strong>界面主题</strong>
-                <span>移动端使用固定钴蓝强调色，明暗模式仅切换表面与文字。</span>
+                <span>明暗模式切换表面与文字，主题色在下方单独设置。</span>
               </span>
             </div>
             <div className="m-theme-segment" role="group" aria-label="界面主题">
@@ -151,6 +164,26 @@ export function MobileSettingsScreen({
                   aria-pressed={theme === value}
                   onClick={() => setTheme(value)}
                 >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="m-settings-row is-stacked">
+              <span className="m-settings-row-icon"><SettingsGlyph name="appearance" /></span>
+              <span className="m-settings-row-copy">
+                <strong>主题色</strong>
+                <span>选中状态、关键操作与焦点环使用的强调色。</span>
+              </span>
+            </div>
+            <div className="m-theme-segment is-accent" role="group" aria-label="主题色">
+              {ACCENT_OPTIONS.map(({ value, label }) => (
+                <button
+                  key={value}
+                  className={accent === value ? 'is-active' : ''}
+                  aria-pressed={accent === value}
+                  onClick={() => setAccent(value)}
+                >
+                  <span className={`m-accent-dot is-${value}`} aria-hidden="true" />
                   {label}
                 </button>
               ))}

@@ -39,6 +39,7 @@ import { KanitsuLogo } from '../KanitsuLogo';
 import {
   COVER_THUMBNAIL_SIZE,
   preloadThumbnails,
+  setThumbnailPreloadPaused,
   THUMB_PRIORITY_CURRENT_DIR,
   THUMB_PRIORITY_DIRECTIONAL,
   THUMB_PRIORITY_SUBFOLDER,
@@ -87,8 +88,9 @@ const FOLDER_CAPTION_H = 50;
 // 移动端极高速惯性滚动一帧内可能跨过多行；缓冲 8 行避免视口追上窗口时
 // 露出空白，同时仍只保留有限的图片 DOM。
 const MOBILE_OVERSCAN_ROWS = Math.max(OVERSCAN_ROWS, 8);
+const MOBILE_SCROLL_PRELOAD_RESUME_MS = 180;
 
-type OverlayLayer = 'drawer' | 'sheet' | 'viewer' | 'settings' | 'mine' | 'organize' | 'cover' | 'dialog' | 'report' | 'search';
+type OverlayLayer = 'drawer' | 'sheet' | 'viewer' | 'settings' | 'tools' | 'organize' | 'cover' | 'dialog' | 'report' | 'search';
 type StackEntry = { type: 'folder'; folderId: string } | { type: 'overlay'; layer: OverlayLayer };
 
 interface SheetModel {
@@ -108,10 +110,10 @@ type PromptState =
 type SortMode = 'default' | 'name' | 'date' | 'size';
 type SortDirection = 'asc' | 'desc';
 
-type MineScreenProps = {
+type ToolsScreenProps = {
   onBack: () => void;
   onOpenSettings: () => void;
-  rootFolder: FolderNode | null;
+  onImport: () => void;
   imageCount: number;
   importReport: ImportTask | null;
   lastManifest: OrganizeManifest | null;
@@ -590,10 +592,10 @@ function FolderListRow({
   );
 }
 
-function MobileMineScreen({
+function MobileToolsScreen({
   onBack,
   onOpenSettings,
-  rootFolder,
+  onImport,
   imageCount,
   importReport,
   lastManifest,
@@ -602,7 +604,7 @@ function MobileMineScreen({
   onExport,
   onUndo,
   onShowReport,
-}: MineScreenProps) {
+}: ToolsScreenProps) {
   return (
     <div className="m-mine-screen fixed inset-0 flex flex-col" style={{ zIndex: Z_SETTINGS }}>
       <header className="m-context-header shrink-0" style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}>
@@ -613,8 +615,8 @@ function MobileMineScreen({
             </svg>
           </button>
           <div className="m-context-title">
-            <strong>我的</strong>
-            <span>本地工作区</span>
+            <strong>工具</strong>
+            <span>图库任务与维护</span>
           </div>
           <span className="w-11 h-11 shrink-0" aria-hidden="true" />
         </div>
@@ -622,47 +624,42 @@ function MobileMineScreen({
       <main className="m-mine-content flex-1 overflow-y-auto overscroll-contain">
         <section className="m-mine-hero">
           <span className="m-eyebrow">工作区</span>
-          <h1>我的</h1>
-          <p>管理 Kanitsu 的本地偏好与运行状态。</p>
+          <h1>管理本地图库</h1>
+          <p>导入、整理和导出都集中在这里，任务离开页面后仍可继续。</p>
         </section>
         <section className="m-mine-group">
-          <h2 className="m-settings-group-title">应用</h2>
-          <button className="m-mine-entry" onClick={onOpenSettings}>
-            <span className="m-mine-entry-icon"><MobileIcon name="⚙️" className="w-5 h-5" /></span>
+          <h2 className="m-settings-group-title">图库操作</h2>
+          <button className="m-mine-entry" onClick={onImport}>
+            <span className="m-mine-entry-icon"><MobileIcon name="📁" className="w-5 h-5" /></span>
             <span className="m-mine-entry-copy">
-              <strong>设置</strong>
-              <span>主题、缓存、整理规则与诊断</span>
+              <strong>导入图包</strong>
+              <span>从设备目录复制图片到 Kanitsu</span>
+            </span>
+            <svg viewBox="0 0 24 24" className="m-list-chevron w-4 h-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M9 18l6-6-6-6" />
+            </svg>
+          </button>
+          <button className="m-mine-entry" disabled={imageCount === 0} onClick={onOrganize}>
+            <span className="m-mine-entry-icon"><MobileIcon name="🧹" className="w-5 h-5" /></span>
+            <span className="m-mine-entry-copy">
+              <strong>整理图库</strong>
+              <span>按文件名规则重新分组图片</span>
+            </span>
+            <svg viewBox="0 0 24 24" className="m-list-chevron w-4 h-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M9 18l6-6-6-6" />
+            </svg>
+          </button>
+          <button className="m-mine-entry" disabled={imageCount === 0} onClick={onExport}>
+            <span className="m-mine-entry-icon"><MobileIcon name="⬆️" className="w-5 h-5" /></span>
+            <span className="m-mine-entry-copy">
+              <strong>导出图库</strong>
+              <span>将全部图包导出为 ZIP</span>
             </span>
             <svg viewBox="0 0 24 24" className="m-list-chevron w-4 h-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M9 18l6-6-6-6" />
             </svg>
           </button>
         </section>
-        {rootFolder && (
-          <section className="m-mine-group">
-            <h2 className="m-settings-group-title">图库工具</h2>
-            <button className="m-mine-entry" disabled={imageCount === 0} onClick={onOrganize}>
-              <span className="m-mine-entry-icon"><MobileIcon name="🧹" className="w-5 h-5" /></span>
-              <span className="m-mine-entry-copy">
-                <strong>整理图库</strong>
-                <span>按文件名规则重新分组图片</span>
-              </span>
-              <svg viewBox="0 0 24 24" className="m-list-chevron w-4 h-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M9 18l6-6-6-6" />
-              </svg>
-            </button>
-            <button className="m-mine-entry" disabled={imageCount === 0} onClick={onExport}>
-              <span className="m-mine-entry-icon"><MobileIcon name="⬆️" className="w-5 h-5" /></span>
-              <span className="m-mine-entry-copy">
-                <strong>导出图库</strong>
-                <span>将全部图包导出为 ZIP</span>
-              </span>
-              <svg viewBox="0 0 24 24" className="m-list-chevron w-4 h-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M9 18l6-6-6-6" />
-              </svg>
-            </button>
-          </section>
-        )}
         {(lastManifest || importReport) && (
           <section className="m-mine-group">
             <h2 className="m-settings-group-title">最近活动</h2>
@@ -692,6 +689,19 @@ function MobileMineScreen({
             )}
           </section>
         )}
+        <section className="m-mine-group">
+          <h2 className="m-settings-group-title">应用</h2>
+          <button className="m-mine-entry" onClick={onOpenSettings}>
+            <span className="m-mine-entry-icon"><MobileIcon name="⚙️" className="w-5 h-5" /></span>
+            <span className="m-mine-entry-copy">
+              <strong>设置</strong>
+              <span>主题、缓存、整理规则与诊断</span>
+            </span>
+            <svg viewBox="0 0 24 24" className="m-list-chevron w-4 h-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M9 18l6-6-6-6" />
+            </svg>
+          </button>
+        </section>
       </main>
     </div>
   );
@@ -805,7 +815,7 @@ export function MobileApp({
   const [sheet, setSheet] = useState<SheetModel | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
   const [promptState, setPromptState] = useState<PromptState | null>(null);
-  const [showMine, setShowMine] = useState(false);
+  const [showTools, setShowTools] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [coverPickerFolder, setCoverPickerFolder] = useState<FolderNode | null>(null);
   // 多选 / 批量操作
@@ -1028,8 +1038,8 @@ export function MobileApp({
       case 'settings':
         setShowSettings(false);
         break;
-      case 'mine':
-        setShowMine(false);
+      case 'tools':
+        setShowTools(false);
         break;
       case 'organize':
         setOrganizePreview(null);
@@ -1227,9 +1237,9 @@ export function MobileApp({
     if (!replaceOverlay('drawer', 'settings')) openOverlay('settings');
   }, [openOverlay, replaceOverlay]);
 
-  const openMine = useCallback(() => {
-    setShowMine(true);
-    openOverlay('mine');
+  const openTools = useCallback(() => {
+    setShowTools(true);
+    openOverlay('tools');
   }, [openOverlay]);
 
   const goUp = useCallback(() => {
@@ -1259,6 +1269,7 @@ export function MobileApp({
   const mainScrollRef = useRef<HTMLDivElement>(null);
   const scrollPositionsRef = useRef(new Map<string, number>());
   const scrollSaveFrameRef = useRef<number | null>(null);
+  const scrollPreloadResumeTimerRef = useRef<number | null>(null);
   const virtualWindowKeyRef = useRef('');
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportH, setViewportH] = useState(0);
@@ -1281,6 +1292,16 @@ export function MobileApp({
   const onMainScroll = useCallback(() => {
     const el = mainScrollRef.current;
     if (!el) return;
+    // 快速滚动时只保留可见/方向预取，暂停当前目录和全库预热，避免后台
+    // 请求占满桥接与原生解码时隙。滚动停止一小段时间后再恢复。
+    setThumbnailPreloadPaused(true);
+    if (scrollPreloadResumeTimerRef.current != null) {
+      window.clearTimeout(scrollPreloadResumeTimerRef.current);
+    }
+    scrollPreloadResumeTimerRef.current = window.setTimeout(() => {
+      scrollPreloadResumeTimerRef.current = null;
+      setThumbnailPreloadPaused(false);
+    }, MOBILE_SCROLL_PRELOAD_RESUME_MS);
     const st = el.scrollTop;
     // 滚动位置本身不需要驱动 React；只有虚拟行窗口变化时才更新，避免
     // 高刷设备每个滚动事件都重渲染整页。
@@ -1322,6 +1343,16 @@ export function MobileApp({
     viewportH,
     currentFolderId,
   ]);
+
+  useEffect(() => {
+    return () => {
+      if (scrollPreloadResumeTimerRef.current != null) {
+        window.clearTimeout(scrollPreloadResumeTimerRef.current);
+        scrollPreloadResumeTimerRef.current = null;
+      }
+      setThumbnailPreloadPaused(false);
+    };
+  }, []);
 
   useEffect(() => {
     const el = mainScrollRef.current;
@@ -1472,7 +1503,12 @@ export function MobileApp({
       setImportReport(task);
       const next = await refresh();
       const topFolder = Object.values(next.folders).find((f) => f.parentId === next.rootId && f.name === task.targetTopFolder);
-      if (topFolder) navigateToFolder(topFolder.id);
+      if (topFolder) {
+        // 工具页是全屏 overlay：先关层再跳转，否则图包条目会压在 overlay 之上，
+        // 关闭工具页时被 slice 一并丢弃，返回栈与当前目录脱节（硬件返回键会直接退出应用）。
+        closeOverlay('tools');
+        navigateToFolder(topFolder.id);
+      }
       notify(
         task.skippedCount > 0
           ? `导入完成：复制 ${task.copiedImageCount} 张，跳过 ${task.skippedCount} 张`
@@ -1486,7 +1522,7 @@ export function MobileApp({
       setImporting(false);
       setImportProgress(null);
     }
-  }, [importing, picker, store, refresh, navigateToFolder, notify]);
+  }, [importing, picker, store, refresh, navigateToFolder, notify, closeOverlay]);
 
   const openOrganizeFor = useCallback(
     (folder: FolderNode) => {
@@ -2436,9 +2472,9 @@ export function MobileApp({
                 <MobileIcon name="🏠" className="w-5 h-5" />
                 <span>图库</span>
               </button>
-              <button className="m-dock-button" onClick={openMine}>
-                <MobileIcon name="👤" className="w-5 h-5" />
-                <span>我的</span>
+              <button className="m-dock-button" onClick={openTools}>
+                <MobileIcon name="📐" className="w-5 h-5" />
+                <span>工具</span>
               </button>
             </>
           ) : (
@@ -2559,11 +2595,11 @@ export function MobileApp({
       )}
 
       {/* 设置 */}
-      {showMine && (
-        <MobileMineScreen
-          onBack={() => closeOverlay('mine')}
+      {showTools && (
+        <MobileToolsScreen
+          onBack={() => closeOverlay('tools')}
           onOpenSettings={openSettings}
-          rootFolder={rootFolder}
+          onImport={() => void handleImport()}
           imageCount={libraryStats.imageCount}
           importReport={importReport}
           lastManifest={lastManifest}

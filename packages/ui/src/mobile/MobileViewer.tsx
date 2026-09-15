@@ -191,7 +191,7 @@ export function MobileViewer({
       }
       if (!existing?.thumbUrl && !loadingThumbsRef.current.has(image.id)) {
         loadingThumbsRef.current.add(image.id);
-        getThumbnailBlob(store, toFileRef(image), 512)
+        getThumbnailBlob(store, toFileRef(image), 512, { shouldCancel: () => !mountedRef.current })
           .then((blob) => {
             if (!mountedRef.current) return;
             // 原图已经加载完成时，缩略图请求可能刚好才返回；此时不再
@@ -1114,7 +1114,7 @@ function FilmThumb({ store, image }: { store: LibraryStore; image: ImageEntry })
   useEffect(() => {
     let cancelled = false;
     let objUrl: string | null = null;
-    getThumbnailBlob(store, toFileRef(image), 128)
+    getThumbnailBlob(store, toFileRef(image), 128, { shouldCancel: () => cancelled })
       .then((blob) => {
         if (cancelled) return;
         objUrl = acquireObjectUrl(blob);

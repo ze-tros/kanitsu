@@ -9,6 +9,8 @@ import {
 
 test('设置页正文里的文案都能搜到对应标签页', () => {
   // 回归：旧实现只和一份硬编码整串比对，页面上的这些文案一律搜不到。
+  // 注意 activeTab 必须取「另一个」标签页，否则 filterSettingsTabs 会无条件保留它，
+  // 断言就退化成永真（测不出关键词是否真的命中）。
   for (const [query, expected] of [
     ['主题色', 'general'],
     ['浅色', 'general'],
@@ -17,9 +19,18 @@ test('设置页正文里的文案都能搜到对应标签页', () => {
     ['智能整理', 'organize'],
     ['运行诊断', 'debug'],
     ['缓存管理', 'cache'],
+    // 比关键词更长的查询（双向匹配）：面板里的真实文案也要能搜到。
+    ['累计掉帧', 'debug'],
+    ['主进程缓存条目', 'debug'],
+    ['缩略图缓存命中率', 'cache'],
+    ['平均帧间隔', 'debug'],
+    ['清除缓存', 'cache'],
+    ['未命中', 'cache'],
+    ['内置规则', 'organize'],
   ] as const) {
+    const otherTab = SETTINGS_TABS.find((tab) => tab.id !== expected)!.id;
     assert.ok(
-      filterSettingsTabs(query, expected).some((tab) => tab.id === expected),
+      filterSettingsTabs(query, otherTab).some((tab) => tab.id === expected),
       `${query} 应命中 ${expected}`,
     );
   }

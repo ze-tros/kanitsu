@@ -1,3 +1,4 @@
+export * from './accents';
 export * from './BlobImage';
 export * from './KanitsuLogo';
 export * from './CardMotion';
@@ -11,4 +12,5 @@ export * from './NavButton';
 export * from './OrganizePreview';
 export * from './OrganizeRulesModal';
 export * from './SettingsPage';
+export * from './settingsTabs';
 export * from './SidebarResizeHandle';

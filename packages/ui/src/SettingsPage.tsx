@@ -4,12 +4,23 @@ import {
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react';
-import { ArrowLeft, Bug, Database, MagicWand, Palette } from '@phosphor-icons/react';
+import { ArrowLeft, Bug, Database, MagicWand, MagnifyingGlass, Palette } from '@phosphor-icons/react';
 import type { CustomOrganizeRule } from '../../organizer/src/index';
 import type { ThumbnailDebugStats, ClearCacheResult } from '../../fs-adapter/src/electron';
 import { OrganizeRulesManager } from './OrganizeRulesModal';
 import { SidebarResizeHandle } from './SidebarResizeHandle';
-import { DesktopWindowControls } from './DesktopWindowControls';
+import {
+  ACCENT_OPTIONS,
+  DEFAULT_ACCENT,
+  isAccentMode,
+  type AccentMode,
+} from './accents';
+import {
+  filterSettingsTabs,
+  hasSettingsTabMatches,
+  SETTINGS_TABS,
+  type SettingsTabId,
+} from './settingsTabs';
 import { getRendererThumbnailStats, clearThumbnailCache, type RendererThumbnailStats } from './thumbnailCache';
 import { startFpsMonitor, stopFpsMonitor, resetFpsMonitor, type FpsStats } from './fpsMonitor';
 import {
@@ -23,18 +34,16 @@ import {
   type LogLevel,
 } from './debugLog';
 
-export type ThemeOption = 'light' | 'dark';
-export type AccentOption = 'cobalt' | 'coral' | 'amber' | 'graphite';
+export type ThemeOption = 'light' | 'dark' | 'system';
+export type AccentOption = AccentMode;
 
-const ACCENT_OPTIONS: ReadonlyArray<{
-  value: AccentOption;
-  label: string;
-}> = [
-  { value: 'cobalt', label: '岩蓝' },
-  { value: 'coral', label: '朱砂' },
-  { value: 'amber', label: '琥珀' },
-  { value: 'graphite', label: '墨灰' },
-];
+/** 标签页图标只属于视图层，留在组件里，纯数据模块保持无 React 依赖。 */
+const TAB_ICONS: Record<SettingsTabId, typeof Palette> = {
+  general: Palette,
+  organize: MagicWand,
+  debug: Bug,
+  cache: Database,
+};
 
 function handleRadioNavigation<T extends string>(
   event: ReactKeyboardEvent<HTMLButtonElement>,
@@ -68,8 +77,11 @@ type SettingsPageProps = {
   onChange: (rules: CustomOrganizeRule[]) => void;
   onBack: () => void;
   runtimeLabel?: string;
+  libraryBytes: number;
+  libraryFileCount: number;
   sidebarWidth: number;
   onSidebarWidthChange: (width: number) => void;
+  sidebarHidden?: boolean;
   theme: ThemeOption;
   accent: AccentOption;
   onThemeChange: (theme: ThemeOption) => void;
@@ -81,52 +93,69 @@ export function SettingsPage({
   onChange,
   onBack,
   runtimeLabel,
+  libraryBytes,
+  libraryFileCount,
   sidebarWidth,
   onSidebarWidthChange,
+  sidebarHidden = false,
   theme,
   accent,
   onThemeChange,
   onAccentChange,
 }: SettingsPageProps) {
-  const [activeTab, setActiveTab] = useState<'general' | 'organize' | 'debug' | 'cache'>('general');
-  const pageTitle = {
-    general: '界面与主题',
-    organize: '整理规则',
-    debug: '运行诊断',
-    cache: '缓存管理',
-  }[activeTab];
+  const [activeTab, setActiveTab] = useState<SettingsTabId>('general');
+  const [searchQuery, setSearchQuery] = useState('');
+  const pageTitle = SETTINGS_TABS.find((tab) => tab.id === activeTab)?.title ?? '';
+  // 当前标签页始终保留在导航里（见 filterSettingsTabs），避免正文与导航割裂。
+  const navTabs = filterSettingsTabs(searchQuery, activeTab);
+  const hasMatches = hasSettingsTabMatches(searchQuery);
 
   return (
-    <div className="desktop-settings-page titlebar-no-drag">
-      <header className="desktop-settings-header titlebar-drag">
-        <button type="button" className="desktop-icon-button titlebar-no-drag" onClick={onBack} aria-label="返回图库" title="返回图库">
-          <ArrowLeft size={17} />
-        </button>
-        <h1 className="titlebar-no-drag">设置</h1>
-        <DesktopWindowControls />
-      </header>
-
+    <div className={`desktop-settings-page titlebar-no-drag${sidebarHidden ? ' is-sidebar-hidden' : ''}`}>
       <div
         className="desktop-settings-body"
         style={{ '--desktop-settings-sidebar-width': `${Math.min(sidebarWidth, 360)}px` } as CSSProperties}
       >
         <aside className="desktop-settings-sidebar">
           <SidebarResizeHandle width={sidebarWidth} onResize={onSidebarWidthChange} max={360} />
+          <button type="button" className="desktop-settings-back" onClick={onBack}>
+            <ArrowLeft size={16} aria-hidden="true" />
+            <span>返回图库</span>
+          </button>
+          <label className="desktop-settings-search">
+            <MagnifyingGlass size={15} aria-hidden="true" />
+            <input
+              type="search"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="搜索设置…"
+              aria-label="搜索设置"
+            />
+          </label>
           <div className="desktop-panel-label">设置项</div>
           <nav className="desktop-settings-nav" aria-label="设置项">
-            <button type="button" className={activeTab === 'general' ? 'is-active' : ''} aria-current={activeTab === 'general' ? 'page' : undefined} onClick={() => setActiveTab('general')}>
-              <Palette size={17} /><span>通用</span>
-            </button>
-            <button type="button" className={activeTab === 'organize' ? 'is-active' : ''} aria-current={activeTab === 'organize' ? 'page' : undefined} onClick={() => setActiveTab('organize')}>
-              <MagicWand size={17} /><span>整理规则</span>
-            </button>
-            <button type="button" className={activeTab === 'debug' ? 'is-active' : ''} aria-current={activeTab === 'debug' ? 'page' : undefined} onClick={() => setActiveTab('debug')}>
-              <Bug size={17} /><span>调试</span>
-            </button>
-            <button type="button" className={activeTab === 'cache' ? 'is-active' : ''} aria-current={activeTab === 'cache' ? 'page' : undefined} onClick={() => setActiveTab('cache')}>
-              <Database size={17} /><span>缓存</span>
-            </button>
+            {navTabs.map((tab) => {
+              const Icon = TAB_ICONS[tab.id];
+              const isActive = tab.id === activeTab;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  className={isActive ? 'is-active' : ''}
+                  aria-current={isActive ? 'page' : undefined}
+                  onClick={() => setActiveTab(tab.id)}
+                >
+                  <Icon size={17} /><span>{tab.label}</span>
+                </button>
+              );
+            })}
           </nav>
+          {/* 空状态常驻挂载、用 role="status" 播报，避免只靠视觉提示。
+              注意它仍在 .desktop-settings-sidebar 内，≤680px 该容器会变成横向标签条，
+              此时提示文字位于标签条末尾（窄屏可能要横向滚动才看得到），屏幕阅读器不受影响。 */}
+          <p className="desktop-settings-empty" role="status">
+            {hasMatches ? '' : '没有匹配的设置项'}
+          </p>
         </aside>
 
         <main className="desktop-settings-main">
@@ -137,9 +166,9 @@ export function SettingsPage({
                 <section className="desktop-settings-section">
                   <header className="desktop-settings-section-heading"><h2>外观</h2></header>
                   <div className="desktop-settings-row">
-                    <div><strong>界面模式</strong><span>浅色或深色</span></div>
+                    <div><strong>界面模式</strong><span>浅色、深色或跟随系统</span></div>
                     <div className="desktop-settings-mode-control" role="radiogroup" aria-label="界面模式">
-                      {([['light', '浅色'], ['dark', '深色']] as const).map(([value, label]) => (
+                      {([['dark', '深色'], ['light', '浅色'], ['system', '跟随系统']] as const).map(([value, label]) => (
                         <button
                           key={value}
                           type="button"
@@ -150,7 +179,7 @@ export function SettingsPage({
                           onClick={() => onThemeChange(value)}
                           onKeyDown={(event) => handleRadioNavigation(
                             event,
-                            ['light', 'dark'],
+                            ['dark', 'light', 'system'],
                             theme,
                             onThemeChange,
                           )}
@@ -194,6 +223,7 @@ export function SettingsPage({
                 <section className="desktop-settings-section">
                   <header className="desktop-settings-section-heading"><h2>应用</h2></header>
                   <div className="desktop-settings-row"><div><strong>运行环境</strong></div><strong>{runtimeLabel ?? '—'}</strong></div>
+                  <div className="desktop-settings-row"><div><strong>图库占用</strong><span>已索引的本地文件总量</span></div><strong>{fmtBytes(libraryBytes)} · {libraryFileCount.toLocaleString('zh-CN')} 个文件</strong></div>
                   <div className="desktop-settings-row"><div><strong>自定义整理规则</strong></div><strong>{rules.length} 条</strong></div>
                 </section>
               </>

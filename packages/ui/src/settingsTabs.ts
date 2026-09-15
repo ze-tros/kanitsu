@@ -5,6 +5,8 @@
  * 做子串匹配，因此页面上真实存在的文案（如「主题色」「图库占用」「运行诊断」）都能搜到，
  * 不再依赖一份和 UI 脱节的硬编码字符串。
  */
+import { ACCENT_OPTIONS } from './accents';
+
 export type SettingsTabId = 'general' | 'organize' | 'debug' | 'cache';
 
 export interface SettingsTab {
@@ -24,7 +26,9 @@ export const SETTINGS_TABS: ReadonlyArray<SettingsTab> = [
     title: '界面与主题',
     keywords: [
       '界面与主题', '外观', '界面模式', '深色', '浅色', '跟随系统', '主题色',
-      '岩蓝', '朱砂', '琥珀', '墨灰', '应用', '运行环境', '图库占用', '自定义整理规则',
+      // 主题色的显示名直接取自共享清单，避免改名后搜索失效。
+      ...ACCENT_OPTIONS.map((option) => option.label),
+      '应用', '运行环境', '图库占用', '自定义整理规则',
     ],
   },
   {
@@ -38,25 +42,35 @@ export const SETTINGS_TABS: ReadonlyArray<SettingsTab> = [
     label: '调试',
     title: '运行诊断',
     keywords: [
-      '运行诊断', '帧率', 'fps', '掉帧', '卡顿', '滚动', '滚动回调', '调试选项',
-      '日志', '日志等级', '缩略图缓存',
+      '运行诊断', '帧率', '帧间隔', 'fps', '掉帧', '卡顿', '滚动', '滚动回调', '调试选项',
+      '日志', '日志等级', '缩略图缓存', '队列积压', '解码', 'worker', '主进程缓存',
+      '磁盘缓存', '样本',
     ],
   },
   {
     id: 'cache',
     label: '缓存',
     title: '缓存管理',
-    keywords: ['缓存管理', '缩略图缓存', '内存缓存', '磁盘缓存', '清理缓存', '命中率'],
+    keywords: [
+      '缓存管理', '缩略图缓存', '内存缓存', '磁盘缓存', '清理缓存', '命中率', '未命中',
+      '缓存条目', '容量上限', '预取',
+    ],
   },
 ];
+
+/** 双向子串匹配：`主题` 命中「主题色」，`累计掉帧` 命中关键词「掉帧」。空查询命中全部。 */
+function matches(haystack: string, query: string): boolean {
+  const text = haystack.toLowerCase();
+  return text.includes(query) || query.includes(text);
+}
 
 /** 大小写不敏感的子串匹配；空查询视为命中全部。 */
 export function settingsTabMatches(tab: SettingsTab, query: string): boolean {
   const normalized = query.trim().toLowerCase();
   if (!normalized) return true;
-  return tab.label.toLowerCase().includes(normalized)
-    || tab.title.toLowerCase().includes(normalized)
-    || tab.keywords.some((keyword) => keyword.toLowerCase().includes(normalized));
+  return matches(tab.label, normalized)
+    || matches(tab.title, normalized)
+    || tab.keywords.some((keyword) => matches(keyword, normalized));
 }
 
 /**

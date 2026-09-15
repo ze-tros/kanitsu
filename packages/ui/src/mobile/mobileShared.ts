@@ -21,6 +21,8 @@ export {
   prefetchOriginal,
 } from '../LibraryBrowser';
 
+import { DEFAULT_ACCENT, isAccentMode, type AccentMode } from '../accents';
+
 /** 图片网格：3 列方形卡片（相册标准密度），卡片间距。 */
 export const IMAGE_GRID = { cols: 3, gap: 3 } as const;
 /** 文件夹网格：2 列卡片。 */
@@ -78,13 +80,37 @@ export function applyThemeMode(mode: ThemeMode): void {
   }
 }
 
+const ACCENT_KEY = 'kanitsu-accent';
+
+/** 读取主题色偏好（与桌面端共用 kanitsu-accent 键），无有效值时用默认朱砂。 */
+export function loadAccentMode(): AccentMode {
+  try {
+    const value = localStorage.getItem(ACCENT_KEY);
+    if (isAccentMode(value)) return value;
+  } catch {
+    // ignore
+  }
+  return DEFAULT_ACCENT;
+}
+
+/** 应用主题色：写 data-accent（mobile.css 的 accent 覆盖规则据此生效）并持久化。 */
+export function applyAccentMode(mode: AccentMode): void {
+  document.documentElement.setAttribute('data-accent', mode);
+  try {
+    localStorage.setItem(ACCENT_KEY, mode);
+  } catch {
+    // ignore
+  }
+}
+
 /**
- * 在移动端根视图挂载时立即恢复主题，并在「跟随系统」模式下监听系统主题变化。
+ * 在移动端根视图挂载时立即恢复主题与主题色，并在「跟随系统」模式下监听系统主题变化。
  * 监听器每次都读取当前偏好，避免用户切到固定主题后被后续系统事件覆盖。
  */
 export function startThemeModeSync(): () => void {
   const media = window.matchMedia('(prefers-color-scheme: light)');
   applyThemeMode(loadThemeMode());
+  applyAccentMode(loadAccentMode());
   const handleChange = (): void => {
     if (loadThemeMode() === 'system') applyThemeMode('system');
   };

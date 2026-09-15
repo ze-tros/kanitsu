@@ -1658,6 +1658,25 @@ html[data-theme='light'] .mobile-studio {
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--m-line-strong) 62%, transparent);
 }
 
+/* 主题色：四个选项，按钮里带一个色点（取值与桌面设置页的色板一致）。 */
+.m-theme-segment.is-accent {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.m-accent-dot {
+  width: 7px;
+  height: 7px;
+  display: inline-block;
+  margin-right: 5px;
+  border-radius: 50%;
+  vertical-align: middle;
+}
+
+.m-accent-dot.is-cobalt { background: #5879bc; }
+.m-accent-dot.is-coral { background: #c65b50; }
+.m-accent-dot.is-amber { background: #b47c24; }
+.m-accent-dot.is-graphite { background: #656d76; }
+
 .m-switch {
   position: relative;
   width: 40px;

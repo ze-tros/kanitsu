@@ -7,13 +7,13 @@ import {
   useRef,
   useState,
   type MouseEvent as ReactMouseEvent,
+  type RefObject,
   type ReactNode,
 } from 'react';
 import {
   ArrowClockwise,
   ArrowLeft,
   ArrowRight,
-  ArrowUp,
   ArrowsOut,
   CaretRight,
   Check,
@@ -26,7 +26,6 @@ import {
   FolderOpen,
   FolderPlus,
   GearSix,
-  HardDrive,
   House,
   ImagesSquare,
   ImageSquare,
@@ -108,6 +107,7 @@ import { CoverPickerModal } from './CoverPickerModal';
 import { loadCustomRules, saveCustomRules } from './OrganizeRulesModal';
 import { OrganizePreview } from './OrganizePreview';
 import { SidebarResizeHandle } from './SidebarResizeHandle';
+import { DEFAULT_ACCENT, isAccentMode } from './accents';
 import { SettingsPage, type AccentOption, type ThemeOption } from './SettingsPage';
 import { DesktopWindowControls } from './DesktopWindowControls';
 import {
@@ -132,6 +132,7 @@ export type { GalleryMetrics } from './virtualWindow';
 
 type ViewMode = 'grid' | 'list';
 type SortMode = 'name' | 'size' | 'modified';
+type ResolvedTheme = 'light' | 'dark';
 
 function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
@@ -302,12 +303,16 @@ export function LibraryBrowser({
   const [searchQuery, setSearchQuery] = useState('');
   const [theme, setTheme] = useState<ThemeOption>(() => {
     const saved = localStorage.getItem('kanitsu-theme');
-    if (saved === 'light' || saved === 'dark') return saved;
-    return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+    if (saved === 'light' || saved === 'dark' || saved === 'system') return saved;
+    // 与移动端 loadThemeMode 保持一致：首启跟随系统深浅色。
+    return 'system';
   });
+  const [systemTheme, setSystemTheme] = useState<ResolvedTheme>(() =>
+    window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark',
+  );
   const [accent, setAccent] = useState<AccentOption>(() => {
     const saved = localStorage.getItem('kanitsu-accent');
-    return saved === 'coral' || saved === 'amber' || saved === 'graphite' ? saved : 'cobalt';
+    return isAccentMode(saved) ? saved : DEFAULT_ACCENT;
   });
   const [viewMode, setViewMode] = useState<ViewMode>(() =>
     localStorage.getItem('kanitsu-view-mode') === 'list' ? 'list' : 'grid',
@@ -326,11 +331,12 @@ export function LibraryBrowser({
   });
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     const value = Number(localStorage.getItem('kanitsu-sidebar-width'));
-    return Number.isFinite(value) && value >= 200 ? Math.min(value, 360) : 288;
+    return Number.isFinite(value) && value >= 200 ? Math.min(value, 360) : 304;
   });
   const [customRules, setCustomRules] = useState<CustomOrganizeRule[]>(() => loadCustomRules());
   const [showSettings, setShowSettings] = useState(false);
   const settingsButtonRef = useRef<HTMLButtonElement>(null);
+  const sidebarScrollRef = useRef<HTMLDivElement>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuModel | null>(null);
   const [pinnedCovers, setPinnedCovers] = useState<Record<string, string>>(() => loadPinnedCovers());
   const [coverPickerFolder, setCoverPickerFolder] = useState<FolderNode | null>(null);
@@ -395,12 +401,27 @@ export function LibraryBrowser({
   }, [inspectorOpen, viewMode]);
 
   useEffect(() => {
-    document.documentElement.dataset.theme = theme;
+    const media = window.matchMedia('(prefers-color-scheme: light)');
+    const handleSystemThemeChange = (event: MediaQueryListEvent): void => {
+      setSystemTheme(event.matches ? 'light' : 'dark');
+    };
+    media.addEventListener?.('change', handleSystemThemeChange);
+    return () => media.removeEventListener?.('change', handleSystemThemeChange);
+  }, []);
+
+  const effectiveTheme: ResolvedTheme = theme === 'system' ? systemTheme : theme;
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = effectiveTheme;
     document.documentElement.dataset.accent = accent;
-    document.documentElement.style.colorScheme = theme;
-    localStorage.setItem('kanitsu-theme', theme);
-    localStorage.setItem('kanitsu-accent', accent);
-  }, [accent, theme]);
+    document.documentElement.style.colorScheme = effectiveTheme;
+    try {
+      localStorage.setItem('kanitsu-theme', theme);
+      localStorage.setItem('kanitsu-accent', accent);
+    } catch {
+      // Ignore storage errors.
+    }
+  }, [accent, effectiveTheme, theme]);
 
   // Startup: load the cached index (no full re-scan). Fallback scans + persists.
   useEffect(() => {
@@ -843,11 +864,10 @@ export function LibraryBrowser({
 
   const selectedFolder = snapshot?.folders[selectedFolderId || snapshot?.rootId || ''] ?? null;
   const rootFolder = snapshot?.folders[snapshot.rootId] ?? null;
-  const selectedParentFolder = selectedFolder?.parentId ? snapshot?.folders[selectedFolder.parentId] ?? null : null;
   const runtimeLabel =
     (window as { kanitsuDesktop?: { platform?: string } }).kanitsuDesktop?.platform === 'electron'
-      ? 'Electron 本地图库'
-      : 'Web 演示图库';
+      ? 'Electron'
+      : 'Web';
   const isRootSelected = !selectedFolderId || selectedFolderId === snapshot?.rootId;
   const selectedImages = useMemo(
     () => folderImages.filter((image) => selectedImageIds.has(image.id)),
@@ -997,12 +1017,6 @@ export function LibraryBrowser({
       window.removeEventListener('auxclick', onSideButton);
     };
   }, [viewerImageId, folderImages, handleNavBack, handleNavForward, showSettings]);
-
-  const handleGoUp = useCallback(() => {
-    if (!snapshot || !selectedFolder?.parentId) return;
-    const parent = snapshot.folders[selectedFolder.parentId];
-    if (parent) handleSelectFolder(parent);
-  }, [snapshot, selectedFolder, handleSelectFolder]);
 
   const handleGoRoot = useCallback(() => {
     if (rootFolder) handleSelectFolder(rootFolder);
@@ -1496,29 +1510,54 @@ export function LibraryBrowser({
     ? `${childFolders.length} 个图包 · ${allLibraryImages.length} 个文件 · ${formatBytes(libraryBytes)}`
     : `${selectedFolder?.directImageCount ?? 0} 张直属图片 · ${selectedFolder?.childCount ?? 0} 个子图包 · ${formatBytes(folderBytes)}`;
 
+  const titlebarNavigation = (
+    <>
+      <DesktopIconButton label={sidebarHidden ? '显示侧栏' : '隐藏侧栏'} onClick={() => setSidebarHidden((value) => !value)}>
+        <SidebarSimple size={17} />
+      </DesktopIconButton>
+      <DesktopIconButton label="后退" disabled={!canGoBack(nav)} onClick={handleNavBack}><ArrowLeft size={16} /></DesktopIconButton>
+      <DesktopIconButton label="前进" disabled={!canGoForward(nav)} onClick={handleNavForward}><ArrowRight size={16} /></DesktopIconButton>
+    </>
+  );
+
   if (showSettings) {
     return (
       <div
-        className="desktop-library app-shell h-screen"
+        className="desktop-library app-shell flex h-screen flex-col"
         data-view={viewMode}
         data-sidebar={sidebarHidden ? 'closed' : 'open'}
         data-inspector={inspectorOpen ? 'open' : 'closed'}
       >
-        <SettingsPage
-          rules={customRules}
-          onChange={handleCustomRulesChange}
-          onBack={() => {
-            setShowSettings(false);
-            requestAnimationFrame(() => settingsButtonRef.current?.focus());
-          }}
-          runtimeLabel={runtimeLabel}
-          sidebarWidth={sidebarWidth}
-          onSidebarWidthChange={setSidebarWidth}
-          theme={theme}
-          accent={accent}
+        <TitleBar
+          navigation={titlebarNavigation}
+          searchQuery={searchQuery}
+          onSearchChange={setSearchQuery}
+          searchPlaceholder="搜索图库"
+          theme={effectiveTheme}
           onThemeChange={setTheme}
-          onAccentChange={setAccent}
+          busy={busy}
+          onImport={() => void handleAdd()}
         />
+        <div className="desktop-content-shell desktop-settings-shell flex-1 min-h-0">
+          <SettingsPage
+            rules={customRules}
+            onChange={handleCustomRulesChange}
+            onBack={() => {
+              setShowSettings(false);
+              requestAnimationFrame(() => settingsButtonRef.current?.focus());
+            }}
+            runtimeLabel={runtimeLabel}
+            libraryBytes={libraryBytes}
+            libraryFileCount={allLibraryImages.length}
+            sidebarWidth={sidebarWidth}
+            onSidebarWidthChange={setSidebarWidth}
+            sidebarHidden={sidebarHidden}
+            theme={theme}
+            accent={accent}
+            onThemeChange={setTheme}
+            onAccentChange={setAccent}
+          />
+        </div>
       </div>
     );
   }
@@ -1531,10 +1570,11 @@ export function LibraryBrowser({
       data-inspector={inspectorOpen ? 'open' : 'closed'}
     >
       <TitleBar
+        navigation={titlebarNavigation}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
         searchPlaceholder={isRootSelected ? '搜索图包' : '搜索当前图包'}
-        theme={theme}
+        theme={effectiveTheme}
         onThemeChange={setTheme}
         busy={busy}
         onImport={() => void handleAdd()}
@@ -1546,14 +1586,6 @@ export function LibraryBrowser({
         <section className="desktop-workspace">
           <header className="desktop-workspace-header">
             <div className="desktop-workspace-nav">
-              <div className="desktop-history-actions">
-                <DesktopIconButton label={sidebarHidden ? '显示侧栏' : '隐藏侧栏'} onClick={() => setSidebarHidden((value) => !value)}>
-                  <SidebarSimple size={17} />
-                </DesktopIconButton>
-                <DesktopIconButton label="后退" disabled={!canGoBack(nav)} onClick={handleNavBack}><ArrowLeft size={16} /></DesktopIconButton>
-                <DesktopIconButton label="前进" disabled={!canGoForward(nav)} onClick={handleNavForward}><ArrowRight size={16} /></DesktopIconButton>
-                <DesktopIconButton label="上一级图包" disabled={!selectedParentFolder} onClick={handleGoUp}><ArrowUp size={16} /></DesktopIconButton>
-              </div>
               <nav className="desktop-breadcrumbs" aria-label="面包屑">
                 {crumbs.map((crumb, index) => {
                   const label = index === 0 ? '全部图包' : crumb.name;
@@ -1823,11 +1855,12 @@ export function LibraryBrowser({
         <label htmlFor="app-drawer" className="drawer-overlay" aria-label="关闭图包导航"></label>
         <aside className="desktop-sidebar" style={{ width: sidebarWidth }} aria-label="图包导航">
           <SidebarResizeHandle width={sidebarWidth} onResize={setSidebarWidth} max={360} />
-          <div className="desktop-sidebar-heading">
-            <div><span>本地图库</span><strong>我的图包</strong></div>
-            <DesktopIconButton label="新建子图包" disabled={!selectedFolder} onClick={() => selectedFolder && handleCreateSubfolder(selectedFolder)}><FolderPlus size={16} /></DesktopIconButton>
-          </div>
-          <nav className="desktop-sidebar-primary" aria-label="主要功能">
+          <div ref={sidebarScrollRef} className="desktop-sidebar-scroll">
+            <div className="desktop-sidebar-heading">
+              <div><span>本地图库</span><strong>我的图包</strong></div>
+              <DesktopIconButton label="新建子图包" disabled={!selectedFolder} onClick={() => selectedFolder && handleCreateSubfolder(selectedFolder)}><FolderPlus size={16} /></DesktopIconButton>
+            </div>
+            <nav className="desktop-sidebar-primary" aria-label="主要功能">
             {rootFolder && (
               <button
                 type="button"
@@ -1835,49 +1868,48 @@ export function LibraryBrowser({
                 onClick={() => handleSelectFolder(rootFolder)}
                 onContextMenu={(event) => openContextMenu(event, buildFolderMenu(rootFolder))}
               >
-                <ImagesSquare size={18} weight="duotone" /><span>全部图包</span><strong>{rootFolder.childCount}</strong>
+                <ImagesSquare size={18} weight="duotone" /><span>全部图包</span>
               </button>
             )}
             <button type="button" className="desktop-sidebar-nav-item" disabled={!selectedFolder} onClick={openOrganizePreview}>
-              <MagicWand size={18} /><span>智能整理</span><CaretRight size={13} />
+              <MagicWand size={18} /><span>智能整理</span>
             </button>
             <button type="button" className="desktop-sidebar-nav-item" disabled={!selectedFolder || busy} onClick={() => void refresh()}>
-              <ArrowClockwise size={18} /><span>刷新图库</span><CaretRight size={13} />
+              <ArrowClockwise size={18} /><span>刷新图库</span>
             </button>
             {lastManifest && (
               <button type="button" className="desktop-sidebar-nav-item" disabled={busy} onClick={() => void handleUndoOrganize()}>
-                <ArrowClockwise size={18} /><span>撤销上次整理</span><CaretRight size={13} />
+                <ArrowClockwise size={18} /><span>撤销上次整理</span>
               </button>
             )}
             <button type="button" className={`desktop-sidebar-nav-item ${busy ? 'has-activity' : ''}`} disabled={busy} onClick={() => void handleAdd()}>
-              <UploadSimple size={18} /><span>{busy ? '正在导入' : '导入图包'}</span>{busy ? <span className="desktop-nav-activity" /> : <CaretRight size={13} />}
+              <UploadSimple size={18} /><span>{busy ? '正在导入' : '导入图包'}</span>{busy && <span className="desktop-nav-activity" />}
             </button>
             {importReport && (
               <button type="button" className="desktop-sidebar-nav-item" onClick={() => setShowImportReport(true)}>
-                <Info size={18} /><span>导入报告</span><CaretRight size={13} />
+                <Info size={18} /><span>导入报告</span>
               </button>
             )}
-          </nav>
-          <div className="desktop-panel-label">图包目录</div>
-          {snapshot ? (
-            <FolderTree
-              snapshot={snapshot}
-              folderId={snapshot.rootId}
-              selectedFolderId={selectedFolderId || snapshot.rootId}
-              onSelect={handleSelectFolder}
-              expandedFolders={expandedFolders}
-              onToggleFolder={toggleFolder}
-              onFolderContextMenu={handleFolderContextMenu}
-            />
-          ) : (
-            <div className="desktop-folder-tree-scroll" />
-          )}
-          <div className="desktop-storage-status">
-            <div><HardDrive size={16} /><span>图库占用</span><strong>{formatBytes(libraryBytes)}</strong></div>
-            <p>{allLibraryImages.length.toLocaleString('zh-CN')} 个本地文件</p>
+            </nav>
+            <div className="desktop-panel-label">图包目录</div>
+            {snapshot ? (
+              <FolderTree
+                snapshot={snapshot}
+                folderId={snapshot.rootId}
+                selectedFolderId={selectedFolderId || snapshot.rootId}
+                onSelect={handleSelectFolder}
+                expandedFolders={expandedFolders}
+                onToggleFolder={toggleFolder}
+                onFolderContextMenu={handleFolderContextMenu}
+                scrollRootRef={sidebarScrollRef}
+              />
+            ) : (
+              <div className="desktop-folder-tree-scroll" />
+            )}
           </div>
-          <button ref={settingsButtonRef} type="button" className="desktop-sidebar-settings" onClick={() => setShowSettings(true)}><GearSix size={17} /><span>界面与性能</span><CaretRight size={13} /></button>
-          <div className="desktop-runtime-label">{runtimeLabel}</div>
+          <div className="desktop-sidebar-footer">
+            <button ref={settingsButtonRef} type="button" className="desktop-sidebar-nav-item desktop-sidebar-settings" onClick={() => setShowSettings(true)}><GearSix size={17} /><span>界面与性能</span></button>
+          </div>
         </aside>
       </div>
 
@@ -2311,7 +2343,7 @@ function DesktopInspector({
   );
 }
 
-const FOLDER_TREE_ROW_HEIGHT = 31;
+const FOLDER_TREE_ROW_HEIGHT = 36;
 const FOLDER_TREE_OVERSCAN_ROWS = 8;
 const FOLDER_TREE_WINDOW_BLOCK_ROWS = 8;
 const FOLDER_TREE_INITIAL_ROWS = 32;
@@ -2414,6 +2446,7 @@ const FolderTree = memo(function FolderTree({
   expandedFolders,
   onToggleFolder,
   onFolderContextMenu,
+  scrollRootRef,
 }: {
   snapshot: LibrarySnapshot;
   folderId: string;
@@ -2422,6 +2455,7 @@ const FolderTree = memo(function FolderTree({
   expandedFolders: ReadonlySet<string>;
   onToggleFolder: (id: string) => void;
   onFolderContextMenu: (event: ReactMouseEvent, folder: FolderNode) => void;
+  scrollRootRef?: RefObject<HTMLDivElement | null>;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrollFrameRef = useRef<number | null>(null);
@@ -2438,13 +2472,16 @@ const FolderTree = memo(function FolderTree({
   });
 
   const updateWindow = useCallback(() => {
-    const node = scrollRef.current;
+    const node = scrollRootRef?.current ?? scrollRef.current;
     if (!node) return;
-    const next = folderTreeWindowFor(rowCountRef.current, node.scrollTop, node.clientHeight);
+    const localScrollTop = scrollRootRef?.current && scrollRef.current
+      ? Math.max(0, scrollRootRef.current.scrollTop - scrollRef.current.offsetTop)
+      : node.scrollTop;
+    const next = folderTreeWindowFor(rowCountRef.current, localScrollTop, node.clientHeight);
     setWindowRows((current) => (
       current.first === next.first && current.last === next.last ? current : next
     ));
-  }, []);
+  }, [scrollRootRef]);
 
   const onScroll = useCallback(() => {
     if (scrollFrameRef.current != null) return;
@@ -2459,19 +2496,24 @@ const FolderTree = memo(function FolderTree({
   }, [rows.length, updateWindow]);
 
   useEffect(() => {
-    const node = scrollRef.current;
+    const node = scrollRootRef?.current ?? scrollRef.current;
     if (!node) return;
     const observer = new ResizeObserver(updateWindow);
     observer.observe(node);
-    return () => observer.disconnect();
-  }, [updateWindow]);
+    if (scrollRootRef?.current && scrollRef.current) observer.observe(scrollRef.current);
+    if (scrollRootRef?.current) scrollRootRef.current.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      observer.disconnect();
+      if (scrollRootRef?.current) scrollRootRef.current.removeEventListener('scroll', onScroll);
+    };
+  }, [onScroll, scrollRootRef, updateWindow]);
 
   useEffect(() => () => {
     if (scrollFrameRef.current != null) cancelAnimationFrame(scrollFrameRef.current);
   }, []);
 
   return (
-    <div ref={scrollRef} className="desktop-folder-tree-scroll" onScroll={onScroll}>
+    <div ref={scrollRef} className="desktop-folder-tree-scroll">
       <ul
         className="desktop-tree-list desktop-tree-virtual-surface"
         style={{ height: rows.length * FOLDER_TREE_ROW_HEIGHT }}
@@ -2524,7 +2566,6 @@ const FolderTree = memo(function FolderTree({
                 >
                   {active ? <FolderOpen size={16} weight="fill" /> : <Folder size={16} weight="duotone" />}
                   <span className="desktop-tree-name">{folder.name}</span>
-                  <span className="desktop-tree-count">{folder.imageCount.toLocaleString('zh-CN')}</span>
                 </button>
               </div>
             </li>
@@ -2536,6 +2577,7 @@ const FolderTree = memo(function FolderTree({
 });
 
 function TitleBar({
+  navigation,
   searchQuery,
   onSearchChange,
   searchPlaceholder,
@@ -2544,6 +2586,7 @@ function TitleBar({
   busy,
   onImport,
 }: {
+  navigation?: ReactNode;
   searchQuery: string;
   onSearchChange: (value: string) => void;
   searchPlaceholder: string;
@@ -2552,8 +2595,10 @@ function TitleBar({
   busy: boolean;
   onImport: () => void;
 }) {
+  const hasNavigation = Boolean(navigation);
   return (
-    <header className={`app-titlebar ${window.kanitsuDesktop?.platform === 'electron' ? 'titlebar-drag' : ''}`}>
+    <header className={`app-titlebar ${hasNavigation ? 'has-nav' : ''} ${window.kanitsuDesktop?.platform === 'electron' ? 'titlebar-drag' : ''}`}>
+      {hasNavigation && <div className="desktop-titlebar-nav titlebar-no-drag">{navigation}</div>}
       <div className="desktop-brand-lockup" aria-label="Kanitsu">
         <KanitsuLogo className="desktop-brand-mark" alt="" aria-hidden="true" />
         <div>
@@ -2986,7 +3031,7 @@ function Viewer({
       setThumbImageId(image.id);
       setThumbUrl(thumbObjectUrl);
     } else {
-      getThumbnailBlob(store, fileRef, 512)
+      getThumbnailBlob(store, fileRef, 512, { shouldCancel: () => cancelled })
         .then((blob) => {
           if (cancelled) return;
           thumbObjectUrl = URL.createObjectURL(blob);
