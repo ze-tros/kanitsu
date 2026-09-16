@@ -17,5 +17,7 @@ apps/desktop/.portable-staging-*/
 
 # Local agent tooling
 .agents/
+.zcode/
 AGENTS.md
+CLAUDE.md
 skills-lock.json
