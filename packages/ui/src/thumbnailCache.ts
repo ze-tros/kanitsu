@@ -24,7 +24,6 @@ export const COVER_THUMBNAIL_SIZE = 1024;
  * 缓存 Promise 以合并同文件夹下并发的挂载请求（同一文件的多次读取只发一次）。
  */
 interface ThumbEntry {
-  promise: Promise<Blob>;
   /** 已解析出的 Blob；未决时为 null。 */
   blob: Blob | null;
   /** 已解析出的 Blob 字节数；未决时为 0。 */
@@ -33,6 +32,26 @@ interface ThumbEntry {
   generation: number;
   /** 上次被“可见请求升级”的时间戳：防止窗口反复进货时对同一文件狂发 IPC。 */
   lastPromotedAt?: number;
+  job: ReadJob | null;
+}
+
+interface Consumer {
+  shouldCancel?: () => boolean;
+  resolve: (blob: Blob) => void;
+  reject: (error: unknown) => void;
+  settled: boolean;
+}
+
+interface ReadJob {
+  entry: ThumbEntry;
+  key: string;
+  store: LibraryStore;
+  file: FileRef;
+  maxSize: number;
+  priority: number;
+  state: 'queued' | 'running' | 'settled';
+  queueVersion: number;
+  consumers: Set<Consumer>;
 }
 
 const MAX_BYTES = 256 * 1024 * 1024; // 256MB：512px 缩略图约 7–30KB/张，容量封顶即可
@@ -68,10 +87,8 @@ class ThumbnailReadCancelledError extends Error {
 }
 
 interface QueuedRead {
-  priority: number;
-  shouldCancel?: () => boolean;
-  start: () => void;
-  cancel: () => void;
+  job: ReadJob;
+  version: number;
 }
 
 const readQueues: QueuedRead[][] = Array.from(
@@ -86,6 +103,23 @@ function normalizePriority(priority: number | undefined): number {
   );
 }
 
+function rejectConsumer(consumer: Consumer, error: unknown): void {
+  if (consumer.settled) return;
+  consumer.settled = true;
+  consumer.reject(error);
+}
+
+function resolveConsumer(consumer: Consumer, blob: Blob): void {
+  if (consumer.settled) return;
+  consumer.settled = true;
+  consumer.resolve(blob);
+}
+
+function enqueueJob(job: ReadJob): void {
+  job.queueVersion++;
+  readQueues[job.priority]!.push({ job, version: job.queueVersion });
+}
+
 function takeNextRead(): QueuedRead | null {
   for (let priority = THUMB_PRIORITY_VISIBLE; priority <= THUMB_PRIORITY_WARMUP; priority++) {
     if (
@@ -96,8 +130,17 @@ function takeNextRead(): QueuedRead | null {
     const queue = readQueues[priority]!;
     while (queue.length > 0) {
       const next = queue.shift()!;
-      if (next.shouldCancel?.()) {
-        next.cancel();
+      const { job } = next;
+      if (job.state !== 'queued' || job.queueVersion !== next.version || job.priority !== priority) continue;
+      for (const consumer of job.consumers) {
+        if (consumer.shouldCancel?.()) rejectConsumer(consumer, new ThumbnailReadCancelledError());
+      }
+      for (const consumer of job.consumers) {
+        if (consumer.settled) job.consumers.delete(consumer);
+      }
+      if (job.consumers.size === 0) {
+        job.state = 'settled';
+        if (job.entry.job === job) job.entry.job = null;
         continue;
       }
       return next;
@@ -110,35 +153,59 @@ function pumpReadQueue(): void {
   while (inFlightReads < MAX_CONCURRENT_READS) {
     const next = takeNextRead();
     if (!next) return;
+    const { job } = next;
     inFlightReads++;
-    if (next.priority > THUMB_PRIORITY_VISIBLE) inFlightNonVisibleReads++;
-    next.start();
+    if (job.priority > THUMB_PRIORITY_VISIBLE) inFlightNonVisibleReads++;
+    startReadJob(job);
   }
 }
 
-function runWhenSlotFree<T>(
-  task: () => Promise<T>,
-  options?: { priority?: number; shouldCancel?: () => boolean },
-): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const request: QueuedRead = {
-      priority: normalizePriority(options?.priority),
-      shouldCancel: options?.shouldCancel,
-      cancel: () => reject(new ThumbnailReadCancelledError()),
-      start: () => {
-        Promise.resolve()
-          .then(task)
-          .then(resolve, reject)
-          .finally(() => {
-            inFlightReads--;
-            if (request.priority > THUMB_PRIORITY_VISIBLE) inFlightNonVisibleReads--;
-            pumpReadQueue();
-          });
+function finishReadJob(job: ReadJob): void {
+  inFlightReads--;
+  if (job.priority > THUMB_PRIORITY_VISIBLE) inFlightNonVisibleReads--;
+  pumpReadQueue();
+}
+
+function startReadJob(job: ReadJob): void {
+  job.state = 'running';
+  Promise.resolve()
+    .then(() => job.store.readThumbnail(job.file, job.maxSize, { priority: job.priority }))
+    .then(
+      (blob) => {
+        const entry = job.entry;
+        if (entry.generation !== cacheGeneration) {
+          for (const consumer of job.consumers) resolveConsumer(consumer, blob);
+          return;
+        }
+        if (entry.blob === null) {
+          entry.blob = blob;
+          if (blob.size <= MAX_SINGLE_BLOB_BYTES && entries.get(job.key) === entry) {
+            entry.bytes = blob.size;
+            totalBytes += blob.size;
+            evict();
+          } else if (entries.get(job.key) === entry) {
+            entries.delete(job.key);
+          }
+        }
+        for (const consumer of job.consumers) {
+          if (consumer.shouldCancel?.()) rejectConsumer(consumer, new ThumbnailReadCancelledError());
+          else resolveConsumer(consumer, entry.blob ?? blob);
+        }
       },
-    };
-    readQueues[request.priority]!.push(request);
-    pumpReadQueue();
-  });
+      (error: unknown) => {
+        const entry = job.entry;
+        if (entries.get(job.key) === entry && entry.job === job && entry.blob === null) {
+          entries.delete(job.key);
+          totalBytes -= entry.bytes;
+        }
+        for (const consumer of job.consumers) rejectConsumer(consumer, error);
+      },
+    )
+    .finally(() => {
+      job.state = 'settled';
+      if (job.entry.job === job) job.entry.job = null;
+      finishReadJob(job);
+    });
 }
 
 /** 滚动期间暂停当前目录/子图包/全库预热，但保留可见和下一屏请求。 */
@@ -223,98 +290,53 @@ export function peekThumbnailBlob(file: FileRef, maxSize: number): Blob | null {
   return hit.blob;
 }
 
-/**
- * 解析结果写回缓存（幂等：只有首个完成的请求计入字节，避免升级后双记）。
- *
- * 特别注意“重复请求（可见升级/方向预取/原预取）乱序完成”的情况：
- * - 条目还在且未出图：正常写入；
- * - 条目已被删除（另一条重复请求失败清掉了）：这条结果完好，重建缓存，
- *   避免“已经生成过、回看又重载”；
- * - 条目已出图：所有重复请求都返回首个成功的 canonical Blob。
- */
-function settleEntry(
-  key: string,
-  entry: ThumbEntry | null,
-  blob: Blob,
-): Blob {
-  if (!entry) return blob;
-  // clear 后旧请求仍可以向原调用者返回结果，但不得触碰新代缓存。
-  if (entry.generation !== cacheGeneration) return blob;
+/** 可见请求升级间隔：同一文件太频繁的重进视口不再重复发 IPC。 */
+const VISIBLE_PROMOTE_MIN_INTERVAL_MS = 200;
 
-  // 升级前后的 Promise 都指向同一条目；首个成功结果是该条目的
-  // canonical Blob，后完成的请求必须返回它，不能泄漏另一份 Blob。
-  if (entry.blob !== null) return entry.blob;
-
-  const current = entries.get(key);
-  let target = entry;
-  if (current && current !== entry) {
-    // 条目失败被删除后，同键可能已创建了新条目。这份成功结果
-    // 可以完成新条目，但绝不覆盖它的条目身份或 Promise 调用者。
-    target = current;
-    if (target.blob !== null) return target.blob;
-  } else if (!current) {
-    // 条目被另一条重复请求失败清掉了：用这份成功结果重建。
-    // generation 检查保证这不会复活 clear 前的条目。
-    if (blob.size <= MAX_SINGLE_BLOB_BYTES) entries.set(key, entry);
-  }
-
-  target.blob = blob;
-  target.promise = Promise.resolve(blob);
-  if (blob.size <= MAX_SINGLE_BLOB_BYTES && entries.get(key) === target) {
-    target.bytes = blob.size;
-    totalBytes += blob.size;
-    evict();
-  } else {
-    // 超大异常输出不入内存缓存：既省内存，也避免
-    // 把其它正常缩略图从 LRU 里挤掉。条目仍保留 canonical Blob，
-    // 仅供已在等待的重复 Promise 统一返回，不会被后续 get 命中。
-    if (entries.get(key) === target) entries.delete(key);
-  }
-  return target.blob;
+function createConsumer(
+  entry: ThumbEntry,
+  job: ReadJob,
+  shouldCancel: (() => boolean) | undefined,
+): Promise<Blob> {
+  return new Promise<Blob>((resolve, reject) => {
+    const consumer: Consumer = { shouldCancel, resolve, reject, settled: false };
+    job.consumers.add(consumer);
+    if (shouldCancel?.()) rejectConsumer(consumer, new ThumbnailReadCancelledError());
+    if (job.state === 'queued' && job.consumers.size === 0) job.state = 'settled';
+    pumpReadQueue();
+  });
 }
 
-/**
- * 失败处理：**绝不删除已经出图的条目**——它可能是另一条重复请求（如可见升级）
- * 先写好、这条慢请求后失败的成果；删了它，回看同一张图就会重新载图。
- * 只在条目还没有任何有效 Blob 时清理。
- */
-function failEntry(key: string, entry: ThumbEntry | null, request: Promise<Blob>): void {
-  if (
-    entry &&
-    entries.get(key) === entry &&
-    entry.blob === null &&
-    entry.promise === request
-  ) {
-    entries.delete(key);
-    totalBytes -= entry.bytes;
-  }
+function promoteJob(job: ReadJob, priority: number): void {
+  const nextPriority = normalizePriority(priority);
+  if (job.state !== 'queued' || nextPriority >= job.priority) return;
+  job.priority = nextPriority;
+  enqueueJob(job);
 }
 
-function createReadPromise(
+function createJob(
   key: string,
-  getEntry: () => ThumbEntry | null,
+  entry: ThumbEntry,
   store: LibraryStore,
   file: FileRef,
   maxSize: number,
-  priority: number | undefined,
-  shouldCancel: (() => boolean) | undefined,
-): Promise<Blob> {
-  let request!: Promise<Blob>;
-  request = runWhenSlotFree(
-    () => store.readThumbnail(file, maxSize, { priority }),
-    { priority, shouldCancel },
-  ).then(
-    (blob) => settleEntry(key, getEntry(), blob),
-    (err: unknown) => {
-      failEntry(key, getEntry(), request);
-      throw err;
-    },
-  );
-  return request;
+  priority: number,
+): ReadJob {
+  const job: ReadJob = {
+    entry,
+    key,
+    store,
+    file,
+    maxSize,
+    priority: normalizePriority(priority),
+    state: 'queued',
+    queueVersion: 0,
+    consumers: new Set(),
+  };
+  entry.job = job;
+  enqueueJob(job);
+  return job;
 }
-
-/** 可见请求升级间隔：同一文件太频繁的重进视口不再重复发 IPC。 */
-const VISIBLE_PROMOTE_MIN_INTERVAL_MS = 200;
 
 export function getThumbnailBlob(
   store: LibraryStore,
@@ -325,71 +347,43 @@ export function getThumbnailBlob(
   const key = keyOf(file, maxSize);
   const hit = entries.get(key);
   if (hit) {
-    // 刷新 LRU 顺序。
     entries.delete(key);
     entries.set(key, hit);
     counters.requests++;
     counters.cacheHits++;
-    if (hit.blob) return hit.promise; // 已出图：直接复用，不必再请求
-    const level = options?.priority ?? 0;
-    if (level === 0) {
-      // —— 可见请求绝不能挂在身后的慢速预取（整目录 FIFO）上 ——
-      // 缓存合并会让可见请求复用预取的 Promise，等于排到数千张的队尾。
-      // 这里把条目的 Promise 升级为一条新的优先 0 请求：插队生成，先于预取出图；
-      // 预取那条稍后完成时结果幂等（settleEntry 只记一次）。带节流防重。
-      const now = Date.now();
-      if (hit.lastPromotedAt !== undefined && now - hit.lastPromotedAt < VISIBLE_PROMOTE_MIN_INTERVAL_MS) {
-        return hit.promise;
-      }
-      hit.lastPromotedAt = now;
-      hit.promise = createReadPromise(
-        key,
-        () => hit,
-        store,
-        file,
-        maxSize,
-        THUMB_PRIORITY_VISIBLE,
-        options?.shouldCancel,
-      );
-    } else if (options?.recheck) {
-      // 滚动方向预取（优先级 1）：同一文件已排在整目录预取（优先级 2）队尾时，
-      // 合并返回慢 Promise 等于没预取。重新以优先 1 请求并替换条目 Promise，
-      // 让 worker 先出下一屏的图（带节流，防重复进视口刷 IPC）。
-      const now = Date.now();
-      if (hit.lastPromotedAt !== undefined && now - hit.lastPromotedAt < VISIBLE_PROMOTE_MIN_INTERVAL_MS) {
-        return hit.promise;
-      }
-      hit.lastPromotedAt = now;
-      hit.promise = createReadPromise(
-        key,
-        () => hit,
-        store,
-        file,
-        maxSize,
-        options.priority ?? THUMB_PRIORITY_DIRECTIONAL,
-        options.shouldCancel,
-      );
+    if (hit.blob) return Promise.resolve(hit.blob);
+
+    const job = hit.job;
+    if (!job) {
+      const replacement = createJob(key, hit, store, file, maxSize, options?.priority ?? THUMB_PRIORITY_VISIBLE);
+      return createConsumer(hit, replacement, options?.shouldCancel);
     }
-    return hit.promise;
+    const requestedPriority = options?.priority ?? THUMB_PRIORITY_VISIBLE;
+    const shouldPromote = requestedPriority === THUMB_PRIORITY_VISIBLE || options?.recheck === true;
+    if (shouldPromote) {
+      const now = Date.now();
+      if (hit.lastPromotedAt === undefined || now - hit.lastPromotedAt >= VISIBLE_PROMOTE_MIN_INTERVAL_MS) {
+        hit.lastPromotedAt = now;
+        promoteJob(job, requestedPriority);
+      }
+    }
+    return createConsumer(hit, job, options?.shouldCancel);
   }
+
   counters.requests++;
   counters.cacheMisses++;
-
-  let entry: ThumbEntry | null = null;
-  const promise = createReadPromise(
-    key,
-    () => entry,
-    store,
-    file,
-    maxSize,
-    options?.priority,
-    options?.shouldCancel,
-  );
-  entry = { promise, blob: null, bytes: 0, generation: cacheGeneration };
+  const entry: ThumbEntry = {
+    blob: null,
+    bytes: 0,
+    generation: cacheGeneration,
+    job: null,
+  };
   entries.set(key, entry);
+  const job = createJob(key, entry, store, file, maxSize, options?.priority ?? THUMB_PRIORITY_VISIBLE);
   evict();
-  return promise;
+  return createConsumer(entry, job, options?.shouldCancel);
 }
+
 
 export interface PreloadThumbnailsOptions {
   /** 同时进行的读取数上限，避免一上来就打爆 IPC / 主进程解码队列。默认 2。 */
