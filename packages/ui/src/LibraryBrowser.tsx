@@ -437,6 +437,26 @@ export function LibraryBrowser({
     return next;
   }, [store, index, applySnapshot]);
 
+  // 自动刷新：窗口重新获得焦点 / 从最小化恢复时重扫图库，取代侧栏里的手动
+  // “刷新图库”按钮（导入、整理等变更操作仍各自触发刷新）。导入/整理进行中
+  // 跳过；1 秒内的重复 focus/visibilitychange 只扫一次，也覆盖刷新在途的情况。
+  const autoRefreshAtRef = useRef(0);
+  useEffect(() => {
+    if (busy) return;
+    const runAutoRefresh = () => {
+      const now = Date.now();
+      if (document.visibilityState !== 'visible' || now - autoRefreshAtRef.current < 1000) return;
+      autoRefreshAtRef.current = now;
+      void refresh();
+    };
+    window.addEventListener('focus', runAutoRefresh);
+    document.addEventListener('visibilitychange', runAutoRefresh);
+    return () => {
+      window.removeEventListener('focus', runAutoRefresh);
+      document.removeEventListener('visibilitychange', runAutoRefresh);
+    };
+  }, [busy, refresh]);
+
   // Auto-dismiss the toast message after a short delay (like the demo).
   useEffect(() => {
     if (!message) return;
@@ -1869,25 +1889,6 @@ export function LibraryBrowser({
                 onContextMenu={(event) => openContextMenu(event, buildFolderMenu(rootFolder))}
               >
                 <ImagesSquare size={18} weight="duotone" /><span>全部图包</span>
-              </button>
-            )}
-            <button type="button" className="desktop-sidebar-nav-item" disabled={!selectedFolder} onClick={openOrganizePreview}>
-              <MagicWand size={18} /><span>智能整理</span>
-            </button>
-            <button type="button" className="desktop-sidebar-nav-item" disabled={!selectedFolder || busy} onClick={() => void refresh()}>
-              <ArrowClockwise size={18} /><span>刷新图库</span>
-            </button>
-            {lastManifest && (
-              <button type="button" className="desktop-sidebar-nav-item" disabled={busy} onClick={() => void handleUndoOrganize()}>
-                <ArrowClockwise size={18} /><span>撤销上次整理</span>
-              </button>
-            )}
-            <button type="button" className={`desktop-sidebar-nav-item ${busy ? 'has-activity' : ''}`} disabled={busy} onClick={() => void handleAdd()}>
-              <UploadSimple size={18} /><span>{busy ? '正在导入' : '导入图包'}</span>{busy && <span className="desktop-nav-activity" />}
-            </button>
-            {importReport && (
-              <button type="button" className="desktop-sidebar-nav-item" onClick={() => setShowImportReport(true)}>
-                <Info size={18} /><span>导入报告</span>
               </button>
             )}
             </nav>

@@ -1125,7 +1125,7 @@ html[data-theme="light"][data-accent="graphite"] {
   min-width: 0;
   min-height: 34px;
   display: grid;
-  grid-template-columns: 19px minmax(0, 1fr) max-content;
+  grid-template-columns: 19px minmax(0, 1fr);
   align-items: center;
   gap: 8px;
   padding: 0 9px;
@@ -1152,14 +1152,6 @@ html[data-theme="light"][data-accent="graphite"] {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.desktop-nav-activity {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--desktop-accent-fill);
-  box-shadow: 0 0 0 3px var(--desktop-accent-soft);
 }
 
 .desktop-panel-label {
@@ -4822,11 +4814,6 @@ body .desktop-library .desktop-sidebar-footer .desktop-sidebar-settings {
   min-height: 34px;
   margin: 0;
   padding: 0 9px;
-  grid-template-columns: 19px minmax(0, 1fr);
-}
-
-body .desktop-library .desktop-sidebar-primary .desktop-sidebar-nav-item:not(.has-activity) {
-  grid-template-columns: 19px minmax(0, 1fr);
 }
 
 body .desktop-library .desktop-settings-back {
