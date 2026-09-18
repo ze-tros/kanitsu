@@ -1,0 +1,135 @@
+/* ============================================================================
+   Kanitsu studio design tokens — single source of truth.
+
+   styles.css imports this file into the `kanitsu-tokens` layer, which is
+   declared after Tailwind's and daisyUI's layers, so these values win over
+   the daisyUI theme variables on the same element while remaining pure
+   token definitions.
+
+   Layout of this file:
+     1. :root                      — dark (default) studio palette + daisyUI bridge
+     2. html[data-theme="light"]   — warm paper palette
+     3. html[data-accent=...]      — accent palettes (coral is the base, no block needed)
+     4. light × accent             — per-accent light overrides
+
+   The `--color-*` variables at the end of :root are a BRIDGE for the daisyUI
+   components still in use (modal/drawer/btn/input): they resolve to the studio
+   palette document-wide, including React portals mounted outside
+   .desktop-library. `.mobile-studio` re-bridges the same variables to --m-*.
+   =========================================================================== */
+
+:root {
+  --desktop-font-sans: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif;
+  --desktop-font-display: "Segoe UI Variable Display", "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif;
+  --desktop-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --desktop-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+
+  /* Ink black + warm paper + single coral accent. */
+  --desktop-app: #111112;
+  --desktop-canvas: #121213;
+  --desktop-surface-1: #18181a;
+  --desktop-surface-2: #202023;
+  --desktop-surface-3: #29292c;
+  --desktop-surface-4: #333337;
+  --desktop-line: rgba(255, 255, 255, .085);
+  --desktop-line-strong: rgba(255, 255, 255, .17);
+  --desktop-text: #f3f0eb;
+  --desktop-text-soft: #d3cfca;
+  --desktop-muted: #a09b9b;
+  --desktop-faint: #6f6b70;
+  --desktop-radius-panel: 12px;
+  --desktop-radius-control: 9px;
+  --desktop-radius-tight: 6px;
+  --desktop-titlebar-height: 46px;
+  --desktop-inspector-width: 280px;
+  --desktop-accent-fill: #ff785e;
+  --desktop-accent-ink: #241411;
+  --desktop-accent-text: #ff9b89;
+  --desktop-accent-soft: rgba(255, 120, 94, .14);
+  --desktop-accent-line: rgba(255, 120, 94, .42);
+  --desktop-danger: #ff8f82;
+  --desktop-danger-soft: rgba(255, 105, 92, .13);
+  --desktop-shadow-raised: 0 18px 45px rgba(0, 0, 0, .23);
+  --desktop-shadow-dialog: 0 30px 90px rgba(0, 0, 0, .5);
+
+  /* daisyUI bridge — desktop values; .mobile-studio overrides with --m-*. */
+  --color-primary: var(--desktop-accent-fill);
+  --color-primary-content: var(--desktop-accent-ink);
+  --color-base-100: var(--desktop-surface-1);
+  --color-base-200: var(--desktop-surface-2);
+  --color-base-300: var(--desktop-surface-3);
+  --color-base-content: var(--desktop-text);
+  --color-error: var(--desktop-danger);
+  --color-error-content: #241411;
+}
+
+/* Warm paper. danger/shadow intentionally stay at the dark-theme values:
+   that is what the library surface resolves today; revisit as a design
+   change, not inside a token refactor. */
+html[data-theme="light"] {
+  --desktop-app: #e9ebee;
+  --desktop-canvas: #f1f3f5;
+  --desktop-surface-1: #fbfcfd;
+  --desktop-surface-2: #f0f2f4;
+  --desktop-surface-3: #e5e8ec;
+  --desktop-surface-4: #d8dce2;
+  --desktop-line: rgba(25, 31, 39, .11);
+  --desktop-line-strong: rgba(25, 31, 39, .2);
+  --desktop-text: #20242a;
+  --desktop-text-soft: #454b54;
+  --desktop-muted: #69717d;
+  --desktop-faint: #8b929c;
+  --desktop-accent-fill: #c45444;
+  --desktop-accent-ink: #fff;
+  --desktop-accent-text: #a84437;
+  --desktop-accent-soft: rgba(196, 84, 68, .12);
+  --desktop-accent-line: rgba(196, 84, 68, .35);
+}
+
+html[data-accent="cobalt"] {
+  --desktop-accent-fill: #8aa4e8;
+  --desktop-accent-ink: #10172a;
+  --desktop-accent-text: #b5c7f5;
+  --desktop-accent-soft: rgba(138, 164, 232, .15);
+  --desktop-accent-line: rgba(138, 164, 232, .45);
+}
+
+html[data-accent="amber"] {
+  --desktop-accent-fill: #e2ad55;
+  --desktop-accent-ink: #251803;
+  --desktop-accent-text: #f0c275;
+  --desktop-accent-soft: rgba(226, 173, 85, .15);
+  --desktop-accent-line: rgba(226, 173, 85, .45);
+}
+
+html[data-accent="graphite"] {
+  --desktop-accent-fill: #c2c9d0;
+  --desktop-accent-ink: #171a1e;
+  --desktop-accent-text: #d7dce1;
+  --desktop-accent-soft: rgba(194, 201, 208, .15);
+  --desktop-accent-line: rgba(194, 201, 208, .45);
+}
+
+html[data-theme="light"][data-accent="cobalt"] {
+  --desktop-accent-fill: #4568ae;
+  --desktop-accent-ink: #fff;
+  --desktop-accent-text: #365996;
+  --desktop-accent-soft: rgba(69, 104, 174, .12);
+  --desktop-accent-line: rgba(69, 104, 174, .35);
+}
+
+html[data-theme="light"][data-accent="amber"] {
+  --desktop-accent-fill: #94620e;
+  --desktop-accent-ink: #fff;
+  --desktop-accent-text: #805208;
+  --desktop-accent-soft: rgba(148, 98, 14, .12);
+  --desktop-accent-line: rgba(148, 98, 14, .35);
+}
+
+html[data-theme="light"][data-accent="graphite"] {
+  --desktop-accent-fill: #505a65;
+  --desktop-accent-ink: #fff;
+  --desktop-accent-text: #404a54;
+  --desktop-accent-soft: rgba(80, 90, 101, .12);
+  --desktop-accent-line: rgba(80, 90, 101, .35);
+}

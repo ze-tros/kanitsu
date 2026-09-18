@@ -1,4 +1,12 @@
+/* Cascade-layer order. Declaring every layer up front (including Tailwind's
+   and daisyUI's) makes the precedence explicit: daisyUI components and
+   Tailwind utilities first, studio tokens and component overrides last —
+   matching the historical "final overrides win" contract without relying on
+   unlayered styles or file order. */
+@layer theme, base, components, utilities, daisyui, kanitsu-tokens, kanitsu-components, kanitsu-mobile;
+
 @import "tailwindcss";
+@import "./styles/theme.css" layer(kanitsu-tokens);
 
 @plugin "daisyui" {
   themes: light --default, dark --prefersdark;
@@ -8,6 +16,8 @@
 
 /* Scan classes used in shared UI packages too */
 @source "../../../packages/ui/src";
+
+@layer kanitsu-components {
 
 :root {
   font-family: 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif;
@@ -469,37 +479,8 @@ body {
    The production LibraryBrowser keeps its existing state and DOM contracts;
    this layer replaces the previous visual system with the reviewed Kanitsu
    studio language: ink black, warm paper surfaces, and a single coral accent.
+   Studio tokens themselves live in styles/theme.css (kanitsu-tokens layer).
    =========================================================================== */
-.desktop-library {
-  --desktop-font-sans: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif;
-  --desktop-font-display: "Segoe UI Variable Display", "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif;
-  --desktop-titlebar-height: 68px;
-  --desktop-inspector-width: 286px;
-  --desktop-radius-panel: 12px;
-  --desktop-radius-control: 9px;
-  --desktop-radius-tight: 6px;
-  --desktop-app: #111112;
-  --desktop-canvas: #121213;
-  --desktop-surface-1: #18181a;
-  --desktop-surface-2: #202023;
-  --desktop-surface-3: #29292c;
-  --desktop-surface-4: #333337;
-  --desktop-line: rgba(255,255,255,.085);
-  --desktop-line-strong: rgba(255,255,255,.17);
-  --desktop-text: #f3f0eb;
-  --desktop-text-soft: #d3cfca;
-  --desktop-muted: #a09b9b;
-  --desktop-faint: #6f6b70;
-  --desktop-accent-fill: #ff785e;
-  --desktop-accent-ink: #241411;
-  --desktop-accent-text: #ff9b89;
-  --desktop-accent-soft: rgba(255,120,94,.14);
-  --desktop-accent-line: rgba(255,120,94,.42);
-  --desktop-danger: #ff8f82;
-  --desktop-danger-soft: rgba(255,105,92,.13);
-  --desktop-shadow-raised: 0 18px 45px rgba(0,0,0,.23);
-  --desktop-shadow-dialog: 0 30px 90px rgba(0,0,0,.5);
-}
 .desktop-library button,
 .desktop-library input,
 .desktop-library select { font-family: inherit; }
@@ -571,135 +552,6 @@ body {
    Scoped to LibraryBrowser so the Android-only .m-* component system below
    keeps its existing layout and interaction model.
    ========================================================================== */
-
-:root {
-  --desktop-font-sans: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif;
-  --desktop-font-display: "Segoe UI Variable Display", "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif;
-  --desktop-titlebar-height: 54px;
-  --desktop-inspector-width: 284px;
-  --desktop-radius-panel: 8px;
-  --desktop-radius-control: 6px;
-  --desktop-radius-tight: 4px;
-  --desktop-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
-  --desktop-ease-standard: cubic-bezier(0.2, 0, 0, 1);
-  --desktop-app: #0e1014;
-  --desktop-canvas: #11141a;
-  --desktop-surface-1: #16191f;
-  --desktop-surface-2: #1c2027;
-  --desktop-surface-3: #242932;
-  --desktop-surface-4: #303640;
-  --desktop-line: #292e37;
-  --desktop-line-strong: #414854;
-  --desktop-text: #eef1f5;
-  --desktop-text-soft: #c8cdd5;
-  --desktop-muted: #9299a4;
-  --desktop-faint: #68717d;
-  --desktop-accent-fill: #7894dc;
-  --desktop-accent-ink: #10172a;
-  --desktop-accent-text: #a9bdf2;
-  --desktop-accent-soft: #1b2948;
-  --desktop-accent-line: #526da9;
-  --desktop-danger: #e87872;
-  --desktop-danger-soft: #342020;
-  --desktop-warning: #dbab62;
-  --desktop-shadow-raised: 0 14px 36px rgb(2 5 11 / 34%);
-  --desktop-shadow-dialog: 0 30px 90px rgb(2 5 11 / 58%);
-}
-
-html[data-theme="light"] {
-  --desktop-app: #e7e9ed;
-  --desktop-canvas: #edf0f3;
-  --desktop-surface-1: #fafbfc;
-  --desktop-surface-2: #f3f5f7;
-  --desktop-surface-3: #e7eaee;
-  --desktop-surface-4: #d9dde3;
-  --desktop-line: #d7dbe1;
-  --desktop-line-strong: #bac0ca;
-  --desktop-text: #20242b;
-  --desktop-text-soft: #494f59;
-  --desktop-muted: #69717d;
-  --desktop-faint: #8a929e;
-  --desktop-accent-fill: #4568ae;
-  --desktop-accent-ink: #ffffff;
-  --desktop-accent-text: #365996;
-  --desktop-accent-soft: #e3eafa;
-  --desktop-accent-line: #a9b9dc;
-  --desktop-danger: #b94d48;
-  --desktop-danger-soft: #f7e5e3;
-  --desktop-warning: #966617;
-  --desktop-shadow-raised: 0 14px 34px rgb(37 43 54 / 14%);
-  --desktop-shadow-dialog: 0 30px 90px rgb(37 43 54 / 24%);
-}
-
-html[data-accent="cobalt"] {
-  --color-primary: #7894dc;
-  --color-primary-content: #10172a;
-}
-
-html[data-theme="light"][data-accent="cobalt"] {
-  --color-primary: #4568ae;
-  --color-primary-content: #ffffff;
-}
-
-html[data-accent="coral"] {
-  --desktop-accent-fill: #e17b6e;
-  --desktop-accent-ink: #2d100d;
-  --desktop-accent-text: #f1a59b;
-  --desktop-accent-soft: #3d2421;
-  --desktop-accent-line: #92564f;
-  --color-primary: #e17b6e;
-  --color-primary-content: #2d100d;
-}
-
-html[data-accent="amber"] {
-  --desktop-accent-fill: #d7a451;
-  --desktop-accent-ink: #251803;
-  --desktop-accent-text: #e9bc71;
-  --desktop-accent-soft: #382c19;
-  --desktop-accent-line: #806432;
-  --color-primary: #d7a451;
-  --color-primary-content: #251803;
-}
-
-html[data-accent="graphite"] {
-  --desktop-accent-fill: #bcc3cb;
-  --desktop-accent-ink: #171a1e;
-  --desktop-accent-text: #d0d5db;
-  --desktop-accent-soft: #2d3239;
-  --desktop-accent-line: #656d77;
-  --color-primary: #bcc3cb;
-  --color-primary-content: #171a1e;
-}
-
-html[data-theme="light"][data-accent="coral"] {
-  --desktop-accent-fill: #b94c41;
-  --desktop-accent-ink: #ffffff;
-  --desktop-accent-text: #9f3e35;
-  --desktop-accent-soft: #f8e5e2;
-  --desktop-accent-line: #dca9a3;
-  --color-primary: #b94c41;
-  --color-primary-content: #ffffff;
-}
-
-html[data-theme="light"][data-accent="amber"] {
-  --desktop-accent-fill: #94620e;
-  --desktop-accent-ink: #ffffff;
-  --desktop-accent-text: #805208;
-  --desktop-accent-soft: #f5ead5;
-  --desktop-accent-line: #d3b980;
-  --color-primary: #94620e;
-  --color-primary-content: #ffffff;
-}
-
-html[data-theme="light"][data-accent="graphite"] {
-  --desktop-accent-fill: #505a65;
-  --desktop-accent-ink: #ffffff;
-  --desktop-accent-text: #404a54;
-  --desktop-accent-soft: #e6e9ec;
-  --desktop-accent-line: #b4bbc2;
-  --color-primary: #505a65;
-  --color-primary-content: #ffffff;
-}
 
 .desktop-library {
   width: 100%;
@@ -3839,46 +3691,10 @@ html[data-theme="light"][data-accent="graphite"] {
    ========================================================================== */
 /* Final proportion pass for the production workspace. Loaded after both
    desktop and mobile theme files so these are the intentional end-state
-   geometry rules, while LibraryBrowser keeps its existing behavior. */
-
-body .desktop-library {
-  /* Codex-like chrome rhythm: compact enough to keep the workspace dominant. */
-}
-
-/* Keep persisted theme choices inside the formal palette. The legacy DaisyUI
-   tokens still exist globally for shared components, so production values are
-   scoped here and intentionally win on the library root. */
-body .desktop-library {
-  --color-primary: var(--desktop-accent-fill);
-  --color-primary-content: var(--desktop-accent-ink);
-  --color-base-100: var(--desktop-surface-1);
-  --color-base-200: var(--desktop-surface-2);
-  --color-base-300: var(--desktop-surface-3);
-  --color-base-content: var(--desktop-text);
-}
-
-html[data-theme="light"] body .desktop-library {
-  --desktop-app: #e9ebee;
-  --desktop-canvas: #f1f3f5;
-  --desktop-surface-1: #fbfcfd;
-  --desktop-surface-2: #f0f2f4;
-  --desktop-surface-3: #e5e8ec;
-  --desktop-surface-4: #d8dce2;
-  --desktop-line: rgba(25,31,39,.11);
-  --desktop-line-strong: rgba(25,31,39,.2);
-  --desktop-text: #20242a;
-  --desktop-text-soft: #454b54;
-  --desktop-muted: #69717d;
-  --desktop-faint: #8b929c;
-  --desktop-accent-fill: #c45444;
-  --desktop-accent-ink: #fff;
-  --desktop-accent-text: #a84437;
-  --desktop-accent-soft: rgba(196,84,68,.12);
-  --desktop-accent-line: rgba(196,84,68,.35);
-  --color-primary: var(--desktop-accent-fill);
-  --color-primary-content: var(--desktop-accent-ink);
-  background: var(--desktop-app);
-}
+   geometry rules, while LibraryBrowser keeps its existing behavior.
+   Theme/token bridging now lives in styles/theme.css (kanitsu-tokens layer,
+   declared after daisyUI), so the old scoped daisyUI bridge blocks here were
+   removed with it. */
 
 html[data-theme="light"] body .desktop-library > .app-titlebar {
   background: rgba(251,252,253,.9);
@@ -3892,66 +3708,6 @@ html[data-theme="light"] body .desktop-library .desktop-package-cover,
 html[data-theme="light"] body .desktop-library .desktop-photo-frame {
   background: #e5e8eb;
   box-shadow: 0 7px 22px rgba(37,43,54,.11);
-}
-
-html[data-accent="cobalt"] body .desktop-library {
-  --desktop-accent-fill: #8aa4e8;
-  --desktop-accent-ink: #10172a;
-  --desktop-accent-text: #b5c7f5;
-  --desktop-accent-soft: rgba(138,164,232,.15);
-  --desktop-accent-line: rgba(138,164,232,.45);
-  --color-primary: var(--desktop-accent-fill);
-  --color-primary-content: var(--desktop-accent-ink);
-}
-
-html[data-accent="amber"] body .desktop-library {
-  --desktop-accent-fill: #e2ad55;
-  --desktop-accent-ink: #251803;
-  --desktop-accent-text: #f0c275;
-  --desktop-accent-soft: rgba(226,173,85,.15);
-  --desktop-accent-line: rgba(226,173,85,.45);
-  --color-primary: var(--desktop-accent-fill);
-  --color-primary-content: var(--desktop-accent-ink);
-}
-
-html[data-accent="graphite"] body .desktop-library {
-  --desktop-accent-fill: #c2c9d0;
-  --desktop-accent-ink: #171a1e;
-  --desktop-accent-text: #d7dce1;
-  --desktop-accent-soft: rgba(194,201,208,.15);
-  --desktop-accent-line: rgba(194,201,208,.45);
-  --color-primary: var(--desktop-accent-fill);
-  --color-primary-content: var(--desktop-accent-ink);
-}
-
-html[data-theme="light"][data-accent="cobalt"] body .desktop-library {
-  --desktop-accent-fill: #4568ae;
-  --desktop-accent-ink: #fff;
-  --desktop-accent-text: #365996;
-  --desktop-accent-soft: rgba(69,104,174,.12);
-  --desktop-accent-line: rgba(69,104,174,.35);
-  --color-primary: #4568ae;
-  --color-primary-content: #fff;
-}
-
-html[data-theme="light"][data-accent="amber"] body .desktop-library {
-  --desktop-accent-fill: #94620e;
-  --desktop-accent-ink: #fff;
-  --desktop-accent-text: #805208;
-  --desktop-accent-soft: rgba(148,98,14,.12);
-  --desktop-accent-line: rgba(148,98,14,.35);
-  --color-primary: #94620e;
-  --color-primary-content: #fff;
-}
-
-html[data-theme="light"][data-accent="graphite"] body .desktop-library {
-  --desktop-accent-fill: #505a65;
-  --desktop-accent-ink: #fff;
-  --desktop-accent-text: #404a54;
-  --desktop-accent-soft: rgba(80,90,101,.12);
-  --desktop-accent-line: rgba(80,90,101,.35);
-  --color-primary: #505a65;
-  --color-primary-content: #fff;
 }
 
 body .desktop-library .btn {
@@ -4328,11 +4084,8 @@ body .desktop-library .desktop-settings-row {
 
 /* Codex-like workspace rhythm: compact chrome, readable work area, and a
    consistent 8/12/16/24 spacing scale. These rules are intentionally last so
-   legacy responsive declarations cannot inflate the production proportions. */
-body .desktop-library {
-  --desktop-titlebar-height: 46px;
-  --desktop-inspector-width: 280px;
-}
+   legacy responsive declarations cannot inflate the production proportions.
+   (The old body-scoped token block here is folded into theme.css defaults.) */
 
 body .desktop-library > .app-titlebar {
   height: 46px;
@@ -4883,4 +4636,6 @@ body .desktop-library .desktop-settings-back {
   body .desktop-library .desktop-settings-page.is-sidebar-hidden .desktop-settings-body {
     grid-template-rows: minmax(0, 1fr);
   }
+}
+
 }

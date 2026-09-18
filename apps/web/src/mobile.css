@@ -1,6 +1,8 @@
 /* Kanitsu Android production UI
    Mirrors the desktop charcoal / cool-gray / cobalt design language while
    leaving the mobile data, cache, virtualization and gesture layers intact. */
+@layer kanitsu-mobile {
+
 
 .mobile-studio {
   --m-font-sans: 'Segoe UI Variable Text', 'Segoe UI', 'Microsoft YaHei UI', 'Microsoft YaHei', system-ui, sans-serif;
@@ -2735,4 +2737,5 @@ html[data-theme='light'][data-accent='graphite'] .mobile-studio { --m-accent: #5
   .mobile-studio .m-library-stats {
     gap: 11px;
   }
+}
 }
