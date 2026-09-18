@@ -8,6 +8,25 @@
     <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png" />
     <meta name="theme-color" content="#181A1F" />
     <title>Kanitsu</title>
+    <script>
+      // 首帧前应用已保存的主题（与 LibraryBrowser 的解析口径一致）：
+      // 否则 React 挂载设置 data-theme 之前会先绘制一帧默认浅色底，
+      // 深色用户看到"白屏 -> 黑屏 -> 内容"的启动过程。
+      (function () {
+        try {
+          var saved = localStorage.getItem('kanitsu-theme');
+          var dark = saved === 'dark'
+            || (saved !== 'light' && !window.matchMedia('(prefers-color-scheme: light)').matches);
+          var root = document.documentElement;
+          root.dataset.theme = dark ? 'dark' : 'light';
+          root.style.colorScheme = dark ? 'dark' : 'light';
+          var accent = localStorage.getItem('kanitsu-accent');
+          if (accent) root.dataset.accent = accent;
+        } catch (error) {
+          // 存储不可用时保持默认深色（:root 的令牌即深色）。
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

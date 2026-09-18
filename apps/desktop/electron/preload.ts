@@ -1,6 +1,22 @@
 // Preload: exposes the desktop bridge to the renderer through contextBridge.
 import { contextBridge, ipcRenderer } from 'electron';
 
+// 启动底色引导：preload 与页面同源，localStorage 同步可读且早于一切页面
+// 脚本。这里把解析后的主题发给主进程，主进程在窗口显示（ready-to-show）
+// 前据此设置 backgroundColor，消除"系统浅色 + 应用暗色"等主题不匹配组合
+// 下的启动闪白。解析口径与 LibraryBrowser / index.html 内联脚本一致。
+const bootTheme: 'dark' | 'light' = (() => {
+  try {
+    const saved = localStorage.getItem('kanitsu-theme');
+    const dark = saved === 'dark'
+      || (saved !== 'light' && !window.matchMedia('(prefers-color-scheme: light)').matches);
+    return dark ? 'dark' : 'light';
+  } catch {
+    return 'dark';
+  }
+})();
+ipcRenderer.send('theme:bootstrap', bootTheme);
+
 type DesktopEntry = {
   id: string;
   name: string;

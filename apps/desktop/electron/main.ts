@@ -1,5 +1,5 @@
 // Electron main process: native file system for import and album library.
-import { app, BrowserWindow, dialog, ipcMain, nativeImage, net, protocol } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, net, protocol } from 'electron';
 import { promises as fs, createWriteStream } from 'node:fs';
 import { execSync } from 'node:child_process';
 import path from 'node:path';
@@ -1042,6 +1042,27 @@ function registerWindowControlIpc(): void {
   ipcMain.handle('window:close', () => mainWindow?.close());
 }
 
+// —— 启动窗口底色 ——
+
+// 渲染进程完成首帧前，窗口底色直接用应用的主题底色（body 的
+// --color-base-100，见 styles/theme.css），而不是 Chromium 默认白色。
+// 具体取值不能依赖 nativeTheme：应用的界面主题存在渲染进程 localStorage
+// 里，主进程读不到，"系统浅色 + 应用暗色"组合下按系统预设会闪白。
+// 最终值由 preload 在页面脚本运行前读取 localStorage 解析后经
+// theme:bootstrap 同步过来（窗口此时尚未显示），见 preload.ts。
+const THEME_BACKGROUNDS: Record<'dark' | 'light', string> = {
+  dark: '#18181a',
+  light: '#fbfcfd',
+};
+
+function registerThemeBootstrap(): void {
+  ipcMain.on('theme:bootstrap', (event, theme: string) => {
+    if (theme !== 'dark' && theme !== 'light') return;
+    const win = BrowserWindow.fromWebContents(event.sender);
+    win?.setBackgroundColor(THEME_BACKGROUNDS[theme]);
+  });
+}
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1280,
@@ -1051,6 +1072,10 @@ function createWindow() {
     frame: false,
     title: 'Kanitsu',
     icon: applicationIconPath(),
+    // 窗口显示前的兜底底色（preload 同步的精确值会在此之前覆盖它）。
+    backgroundColor: nativeTheme.shouldUseDarkColors ? THEME_BACKGROUNDS.dark : THEME_BACKGROUNDS.light,
+    // 首帧就绪后再显示窗口：避免"先显示未绘制的窗口，再跳变成应用"的过程。
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -1059,6 +1084,7 @@ function createWindow() {
   });
 
   mainWindow = win;
+  win.once('ready-to-show', () => win.show());
   win.on('maximize', () => win.webContents.send('window:maximized-changed', true));
   win.on('unmaximize', () => win.webContents.send('window:maximized-changed', false));
   win.on('closed', () => {
@@ -1102,6 +1128,7 @@ void app.whenReady().then(() => {
   registerViewerProtocol();
   registerBundleProtocol();
   registerWindowControlIpc();
+  registerThemeBootstrap();
   createWindow();
   // 后台清理缩略图磁盘缓存（超限时删除最旧）。
   void pruneThumbCache();
