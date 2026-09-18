@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { Check } from '@phosphor-icons/react';
 
 export interface ContextMenuItem {
   label: string;
@@ -8,6 +9,8 @@ export interface ContextMenuItem {
   danger?: boolean;
   /** Draw a separator line immediately above this item. */
   separator?: boolean;
+  /** Toggle-state marker: renders a trailing check and switches the item to a checkbox role. */
+  checked?: boolean;
   onSelect: () => void;
 }
 
@@ -19,17 +22,32 @@ export interface ContextMenuModel {
 
 const EDGE_MARGIN = 8;
 
+interface MenuPlacement {
+  left: number;
+  top: number;
+  originX: 'left' | 'right';
+  originY: 'top' | 'bottom';
+}
+
 export function ContextMenu({
   menu,
   onClose,
+  container,
 }: {
   menu: ContextMenuModel | null;
   onClose: () => void;
+  /** Portal target inside the themed app root so the menu inherits studio tokens. */
+  container?: HTMLElement | null;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const itemRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const previousFocusRef = useRef<HTMLElement | null>(null);
-  const [position, setPosition] = useState({ left: 0, top: 0 });
+  const [placement, setPlacement] = useState<MenuPlacement>({
+    left: 0,
+    top: 0,
+    originX: 'left',
+    originY: 'top',
+  });
 
   useLayoutEffect(() => {
     if (!menu) return;
@@ -44,7 +62,10 @@ export function ContextMenu({
       EDGE_MARGIN,
       Math.min(menu.y, window.innerHeight - rect.height - EDGE_MARGIN),
     );
-    setPosition({ left, top });
+    // The entry animation should scale out of the corner nearest the cursor.
+    const originX: MenuPlacement['originX'] = menu.x > left + rect.width / 2 ? 'right' : 'left';
+    const originY: MenuPlacement['originY'] = menu.y > top + rect.height / 2 ? 'bottom' : 'top';
+    setPlacement({ left, top, originX, originY });
   }, [menu]);
 
   useEffect(() => {
@@ -82,11 +103,17 @@ export function ContextMenu({
 
   if (!menu) return null;
 
+  const portalTarget = container && container.isConnected ? container : document.body;
+
   return createPortal(
     <div
       ref={ref}
       className="context-menu"
-      style={{ left: position.left, top: position.top }}
+      style={{
+        left: placement.left,
+        top: placement.top,
+        transformOrigin: `${placement.originX} ${placement.originY}`,
+      }}
       role="menu"
       aria-orientation="vertical"
       onKeyDown={(event) => {
@@ -114,7 +141,8 @@ export function ContextMenu({
           {item.separator && <div className="context-menu-separator" role="separator" />}
           <button
             type="button"
-            role="menuitem"
+            role={item.checked === undefined ? 'menuitem' : 'menuitemcheckbox'}
+            aria-checked={item.checked === undefined ? undefined : Boolean(item.checked)}
             ref={(element) => {
               itemRefs.current[index] = element;
             }}
@@ -130,10 +158,15 @@ export function ContextMenu({
           >
             {item.icon != null && <span className="context-menu-icon">{item.icon}</span>}
             <span className="context-menu-label">{item.label}</span>
+            {item.checked != null && (
+              <span className="context-menu-check" aria-hidden="true">
+                {item.checked && <Check size={13} weight="bold" />}
+              </span>
+            )}
           </button>
         </div>
       ))}
     </div>,
-    document.body,
+    portalTarget,
   );
 }

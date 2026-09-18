@@ -15,6 +15,7 @@ import {
   ArrowLeft,
   ArrowRight,
   ArrowsOut,
+  CaretDown,
   CaretRight,
   Check,
   Copy,
@@ -335,6 +336,7 @@ export function LibraryBrowser({
   });
   const [customRules, setCustomRules] = useState<CustomOrganizeRule[]>(() => loadCustomRules());
   const [showSettings, setShowSettings] = useState(false);
+  const libraryRootRef = useRef<HTMLDivElement>(null);
   const settingsButtonRef = useRef<HTMLButtonElement>(null);
   const sidebarScrollRef = useRef<HTMLDivElement>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuModel | null>(null);
@@ -1452,61 +1454,66 @@ export function LibraryBrowser({
 
   const buildImageMenu = (image: ImageEntry): ContextMenuItem[] => {
     const imageBlurred = blurredImages.has(image.relPath);
+    const imagePinned = pinnedCovers[image.folderId] === image.id;
     return [
-      { label: '查看图片', icon: '🔍', onSelect: () => setViewerImageId(image.id) },
+      { label: '查看图片', icon: <Eye size={16} />, onSelect: () => setViewerImageId(image.id) },
+      {
+        label: imagePinned ? '取消固定封面' : '设为封面',
+        icon: <PushPin size={16} />,
+        checked: imagePinned,
+        onSelect: () => pinCover(image.folderId, imagePinned ? null : image.id, image.name),
+      },
       {
         label: imageBlurred ? '取消隐私预览' : '设为隐私预览',
-        icon: imageBlurred ? '🔓' : '🔒',
+        icon: <EyeSlash size={16} />,
+        checked: imageBlurred,
         onSelect: () => toggleImageBlur(image),
       },
-      {
-        label: pinnedCovers[image.folderId] === image.id ? '取消固定封面' : '设为封面',
-        icon: '⭐',
-        onSelect: () => pinCover(image.folderId, pinnedCovers[image.folderId] === image.id ? null : image.id, image.name),
-      },
-      { label: '重命名…', icon: '✏️', onSelect: () => void handleRenameImage(image) },
-      { label: '复制路径', icon: '📋', onSelect: () => void copyPath(image.relPath) },
-      { label: '删除', icon: '🗑️', danger: true, separator: true, onSelect: () => requestDeleteImage(image) },
+      { label: '重命名…', icon: <PencilSimple size={16} />, onSelect: () => void handleRenameImage(image) },
+      { label: '复制路径', icon: <Copy size={16} />, separator: true, onSelect: () => void copyPath(image.relPath) },
+      { label: '删除', icon: <Trash size={16} />, danger: true, separator: true, onSelect: () => requestDeleteImage(image) },
     ];
   };
 
   const buildFolderMenu = (folder: FolderNode): ContextMenuItem[] => {
     const items: ContextMenuItem[] = [
-      { label: '打开', icon: '📂', onSelect: () => handleSelectFolder(folder) },
-      { label: '新建子文件夹…', icon: '➕', onSelect: () => void handleCreateSubfolder(folder) },
+      { label: '打开', icon: <FolderOpen size={16} />, onSelect: () => handleSelectFolder(folder) },
+      { label: '新建子文件夹…', icon: <FolderPlus size={16} />, onSelect: () => void handleCreateSubfolder(folder) },
     ];
     if (folder.relPath && folder.childCount > 0) {
       items.push({
         label: expandedFolders.has(folder.id) ? '收起子目录' : '展开子目录',
-        icon: expandedFolders.has(folder.id) ? '▾' : '▸',
+        icon: expandedFolders.has(folder.id) ? <CaretDown size={16} /> : <CaretRight size={16} />,
         onSelect: () => toggleFolder(folder.id),
       });
     }
     if (folder.relPath) {
-      items.push({ label: '重命名…', icon: '✏️', onSelect: () => void handleRenameFolder(folder) });
+      items.push({ label: '重命名…', icon: <PencilSimple size={16} />, separator: true, onSelect: () => void handleRenameFolder(folder) });
     }
     const folderImagesList = snapshot ? imagesOf(snapshot, folder.id) : [];
     const folderAllBlurred =
       folderImagesList.length > 0 && folderImagesList.every((img) => blurredImages.has(img.relPath));
     items.push({
       label: folderAllBlurred ? '取消隐私预览（含子文件夹）' : '设为隐私预览（含子文件夹）',
-      icon: folderAllBlurred ? '🔓' : '🔒',
+      icon: <EyeSlash size={16} />,
+      checked: folderAllBlurred,
       disabled: folderImagesList.length === 0,
+      separator: !folder.relPath,
       onSelect: () => toggleFolderBlur(folder),
     });
     items.push({
       label: '设置封面…',
-      icon: '🖼️',
+      icon: <ImagesSquare size={16} />,
       disabled: folderImagesList.length === 0,
       onSelect: () => setCoverPickerFolder(folder),
     });
     items.push(
-      { label: '整理…', icon: '🧹', onSelect: () => openOrganizePreviewFor(folder) },
-      { label: '导出 ZIP…', icon: '📦', onSelect: () => void exportFolder(folder) },
-      { label: '复制路径', icon: '📋', onSelect: () => void copyPath(folder.relPath || '根目录') },
+      { label: '整理…', icon: <MagicWand size={16} />, onSelect: () => openOrganizePreviewFor(folder) },
+      { label: '导出 ZIP…', icon: <FileZip size={16} />, separator: true, onSelect: () => void exportFolder(folder) },
+      { label: '复制路径', icon: <Copy size={16} />, onSelect: () => void copyPath(folder.relPath || '根目录') },
     );
     if (folder.relPath) {
-      items.push({ label: '删除', icon: '🗑️', danger: true, separator: true, onSelect: () => requestDeleteFolder(folder) });
+      items.push({ label: '删除', icon: <Trash size={16} />, danger: true, separator: true, onSelect: () => requestDeleteFolder(folder) });
     }
     return items;
   };
@@ -1584,6 +1591,7 @@ export function LibraryBrowser({
 
   return (
     <div
+      ref={libraryRootRef}
       className="desktop-library app-shell flex h-screen flex-col"
       data-view={viewMode}
       data-sidebar={sidebarHidden ? 'closed' : 'open'}
@@ -2122,7 +2130,7 @@ export function LibraryBrowser({
         </div>
       )}
 
-      <ContextMenu menu={contextMenu} onClose={() => setContextMenu(null)} />
+      <ContextMenu menu={contextMenu} container={libraryRootRef.current} onClose={() => setContextMenu(null)} />
     </div>
   );
 }

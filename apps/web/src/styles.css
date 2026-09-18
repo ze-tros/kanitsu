@@ -354,54 +354,76 @@ body {
   transform: rotate(90deg);
 }
 
-/* Right-click context menu. */
+/* Right-click context menu — Kanitsu studio language.
+   ContextMenu portals into .desktop-library, so these scoped studio tokens
+   (warm surfaces, coral accent, studio easing) resolve here. */
 .context-menu {
   position: fixed;
   z-index: 200;
-  min-width: 190px;
-  max-width: min(280px, calc(100vw - 16px));
+  min-width: 200px;
+  max-width: min(300px, calc(100vw - 16px));
   max-height: calc(100vh - 16px);
   overflow-y: auto;
-  padding: 6px;
-  border-radius: 12px;
-  border: 1px solid var(--color-base-300, rgba(128, 128, 128, 0.35));
-  background: var(--color-base-100, #ffffff);
-  color: var(--color-base-content, #1f2937);
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.22);
+  overscroll-behavior: contain;
+  padding: 5px;
+  border-radius: var(--desktop-radius-panel, 12px);
+  border: 1px solid var(--desktop-line-strong, rgba(128, 128, 128, 0.35));
+  background: color-mix(in srgb, var(--desktop-surface-2, #202023) 86%, transparent);
+  backdrop-filter: blur(20px) saturate(1.15);
+  color: var(--desktop-text-soft, #d3cfca);
+  box-shadow: var(--desktop-shadow-dialog, 0 30px 90px rgba(0, 0, 0, 0.5));
   user-select: none;
+  animation: context-menu-in 150ms var(--desktop-ease-out, cubic-bezier(0.16, 1, 0.3, 1)) both;
+}
+@keyframes context-menu-in {
+  from { opacity: 0; transform: scale(0.96) translateY(-2px); }
+  to { opacity: 1; transform: none; }
 }
 .context-menu-item {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   width: 100%;
-  padding: 7px 9px;
+  padding: 7px 10px;
   border: none;
   border-radius: 8px;
   background: transparent;
-  color: inherit;
+  color: var(--desktop-text-soft, #d3cfca);
   font-size: 13px;
+  line-height: 1.4;
   text-align: left;
   cursor: pointer;
 }
 .context-menu-item:hover:not(:disabled),
 .context-menu-item:focus-visible {
-  background: color-mix(in srgb, var(--color-primary, #ff785e) 14%, transparent);
+  background: var(--desktop-accent-soft, rgba(255, 120, 94, 0.14));
+  color: var(--desktop-text, #f3f0eb);
 }
 .context-menu-item:disabled {
-  opacity: 0.4;
-  cursor: default;
+  opacity: 0.38;
+  cursor: not-allowed;
 }
 .context-menu-item-danger {
-  color: var(--color-error, #ef4444);
+  color: var(--desktop-danger, #ff8f82);
+}
+.context-menu-item-danger:hover:not(:disabled),
+.context-menu-item-danger:focus-visible {
+  background: var(--desktop-danger-soft, rgba(255, 105, 92, 0.13));
+  color: var(--desktop-danger, #ff8f82);
 }
 .context-menu-icon {
   width: 16px;
   flex-shrink: 0;
   display: inline-flex;
   justify-content: center;
-  font-size: 14px;
-  opacity: 0.9;
+  color: var(--desktop-muted, #a09b9b);
+}
+.context-menu-item:hover:not(:disabled) .context-menu-icon,
+.context-menu-item:focus-visible .context-menu-icon {
+  color: var(--desktop-accent-text, #ff9b89);
+}
+.context-menu-item-danger .context-menu-icon {
+  color: var(--desktop-danger, #ff8f82);
 }
 .context-menu-label {
   flex: 1 1 auto;
@@ -409,10 +431,21 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.context-menu-check {
+  flex-shrink: 0;
+  display: inline-flex;
+  width: 13px;
+  color: var(--desktop-accent-text, #ff9b89);
+}
 .context-menu-separator {
   height: 1px;
-  margin: 5px 6px;
-  background: var(--color-base-300, rgba(128, 128, 128, 0.28));
+  margin: 5px 8px;
+  background: var(--desktop-line, rgba(128, 128, 128, 0.28));
+}
+@media (prefers-reduced-motion: reduce) {
+  .context-menu {
+    animation: none !important;
+  }
 }
 
 /* —— 柔和动画 ——
