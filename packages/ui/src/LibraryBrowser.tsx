@@ -60,10 +60,12 @@ import {
   importFolder,
   joinRelPath,
   loadOrScan,
+  readSnapshotMirror,
   renameFolder,
   renameImage,
   rescanLibrary,
   undoOrganize,
+  writeSnapshotMirror,
   type FolderNode,
   type ImageEntry,
   type ImportSkippedFile,
@@ -274,7 +276,10 @@ export function LibraryBrowser({
   store: LibraryStore;
   index: PersistentIndex;
 }) {
-  const [snapshot, setSnapshot] = useState<LibrarySnapshot | null>(null);
+  // 首帧同步水合：localStorage 读取是同步的，能在首次渲染前拿到上次会话的
+  // 图库结构，侧栏"全部图包"与图包列表不必等 IndexedDB + IPC 的异步加载
+  // 结束才"慢一拍"弹出。loadOrScan 完成后仍会用权威数据整体覆盖。
+  const [snapshot, setSnapshot] = useState<LibrarySnapshot | null>(readSnapshotMirror);
   const [selectedFolderId, setSelectedFolderId] = useState<string>('');
   const [viewerImageId, setViewerImageId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -347,9 +352,18 @@ export function LibraryBrowser({
   // 最近一次“已入栈”的目录 id：后退/前进自身触发的选中变化用它来抑制重复记录。
   const lastRecordedFolderRef = useRef<string | null>(null);
 
+  // 同步镜像的签名：指纹 + 目录/图片数量。三者都不变时（如 focus 自动刷新
+  // 的重复扫描）跳过重写，避免对大快照做无谓的 stringify。
+  const mirrorKeyRef = useRef('');
+
   const applySnapshot = useCallback((next: LibrarySnapshot) => {
     setSnapshot(next);
     setSelectedFolderId((prev) => (prev && next.folders[prev] ? prev : next.rootId));
+    const mirrorKey = `${next.fingerprint}|${Object.keys(next.folders).length}|${Object.keys(next.images).length}`;
+    if (mirrorKey !== mirrorKeyRef.current) {
+      mirrorKeyRef.current = mirrorKey;
+      writeSnapshotMirror(next);
+    }
   }, []);
 
   // 记录每一次有效的文件夹导航（除前进/后退自身外）：截断当前位置之后的历史，
@@ -1889,16 +1903,15 @@ export function LibraryBrowser({
               <DesktopIconButton label="新建子图包" disabled={!selectedFolder} onClick={() => selectedFolder && handleCreateSubfolder(selectedFolder)}><FolderPlus size={16} /></DesktopIconButton>
             </div>
             <nav className="desktop-sidebar-primary" aria-label="主要功能">
-            {rootFolder && (
+              {/* 常驻按钮：首次启动快照未加载时也可见可点，此时点击即回到根视图。 */}
               <button
                 type="button"
                 className={`desktop-sidebar-nav-item ${isRootSelected ? 'is-active' : ''}`}
-                onClick={() => handleSelectFolder(rootFolder)}
-                onContextMenu={(event) => openContextMenu(event, buildFolderMenu(rootFolder))}
+                onClick={() => (rootFolder ? handleSelectFolder(rootFolder) : selectFolderRaw(''))}
+                onContextMenu={rootFolder ? (event) => openContextMenu(event, buildFolderMenu(rootFolder)) : undefined}
               >
                 <ImagesSquare size={18} weight="duotone" /><span>全部图包</span>
               </button>
-            )}
             </nav>
             <div className="desktop-panel-label">图包目录</div>
             {snapshot ? (

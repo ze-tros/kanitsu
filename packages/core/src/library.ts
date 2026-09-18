@@ -30,9 +30,13 @@ export function createMemoryPersistentIndex(): PersistentIndex {
 
 /** Load the cached index if present, otherwise scan the library and persist it. */
 export async function loadOrScan(store: LibraryStore, index: PersistentIndex): Promise<LibrarySnapshot> {
-  const cached = await index.load();
-  const currentRoot = await store.getLibraryRoot();
-  const currentFingerprint = await store.getLibraryFingerprint();
+  // The three probes are independent (IndexedDB read vs. store IPC round-trips);
+  // awaiting them sequentially stacks their latencies onto startup.
+  const [cached, currentRoot, currentFingerprint] = await Promise.all([
+    index.load(),
+    store.getLibraryRoot(),
+    store.getLibraryFingerprint(),
+  ]);
   if (cached && cached.fingerprint === currentFingerprint) {
     // The library root display name is live metadata (it can change, e.g. through
     // i18n/localization), so never trust the cached root name: refresh it from the

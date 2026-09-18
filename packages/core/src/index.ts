@@ -6,6 +6,7 @@ export * from './import';
 export * from './organize';
 export * from './library';
 export * from './indexed';
+export * from './snapshotMirror';
 export * from './remove';
 export * from './entry-ops';
 export * from './log';
