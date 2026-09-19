@@ -109,6 +109,7 @@ type PromptState =
 
 type SortMode = 'default' | 'name' | 'date' | 'size';
 type SortDirection = 'asc' | 'desc';
+const SORT_MODE_LABELS: Record<SortMode, string> = { default: '默认顺序', name: '按名称', date: '按日期', size: '按大小' };
 
 type ToolsScreenProps = {
   onBack: () => void;
@@ -1858,6 +1859,21 @@ export function MobileApp({
     [blurredImages, navigateToFolder, toggleFolderBlur, openOrganizeFor, handleExport, copyText, openOverlay],
   );
 
+  // 排序方式选择器（替代原生 select 弹层，复用底部动作面板）。
+  const openSortSheet = useCallback(() => {
+    const actions: SheetAction[] = (Object.keys(SORT_MODE_LABELS) as SortMode[]).map((mode) => ({
+      label: SORT_MODE_LABELS[mode],
+      checked: sortMode === mode,
+      onSelect: () => {
+        setSortMode(mode);
+        if (mode === 'name') setSortDirection('asc');
+        else if (mode === 'date' || mode === 'size') setSortDirection('desc');
+      },
+    }));
+    setSheet({ title: '排序方式', actions });
+    openOverlay('sheet');
+  }, [sortMode, openOverlay]);
+
   // ===== 打开各 UI 层（history 栈配对）=====
   const openViewer = useCallback(
     (image: ImageEntry) => {
@@ -2233,24 +2249,18 @@ export function MobileApp({
               <div className="m-directory-toolbar">
                 <span>{isRoot ? '图包排列' : '内容排列'}</span>
                 <div className="m-directory-controls">
-                  <label className="m-sort-picker">
+                  <button
+                    type="button"
+                    className="m-sort-picker"
+                    onClick={openSortSheet}
+                    aria-label={`排序方式，当前${SORT_MODE_LABELS[sortMode]}`}
+                  >
                     <MobileIcon name="📐" className="w-4 h-4" />
-                    <select
-                      value={sortMode}
-                      onChange={(e) => {
-                        const next = e.target.value as SortMode;
-                        setSortMode(next);
-                        if (next === 'name') setSortDirection('asc');
-                        else if (next === 'date' || next === 'size') setSortDirection('desc');
-                      }}
-                      aria-label="图包和图片排序方式"
-                    >
-                      <option value="default">默认顺序</option>
-                      <option value="name">按名称</option>
-                      <option value="date">按日期</option>
-                      <option value="size">按大小</option>
-                    </select>
-                  </label>
+                    <span className="m-sort-picker-value">{SORT_MODE_LABELS[sortMode]}</span>
+                    <svg viewBox="0 0 24 24" className="m-sort-picker-chevron" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M6 9l6 6 6-6" />
+                    </svg>
+                  </button>
                   <button
                     className="m-sort-direction"
                     disabled={sortMode === 'default'}

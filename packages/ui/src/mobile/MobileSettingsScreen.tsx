@@ -371,20 +371,25 @@ function MobileLogSection() {
     <section className="m-settings-group">
       <h2 className="m-settings-group-title">诊断</h2>
       <div className="m-settings-card">
-        <label className="m-settings-row">
+        <div className="m-settings-row is-stacked">
           <span className="m-settings-row-icon"><SettingsGlyph name="debug" /></span>
           <span className="m-settings-row-copy">
             <strong>日志等级</strong>
             <span>控制渲染端与 Android 原生桥记录的详细程度。</span>
           </span>
-          <span className="m-select-wrap m-log-level-wrap">
-            <select className="m-select m-log-level-select" value={level} onChange={(e) => setLevel(e.target.value as LogLevel)}>
-              {LEVEL_LABELS.map(([v, label]) => (
-                <option key={v} value={v}>{label}</option>
-              ))}
-            </select>
-          </span>
-        </label>
+        </div>
+        <div className="m-theme-segment" role="group" aria-label="日志等级">
+          {LEVEL_LABELS.map(([v, label]) => (
+            <button
+              key={v}
+              className={level === v ? 'is-active' : ''}
+              aria-pressed={level === v}
+              onClick={() => setLevel(v)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
         <div className="m-settings-actions is-three">
           <button className="m-button" onClick={() => setShowLogs((v) => !v)}>{showLogs ? '收起日志' : '查看日志'}</button>
           <button className="m-button" onClick={() => void refreshNativeLogs()}>读取原生</button>

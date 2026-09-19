@@ -33,6 +33,8 @@ export interface SheetAction {
   icon?: ReactNode;
   danger?: boolean;
   disabled?: boolean;
+  /** 选中态标记（单选选择器用），渲染为右侧勾选。 */
+  checked?: boolean;
   onSelect: () => void;
 }
 
@@ -145,6 +147,7 @@ export function MobileActionSheet({
               key={i}
               className={`m-sheet-action ${action.danger ? 'is-danger' : ''}`}
               disabled={action.disabled}
+              aria-pressed={action.checked === undefined ? undefined : action.checked}
               onClick={() => {
                 if (action.disabled) return;
                 requestClose(action.onSelect);
@@ -156,6 +159,13 @@ export function MobileActionSheet({
                 </span>
               )}
               <span className="flex-1 min-w-0 truncate">{action.label}</span>
+              {action.checked && (
+                <span className="m-sheet-action-check" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M5 13l4 4L19 7" />
+                  </svg>
+                </span>
+              )}
             </button>
           ))}
         </div>
