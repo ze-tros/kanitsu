@@ -2503,7 +2503,6 @@ export function MobileApp({
               </button>
             </>
           )}
-          <span className="m-gesture-bar" aria-hidden="true" />
         </nav>
       )}
 

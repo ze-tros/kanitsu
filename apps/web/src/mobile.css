@@ -984,20 +984,6 @@ html[data-theme='light'] .mobile-studio {
   color: var(--m-accent-text);
 }
 
-.m-gesture-bar {
-  position: absolute;
-  z-index: 2;
-  bottom: 4px;
-  left: 50%;
-  width: 104px;
-  height: 4px;
-  border-radius: 3px;
-  background: color-mix(in srgb, var(--m-text) 70%, transparent);
-  opacity: 0.34;
-  transform: translateX(-50%);
-  pointer-events: none;
-}
-
 .m-batch-wrap {
   position: fixed;
   right: 12px;
