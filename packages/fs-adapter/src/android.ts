@@ -78,6 +78,7 @@ interface KanitsuPluginNative {
   clearCaches(): Promise<void>;
   setLogLevel(opts: { level: 'debug' | 'info' | 'warn' | 'error' }): Promise<void>;
   readLogs(opts: { maxLines?: number }): Promise<{ lines: string[] }>;
+  setSystemTheme(opts: { dark: boolean }): Promise<void>;
 }
 
 /** Wrapped bridge exposed as window.kanitsuAndroid to the shared UI/Core code. */
@@ -109,6 +110,7 @@ export interface KanitsuAndroidBridge {
   clearCaches(): Promise<void>;
   setLogLevel(level: 'debug' | 'info' | 'warn' | 'error'): Promise<void>;
   readLogs(maxLines?: number): Promise<string[]>;
+  setSystemTheme(dark: boolean): Promise<void>;
 }
 
 declare global {
@@ -230,6 +232,7 @@ function requireBridge(): Promise<KanitsuAndroidBridge> {
         clearCaches: () => p.clearCaches(),
         setLogLevel: (level) => p.setLogLevel({ level }),
         readLogs: async (maxLines) => (await p.readLogs({ maxLines })).lines,
+        setSystemTheme: (dark) => p.setSystemTheme({ dark }),
       };
       window.kanitsuAndroid = bridge;
       return bridge;

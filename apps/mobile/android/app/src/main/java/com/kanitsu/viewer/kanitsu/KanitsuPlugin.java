@@ -72,6 +72,27 @@ public class KanitsuPlugin extends Plugin {
     }
 
     // ------------------------------------------------------------------
+    // System bars
+    // ------------------------------------------------------------------
+
+    /** 应用内主题切换时同步状态栏/导航栏底色与图标明暗（setSystemTheme: { dark })。 */
+    @PluginMethod
+    public void setSystemTheme(PluginCall call) {
+        Boolean dark = call.getBoolean("dark");
+        if (dark == null) {
+            call.reject("missing dark");
+            return;
+        }
+        Activity activity = getActivity();
+        if (activity == null) {
+            call.reject("activity unavailable");
+            return;
+        }
+        activity.runOnUiThread(() -> com.kanitsu.viewer.SystemBars.apply(activity, dark));
+        call.resolve();
+    }
+
+    // ------------------------------------------------------------------
     // SAF source
     // ------------------------------------------------------------------
 

@@ -22,6 +22,7 @@ export {
 } from '../LibraryBrowser';
 
 import { DEFAULT_ACCENT, isAccentMode, type AccentMode } from '../accents';
+import type { KanitsuAndroidBridge } from '../../../fs-adapter/src/android';
 
 /** 图片网格：3 列方形卡片（相册标准密度），卡片间距。 */
 export const IMAGE_GRID = { cols: 3, gap: 3 } as const;
@@ -73,8 +74,25 @@ export function applyThemeMode(mode: ThemeMode): void {
       : mode;
   document.documentElement.setAttribute('data-theme', resolved);
   document.querySelector('meta[name="theme-color"]')?.setAttribute('content', resolved === 'light' ? '#e7e9ed' : '#0e1014');
+  syncAndroidSystemBars(resolved === 'dark');
   try {
     localStorage.setItem(THEME_KEY, mode);
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * 把解析后的主题同步给 Android 系统栏（底色 + 图标明暗）。
+ * 桥接未就绪（web/electron）时是空操作；调用失败静默忽略，不影响主题本身。
+ * ui 包不依赖 fs-adapter 的全局 Window 声明，这里做类型化读取（同 MobileSettingsScreen）。
+ */
+function syncAndroidSystemBars(dark: boolean): void {
+  try {
+    const bridge = (window as unknown as { kanitsuAndroid?: KanitsuAndroidBridge }).kanitsuAndroid;
+    void bridge?.setSystemTheme?.(dark)?.catch(() => {
+      // ignore
+    });
   } catch {
     // ignore
   }
