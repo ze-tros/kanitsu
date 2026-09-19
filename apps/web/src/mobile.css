@@ -2598,8 +2598,10 @@ html[data-theme='light'] .mobile-studio {
 .m-context-header { background: color-mix(in srgb, var(--m-app) 92%, transparent); box-shadow: 0 10px 30px rgba(0,0,0,.12); }
 .m-context-bar { min-height: 62px; padding-inline: 12px; }
 .m-icon-button, .m-viewer-button { border-radius: 10px; }
-.m-search-field { border-color: var(--m-line); border-radius: 10px; background: color-mix(in srgb, var(--m-text) 3.5%, transparent); }
-.m-search-field:focus-within { border-color: var(--m-accent-line); background: color-mix(in srgb, var(--m-text) 6%, transparent); }
+.m-search-field { border-color: var(--m-line); border-radius: var(--m-radius-control); background: color-mix(in srgb, var(--m-text) 3.5%, transparent); }
+/* 聚焦只换描边：不变灰底、不叠加全局 input 光环，避免“框中框”。 */
+.m-search-field:focus-within { border-color: var(--m-accent-line); }
+.m-search-field input:focus-visible { box-shadow: none; }
 .m-eyebrow { color: var(--m-accent); letter-spacing: .16em; }
 .m-library-intro h1 { letter-spacing: -.045em; font-weight: 650; }
 .m-library-tools, .m-directory-toolbar, .m-view-toolbar { border-color: var(--m-line); }
