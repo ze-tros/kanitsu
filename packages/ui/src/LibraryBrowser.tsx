@@ -3714,8 +3714,9 @@ function Viewer({
           <button type="button" className="viewer-button viewer-tool-text" aria-label="原始大小" title="原始大小" onClick={percent}>1:1</button>
           <button type="button" className="viewer-button" aria-label="顺时针旋转" title="顺时针旋转" onClick={rotateCW}><ArrowClockwise size={17} /></button>
           <button type="button" className={`viewer-button ${showInfo ? 'is-active' : ''}`} aria-label="图片信息" aria-pressed={showInfo} title="图片信息" onClick={() => setShowInfo((value) => !value)}><Info size={17} /></button>
-          {/* RAW 观感切换:直出=相机内嵌预览(机内创意外观);显影=完整解码
-              (与 Windows 照片等查看器显影后的稳定画面一致)。 */}
+          {/* RAW 观感切换:显影=完整解码(与 Windows 照片等查看器显影后的稳定
+              画面一致);直出=相机内嵌预览(机内创意外观)。顺序与设置页一致:
+              完整解码在前(默认),相机直出在后。 */}
           {isRaw && (
             <>
               <span className="viewer-separator" />
@@ -3726,22 +3727,22 @@ function Viewer({
                 <button
                   type="button"
                   role="radio"
-                  aria-checked={rawViewMode === 'camera'}
-                  className={rawViewMode === 'camera' ? 'is-active' : ''}
-                  title="相机直出：显示相机内嵌预览（机内创意外观）"
-                  onClick={() => onRawViewModeChange('camera')}
-                >
-                  直出
-                </button>
-                <button
-                  type="button"
-                  role="radio"
                   aria-checked={rawViewMode === 'developed'}
                   className={rawViewMode === 'developed' ? 'is-active' : ''}
                   title="完整解码：应用重新显影，与 Windows 照片等查看器的最终画面一致"
                   onClick={() => onRawViewModeChange('developed')}
                 >
                   显影
+                </button>
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={rawViewMode === 'camera'}
+                  className={rawViewMode === 'camera' ? 'is-active' : ''}
+                  title="相机直出：显示相机内嵌预览（机内创意外观）"
+                  onClick={() => onRawViewModeChange('camera')}
+                >
+                  直出
                 </button>
               </div>
             </>

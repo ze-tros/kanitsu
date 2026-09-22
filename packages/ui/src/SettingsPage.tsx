@@ -257,7 +257,7 @@ export function SettingsPage({
                             onClick={() => onRawViewModeChange(value)}
                             onKeyDown={(event) => handleRadioNavigation(
                               event,
-                              ['camera', 'developed'],
+                              ['developed', 'camera'],
                               rawViewMode,
                               onRawViewModeChange,
                             )}
