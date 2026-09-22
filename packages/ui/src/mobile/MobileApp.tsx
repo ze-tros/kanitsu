@@ -34,7 +34,7 @@ import {
 import type { FileRef, ImportSourcePicker, LibraryStore } from '../../../fs-adapter/src/types';
 import { organizeByFolder, type CustomOrganizeRule } from '../../../organizer/src/index';
 import { pickCover } from '../../../cover-picker/src/index';
-import { BlobImage } from '../BlobImage';
+import { BlobImage, setImageMotionSuppressed } from '../BlobImage';
 import { KanitsuLogo } from '../KanitsuLogo';
 import {
   COVER_THUMBNAIL_SIZE,
@@ -58,7 +58,8 @@ import {
   MobileToast,
   type SheetAction,
 } from './MobileSheets';
-import { MobileSettingsScreen } from './MobileSettingsScreen';
+import { MobileSettingsScreen, type SettingsSectionId } from './MobileSettingsScreen';
+import { useExitPresence } from './useExitPresence';
 import {
   FOLDER_GRID,
   IMAGE_GRID,
@@ -74,7 +75,7 @@ import {
   skippedReasonLabel,
   startThemeModeSync,
 } from './mobileShared';
-import { Z_BATCH_BAR, Z_DIALOG, Z_DRAWER, Z_SETTINGS } from './zindex';
+import { Z_BATCH_BAR, Z_DIALOG, Z_DRAWER } from './zindex';
 import { MobileIcon } from './mobileIcons';
 
 // —— 移动端网格参数（单一数据源：mobileShared，避免与库内 IMAGE_GRID 漂移）——
@@ -90,7 +91,7 @@ const FOLDER_CAPTION_H = 50;
 const MOBILE_OVERSCAN_ROWS = Math.max(OVERSCAN_ROWS, 8);
 const MOBILE_SCROLL_PRELOAD_RESUME_MS = 180;
 
-type OverlayLayer = 'drawer' | 'sheet' | 'viewer' | 'settings' | 'tools' | 'organize' | 'cover' | 'dialog' | 'report' | 'search';
+type OverlayLayer = 'drawer' | 'sheet' | 'viewer' | 'settings' | 'organize' | 'cover' | 'dialog' | 'report' | 'search';
 type StackEntry = { type: 'folder'; folderId: string } | { type: 'overlay'; layer: OverlayLayer };
 
 interface SheetModel {
@@ -112,7 +113,6 @@ type SortDirection = 'asc' | 'desc';
 const SORT_MODE_LABELS: Record<SortMode, string> = { default: '默认顺序', name: '按名称', date: '按日期', size: '按大小' };
 
 type ToolsScreenProps = {
-  onBack: () => void;
   onOpenSettings: () => void;
   onImport: () => void;
   imageCount: number;
@@ -145,6 +145,7 @@ function useLongPress(onLongPress: () => void, ms = 460) {
   const timerRef = useRef<number | null>(null);
   const firedRef = useRef(false);
   const startPointRef = useRef<{ x: number; y: number } | null>(null);
+  const elementRef = useRef<HTMLDivElement | null>(null);
   const [pressing, setPressing] = useState(false);
 
   const cancel = useCallback(() => {
@@ -192,7 +193,22 @@ function useLongPress(onLongPress: () => void, ms = 460) {
   }, [cancel]);
 
   useEffect(() => cancel, [cancel]);
+
+  // 长按触发后动作面板会滑到手指下方；手指抬起时 WebView 按释放坐标做命中
+  // 测试并合成 click，落在面板按钮上就会误触发动作（“自动选中手指位置”）。
+  // 在非被动监听里对已触发长按的触摸 preventDefault，阻止浏览器合成 click。
+  useEffect(() => {
+    const el = elementRef.current;
+    if (!el) return;
+    const onTouchEnd = (event: TouchEvent) => {
+      if (firedRef.current) event.preventDefault();
+    };
+    el.addEventListener('touchend', onTouchEnd, { passive: false });
+    return () => el.removeEventListener('touchend', onTouchEnd);
+  }, []);
+
   return {
+    ref: elementRef,
     onTouchStart: start,
     onTouchMove: move,
     onTouchEnd: end,
@@ -291,6 +307,7 @@ function ImageCard({
   const lp = useLongPress(onActions);
   return (
     <div
+      ref={lp.ref}
       className="m-gallery-item m-image-card relative overflow-hidden flex flex-col"
       role="button"
       tabIndex={0}
@@ -377,6 +394,7 @@ function ImageListRow({
     .join(' · ');
   return (
     <div
+      ref={lp.ref}
       className={"m-image-list-row flex items-center gap-3 " + (selectMode && selected ? 'is-selected' : '')}
       role="button"
       tabIndex={0}
@@ -451,6 +469,7 @@ function FolderCard({
   const lp = useLongPress(onActions);
   return (
     <div
+      ref={lp.ref}
       className="m-gallery-item m-folder-card relative overflow-hidden"
       role="button"
       tabIndex={0}
@@ -541,6 +560,7 @@ function FolderListRow({
   const lp = useLongPress(onActions);
   return (
     <div
+      ref={lp.ref}
       className="m-folder-list-row flex items-center gap-3"
       role="button"
       tabIndex={0}
@@ -593,8 +613,47 @@ function FolderListRow({
   );
 }
 
+/** 图库/工具双 tab 底栏：常驻外壳（任务进行中只禁用不隐藏，避免布局跳变）。 */
+function MobileLibraryDock({
+  active,
+  disabled = false,
+  onLibrary,
+  onTools,
+}: {
+  active: 'library' | 'tools';
+  disabled?: boolean;
+  onLibrary: () => void;
+  onTools: () => void;
+}) {
+  return (
+    <nav className="m-bottom-dock is-library" aria-label="主导航">
+      <button
+        className={`m-dock-button ${active === 'library' ? 'is-active' : ''}`}
+        onClick={onLibrary}
+        disabled={disabled}
+        aria-current={active === 'library' ? 'page' : undefined}
+      >
+        <MobileIcon name="🏠" className="w-5 h-5" />
+        <span>图库</span>
+      </button>
+      <button
+        className={`m-dock-button ${active === 'tools' ? 'is-active' : ''}`}
+        onClick={onTools}
+        disabled={disabled}
+        aria-current={active === 'tools' ? 'page' : undefined}
+      >
+        <MobileIcon name="📐" className="w-5 h-5" />
+        <span>工具</span>
+      </button>
+    </nav>
+  );
+}
+
+/**
+ * 工具页：与图库平级的 tab（不是覆盖层）。无独立顶栏；设置作为二级页从这里
+ * 进入。底栏由外壳常驻提供，tab 切换时内容区整体替换。
+ */
 function MobileToolsScreen({
-  onBack,
   onOpenSettings,
   onImport,
   imageCount,
@@ -607,22 +666,8 @@ function MobileToolsScreen({
   onShowReport,
 }: ToolsScreenProps) {
   return (
-    <div className="m-mine-screen fixed inset-0 flex flex-col" style={{ zIndex: Z_SETTINGS }}>
-      <header className="m-context-header shrink-0" style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}>
-        <div className="m-context-bar">
-          <button className="m-icon-button" onClick={onBack} aria-label="返回图库">
-            <svg viewBox="0 0 24 24" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M15 18l-6-6 6-6" />
-            </svg>
-          </button>
-          <div className="m-context-title">
-            <strong>工具</strong>
-            <span>图库任务与维护</span>
-          </div>
-          <span className="w-11 h-11 shrink-0" aria-hidden="true" />
-        </div>
-      </header>
-      <main className="m-mine-content flex-1 overflow-y-auto overscroll-contain">
+    <div className="m-mine-screen m-tab-enter flex-1 min-h-0 overflow-y-auto overscroll-contain">
+      <main className="m-mine-content">
         <section className="m-mine-hero">
           <span className="m-eyebrow">工作区</span>
           <h1>管理本地图库</h1>
@@ -696,7 +741,7 @@ function MobileToolsScreen({
             <span className="m-mine-entry-icon"><MobileIcon name="⚙️" className="w-5 h-5" /></span>
             <span className="m-mine-entry-copy">
               <strong>设置</strong>
-              <span>主题、缓存、整理规则与诊断</span>
+              <span>主题、性能、缓存、整理规则与诊断</span>
             </span>
             <svg viewBox="0 0 24 24" className="m-list-chevron w-4 h-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M9 18l6-6-6-6" />
@@ -816,15 +861,33 @@ export function MobileApp({
   const [sheet, setSheet] = useState<SheetModel | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
   const [promptState, setPromptState] = useState<PromptState | null>(null);
-  const [showTools, setShowTools] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
+  // 工具 tab：与图库平级（底栏切换），不是覆盖层，不进 history 栈。
+  const [toolsTab, setToolsTab] = useState(false);
   const [coverPickerFolder, setCoverPickerFolder] = useState<FolderNode | null>(null);
+  // 设置页（工具 tab 的二级页）与页内分类详情（三级）。section 由本层持有，
+  // 硬件返回时先退三级详情，再关整个设置页。
+  const [showSettings, setShowSettings] = useState(false);
+  const [settingsSection, setSettingsSection] = useState<SettingsSectionId | null>(null);
   // 多选 / 批量操作
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set());
   const [organizePreview, setOrganizePreview] = useState<{ folder: FolderNode; bindings: OrganizeBinding[] } | null>(null);
   const [organizeResult, setOrganizeResult] = useState<OrganizeResult | null>(null);
   const [lastManifest, setLastManifest] = useState<OrganizeManifest | null>(null);
+
+  // ===== 关闭退场动画：这些层关闭时多挂载一小段时间播放滑出/淡出 =====
+  const settingsPresence = useExitPresence(showSettings, 240);
+  const drawerPresence = useExitPresence(drawerOpen, 220);
+  const reportPresence = useExitPresence(showReport, 200);
+  const dialogPresence = useExitPresence(deleteTarget != null || promptState != null, 200);
+  const organizePresence = useExitPresence(organizePreview != null, 200);
+  const coverPresence = useExitPresence(coverPickerFolder != null, 200);
+  const resultPresence = useExitPresence(organizeResult != null, 200);
+  // 退场动画期间数据已被置空，用 ref 保留最后一次的内容供退出渲染。
+  const organizePreviewRef = useRef(organizePreview);
+  organizePreviewRef.current = organizePreview ?? organizePreviewRef.current;
+  const coverFolderRef = useRef(coverPickerFolder);
+  coverFolderRef.current = coverPickerFolder ?? coverFolderRef.current;
 
   // ===== 任务进度 =====
   const [importing, setImporting] = useState(false);
@@ -845,6 +908,10 @@ export function MobileApp({
   selectedFolderIdRef.current = selectedFolderId;
   const selectModeRef = useRef(selectMode);
   selectModeRef.current = selectMode;
+  const toolsTabRef = useRef(toolsTab);
+  toolsTabRef.current = toolsTab;
+  const settingsSectionRef = useRef(settingsSection);
+  settingsSectionRef.current = settingsSection;
 
   // 搜索防抖：输入停止 180ms 后才更新查询，避免每击一键重算数千张图的过滤。
   useEffect(() => {
@@ -1020,6 +1087,33 @@ export function MobileApp({
   // 它是快速连续返回 / 主动关闭与硬件返回交错时栈错乱的竞态根源。
   const stackRef = useRef<StackEntry[]>([]);
 
+  // ===== 页面切换动画 =====
+  // 目录前进/后退、搜索开合时对滚动容器重放入场动画（方向感知）。动画放在
+  // 视口大小的滚动容器上，而不是内容包装层——后者在万级图目录下可达几十万
+  // px 高，整体提升为合成层的内存/栅格化代价不可控。
+  const [pageTransition, setPageTransition] = useState<{ seq: number; kind: 'forward' | 'back' | 'tab-back' }>({ seq: 0, kind: 'forward' });
+  const animatePage = useCallback((kind: 'forward' | 'back' | 'tab-back') => {
+    setPageTransition((prev) => ({ seq: prev.seq + 1, kind }));
+  }, []);
+
+  useLayoutEffect(() => {
+    const el = mainScrollRef.current;
+    if (!el || pageTransition.seq === 0) return;
+    el.classList.remove('m-page-in', 'is-back', 'is-tab-back');
+    if (pageTransition.kind === 'back') el.classList.add('is-back');
+    else if (pageTransition.kind === 'tab-back') el.classList.add('is-tab-back');
+    // 读取 offsetWidth 强制 reflow：同名类连续两次前进导航也要重播动画。
+    void el.offsetWidth;
+    el.classList.add('m-page-in');
+    // animationend 会从子元素冒泡上来（占位 shimmer 等），只认自己的。
+    const done = (e: AnimationEvent) => {
+      if (e.target !== el) return;
+      el.classList.remove('m-page-in', 'is-back', 'is-tab-back');
+    };
+    el.addEventListener('animationend', done);
+    return () => el.removeEventListener('animationend', done);
+  }, [pageTransition]);
+
   const readStackSnapshot = useCallback((): StackEntry[] => {
     const s = window.history.state as { kanitsuStack?: unknown } | null;
     return Array.isArray(s?.kanitsuStack) ? (s.kanitsuStack as StackEntry[]) : [];
@@ -1037,10 +1131,9 @@ export function MobileApp({
         setViewerImageId(null);
         break;
       case 'settings':
+        // 不在此处重置 settingsSection：退场动画期间页面要保持原内容，
+        // 下次 openSettings 时会重置。
         setShowSettings(false);
-        break;
-      case 'tools':
-        setShowTools(false);
         break;
       case 'organize':
         setOrganizePreview(null);
@@ -1059,9 +1152,10 @@ export function MobileApp({
         setSearchActive(false);
         setSearchQuery('');
         setSearchInput('');
+        animatePage('back');
         break;
     }
-  }, []);
+  }, [animatePage]);
 
   const entryEq = (a: StackEntry, b: StackEntry): boolean => {
     if (a.type === 'folder' && b.type === 'folder') return a.folderId === b.folderId;
@@ -1085,6 +1179,8 @@ export function MobileApp({
       }
       const topFolder = [...target].reverse().find((e): e is { type: 'folder'; folderId: string } => e.type === 'folder');
       const folderId = topFolder ? topFolder.folderId : snapshotRef.current?.rootId ?? '';
+      // 只在目录真正回退时播返回动画；仅关闭浮层（抽屉/面板）不闪内容区。
+      if (folderId !== selectedFolderIdRef.current) animatePage('back');
       selectedFolderIdRef.current = folderId;
       setSelectedFolderId(folderId);
     };
@@ -1142,10 +1238,23 @@ export function MobileApp({
         setSelectedIds(new Set());
         return;
       }
+      // 浮层（抽屉/弹层/导入报告等）优先于工具 tab 关闭：否则工具页上打开的
+      // 浮层会被跳过，返回直接落回图库。
       const top = stackRef.current[stackRef.current.length - 1];
       if (top?.type === 'overlay') {
         event.preventDefault();
-        closeOverlay(top.layer);
+        if (top.layer === 'settings' && settingsSectionRef.current) {
+          // 设置页的三级分类详情先退回设置列表，再退才是关闭设置页。
+          setSettingsSection(null);
+        } else {
+          closeOverlay(top.layer);
+        }
+        return;
+      }
+      // 工具 tab 与图库平级、不占 history：硬件返回先切回图库 tab，而不是退出应用。
+      if (toolsTabRef.current) {
+        event.preventDefault();
+        setToolsTab(false);
         return;
       }
       if (stackRef.current.length === 0) return;
@@ -1155,31 +1264,6 @@ export function MobileApp({
     window.addEventListener('kanitsu:android-back', onAndroidBack);
     return () => window.removeEventListener('kanitsu:android-back', onAndroidBack);
   }, [closeOverlay]);
-
-  /**
-   * Replace an open overlay in-place. This avoids racing history.go() when a
-   * drawer action opens settings or a folder in the same tap.
-   */
-  const replaceOverlay = useCallback(
-    (from: OverlayLayer, to: OverlayLayer): boolean => {
-      const stack = stackRef.current;
-      const idx = stack
-        .map((entry, index) => (entry.type === 'overlay' && entry.layer === from ? index : -1))
-        .filter((index) => index >= 0)
-        .pop();
-      if (idx == null) return false;
-
-      const next = [...stack.slice(0, idx), { type: 'overlay' as const, layer: to }];
-      stackRef.current = next;
-      for (let k = idx; k < stack.length; k++) {
-        const entry = stack[k]!;
-        if (entry.type === 'overlay') closeOverlayUI(entry.layer);
-      }
-      window.history.replaceState({ kanitsuStack: next }, '');
-      return true;
-    },
-    [closeOverlayUI],
-  );
 
   const navigateToFolder = useCallback(
     (folderId: string) => {
@@ -1194,6 +1278,7 @@ export function MobileApp({
       window.history.pushState({ kanitsuStack: next }, '');
       selectedFolderIdRef.current = target;
       setSelectedFolderId(target);
+      animatePage('forward');
       const folder = snap.folders[target];
       if (folder && folder.childCount > 0) {
         setExpandedFolders((prev) => (prev.has(target) ? prev : new Set(prev).add(target)));
@@ -1202,7 +1287,7 @@ export function MobileApp({
       setSearchInput('');
       setSearchActive(false);
     },
-    [],
+    [animatePage],
   );
 
   const navigateFromDrawer = useCallback(
@@ -1234,14 +1319,20 @@ export function MobileApp({
   );
 
   const openSettings = useCallback(() => {
+    setSettingsSection(null);
     setShowSettings(true);
-    if (!replaceOverlay('drawer', 'settings')) openOverlay('settings');
-  }, [openOverlay, replaceOverlay]);
+    openOverlay('settings');
+  }, [openOverlay]);
 
   const openTools = useCallback(() => {
-    setShowTools(true);
-    openOverlay('tools');
-  }, [openOverlay]);
+    setToolsTab(true);
+  }, []);
+
+  const closeTools = useCallback(() => {
+    setToolsTab(false);
+    // tab 回图库：图库内容从右侧滑入（与工具页的从左到右滑入互为反向）。
+    animatePage('tab-back');
+  }, [animatePage]);
 
   const goUp = useCallback(() => {
     const snap = snapshotRef.current;
@@ -1264,13 +1355,15 @@ export function MobileApp({
     }
     selectedFolderIdRef.current = target;
     setSelectedFolderId(target);
-  }, []);
+    animatePage('back');
+  }, [animatePage]);
 
   // ===== 滚动 + 虚拟化度量 =====
   const mainScrollRef = useRef<HTMLDivElement>(null);
   const scrollPositionsRef = useRef(new Map<string, number>());
   const scrollSaveFrameRef = useRef<number | null>(null);
   const scrollPreloadResumeTimerRef = useRef<number | null>(null);
+  const scrollMotionRef = useRef(false);
   const virtualWindowKeyRef = useRef('');
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportH, setViewportH] = useState(0);
@@ -1295,13 +1388,23 @@ export function MobileApp({
     if (!el) return;
     // 快速滚动时只保留可见/方向预取，暂停当前目录和全库预热，避免后台
     // 请求占满桥接与原生解码时隙。滚动停止一小段时间后再恢复。
+    // 同一窗口内还跳过新挂载图片的入场动画：动画洪峰与滚动争主线程，
+    // 是“快速滑动时卡片消失、停下才出现”的直接原因。
     setThumbnailPreloadPaused(true);
+    setImageMotionSuppressed(true);
+    if (!scrollMotionRef.current) {
+      scrollMotionRef.current = true;
+      el.classList.add('is-fast-scrolling');
+    }
     if (scrollPreloadResumeTimerRef.current != null) {
       window.clearTimeout(scrollPreloadResumeTimerRef.current);
     }
     scrollPreloadResumeTimerRef.current = window.setTimeout(() => {
       scrollPreloadResumeTimerRef.current = null;
       setThumbnailPreloadPaused(false);
+      setImageMotionSuppressed(false);
+      scrollMotionRef.current = false;
+      mainScrollRef.current?.classList.remove('is-fast-scrolling');
     }, MOBILE_SCROLL_PRELOAD_RESUME_MS);
     const st = el.scrollTop;
     // 滚动位置本身不需要驱动 React；只有虚拟行窗口变化时才更新，避免
@@ -1351,7 +1454,9 @@ export function MobileApp({
         window.clearTimeout(scrollPreloadResumeTimerRef.current);
         scrollPreloadResumeTimerRef.current = null;
       }
+      scrollMotionRef.current = false;
       setThumbnailPreloadPaused(false);
+      setImageMotionSuppressed(false);
     };
   }, []);
 
@@ -1366,7 +1471,7 @@ export function MobileApp({
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
+  }, [toolsTab]);
 
   // 度量两个 section 相对内容顶部的偏移
   useLayoutEffect(() => {
@@ -1387,15 +1492,16 @@ export function MobileApp({
     viewMode,
     showFileNames,
     aggregate,
+    toolsTab,
   ]);
 
-  // 切换目录后恢复滚动位置
+  // 切换目录后恢复滚动位置（工具 tab 关闭、内容区重新挂载时也会走到这里）
   useLayoutEffect(() => {
     const el = mainScrollRef.current;
     if (!el) return;
     el.scrollTop = scrollPositionsRef.current.get(currentFolderId) ?? 0;
     setScrollTop(el.scrollTop);
-  }, [currentFolderId, snapshot]);
+  }, [currentFolderId, snapshot, toolsTab]);
 
   // ===== 缩略图预取（与桌面同优先级策略）=====
   useEffect(() => {
@@ -1505,9 +1611,8 @@ export function MobileApp({
       const next = await refresh();
       const topFolder = Object.values(next.folders).find((f) => f.parentId === next.rootId && f.name === task.targetTopFolder);
       if (topFolder) {
-        // 工具页是全屏 overlay：先关层再跳转，否则图包条目会压在 overlay 之上，
-        // 关闭工具页时被 slice 一并丢弃，返回栈与当前目录脱节（硬件返回键会直接退出应用）。
-        closeOverlay('tools');
+        // 导入完成后跳转到新图包目录；先关工具 tab，避免 tab 与目录内容叠加。
+        setToolsTab(false);
         navigateToFolder(topFolder.id);
       }
       notify(
@@ -1523,7 +1628,7 @@ export function MobileApp({
       setImporting(false);
       setImportProgress(null);
     }
-  }, [importing, picker, store, refresh, navigateToFolder, notify, closeOverlay]);
+  }, [importing, picker, store, refresh, navigateToFolder, notify]);
 
   const openOrganizeFor = useCallback(
     (folder: FolderNode) => {
@@ -1923,8 +2028,9 @@ export function MobileApp({
 
   const openSearch = useCallback(() => {
     setSearchActive(true);
+    animatePage('forward');
     openOverlay('search');
-  }, [openOverlay]);
+  }, [animatePage, openOverlay]);
 
   const closeSearch = useCallback(() => {
     closeOverlay('search');
@@ -2022,7 +2128,28 @@ export function MobileApp({
         </header>
       )}
 
-      {/* 主内容 */}
+      {/* 主内容：工具 tab 与图库内容平级切换，底栏由外壳常驻提供 */}
+      {toolsTab ? (
+        <MobileToolsScreen
+          onOpenSettings={openSettings}
+          onImport={() => void handleImport()}
+          imageCount={libraryStats.imageCount}
+          importReport={importReport}
+          lastManifest={lastManifest}
+          organizing={organizing}
+          onOrganize={() => {
+            if (rootFolder) openOrganizeFor(rootFolder);
+          }}
+          onExport={() => {
+            if (rootFolder) void handleExport(rootFolder);
+          }}
+          onUndo={() => void handleUndoOrganize()}
+          onShowReport={() => {
+            setShowReport(true);
+            openOverlay('report');
+          }}
+        />
+      ) : (
       <main
         ref={mainScrollRef}
         onScroll={onMainScroll}
@@ -2445,6 +2572,7 @@ export function MobileApp({
           </div>
         )}
       </main>
+      )}
 
       {/* 批量操作栏 */}
       {selectMode && !viewerOpen && (
@@ -2473,44 +2601,42 @@ export function MobileApp({
         </div>
       )}
 
-      {/* 底部主导航 / 图包操作 */}
-      {!importing && !viewerOpen && !selectMode && (
-        <nav className={`m-bottom-dock ${isRoot ? 'is-library' : 'is-package'}`} aria-label={isRoot ? '主导航' : '图包操作'}>
-          {isRoot ? (
-            <>
-              <button className="m-dock-button is-active" aria-current="page">
-                <MobileIcon name="🏠" className="w-5 h-5" />
-                <span>图库</span>
-              </button>
-              <button className="m-dock-button" onClick={openTools}>
-                <MobileIcon name="📐" className="w-5 h-5" />
-                <span>工具</span>
-              </button>
-            </>
-          ) : (
-            <>
-              <button className="m-dock-button" disabled={displayImages.length === 0} onClick={handleEnterSelectMode}>
-                <MobileIcon name="✅" className="w-5 h-5" />
-                <span>选择</span>
-              </button>
-              <button className="m-dock-button is-primary" disabled={!selectedFolder} onClick={() => selectedFolder && openOrganizeFor(selectedFolder)}>
-                <MobileIcon name="🧹" className="w-5 h-5" />
-                <span>智能整理</span>
-              </button>
-              <button className="m-dock-button" disabled={!selectedFolder} onClick={() => selectedFolder && void handleExport(selectedFolder)}>
-                <MobileIcon name="⬆️" className="w-5 h-5" />
-                <span>导出</span>
-              </button>
-            </>
-          )}
-        </nav>
+      {/* 底部主导航 / 图包操作（工具 tab 下仍是 图库/工具 双 tab）。
+          导入/整理/导出期间只禁用不隐藏，进度卡浮在底栏上方，布局不跳变。 */}
+      {!viewerOpen && !selectMode && (
+        toolsTab ? (
+          <MobileLibraryDock active="tools" disabled={importing} onLibrary={closeTools} onTools={() => {}} />
+        ) : isRoot ? (
+          <MobileLibraryDock active="library" disabled={importing} onLibrary={() => {}} onTools={openTools} />
+        ) : (
+          <nav className="m-bottom-dock is-package" aria-label="图包操作">
+            <button className="m-dock-button" disabled={importing || displayImages.length === 0} onClick={handleEnterSelectMode}>
+              <MobileIcon name="✅" className="w-5 h-5" />
+              <span>选择</span>
+            </button>
+            <button className="m-dock-button is-primary" disabled={importing || !selectedFolder} onClick={() => selectedFolder && openOrganizeFor(selectedFolder)}>
+              <MobileIcon name="🧹" className="w-5 h-5" />
+              <span>智能整理</span>
+            </button>
+            <button className="m-dock-button" disabled={importing || !selectedFolder} onClick={() => selectedFolder && void handleExport(selectedFolder)}>
+              <MobileIcon name="⬆️" className="w-5 h-5" />
+              <span>导出</span>
+            </button>
+          </nav>
+        )
       )}
 
       {/* 抽屉 */}
-      {drawerOpen && (
+      {drawerPresence.present && (
         <div className="fixed inset-0" style={{ zIndex: Z_DRAWER }}>
-          <div className="m-drawer-mask m-overlay-scrim absolute inset-0" onClick={() => closeOverlay('drawer')} />
-          <aside className="m-directory-panel absolute inset-0 flex flex-col" style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}>
+          <div
+            className={`m-drawer-mask m-overlay-scrim absolute inset-0 ${drawerPresence.exiting ? 'm-exiting' : ''}`}
+            onClick={() => closeOverlay('drawer')}
+          />
+          <aside
+            className={`m-directory-panel absolute inset-0 flex flex-col ${drawerPresence.exiting ? 'm-exiting' : ''}`}
+            style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}
+          >
             <div className="m-directory-header shrink-0">
               <button className="m-icon-button" onClick={() => closeOverlay('drawer')} aria-label="关闭目录">
                 <svg viewBox="0 0 24 24" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
@@ -2571,10 +2697,10 @@ export function MobileApp({
       )}
 
       {/* 整理预览（全屏化桌面组件） */}
-      {organizePreview && (
-        <div className="m-fullscreen">
+      {organizePresence.present && organizePreviewRef.current && (
+        <div className={`m-fullscreen ${organizePresence.exiting ? 'm-fade-exit' : ''}`}>
           <OrganizePreview
-            bindings={organizePreview.bindings}
+            bindings={organizePreviewRef.current.bindings}
             organizing={organizing}
             progress={organizeProgress}
             onChange={(bindings) => setOrganizePreview((prev) => (prev ? { ...prev, bindings } : prev))}
@@ -2585,55 +2711,45 @@ export function MobileApp({
       )}
 
       {/* 封面选择（全屏化桌面组件） */}
-      {coverPickerFolder && snapshot && (
-        <div className="m-fullscreen">
-          <CoverPickerModal
-            folderId={coverPickerFolder.id}
-            snapshot={snapshot}
-            store={store}
-            pinnedCovers={pinnedCovers}
-            currentCoverId={pinnedCovers[coverPickerFolder.id] ?? null}
-            onPick={(imageId) => {
-              const name = imageId ? snapshot.images[imageId]?.name : undefined;
-              pinCover(coverPickerFolder.id, imageId, name);
-              closeOverlay('cover');
-            }}
-            onCancel={() => closeOverlay('cover')}
-          />
-        </div>
-      )}
+      {coverPresence.present && coverFolderRef.current && snapshot && (() => {
+        const coverFolder = coverFolderRef.current;
+        return (
+          <div className={`m-fullscreen ${coverPresence.exiting ? 'm-fade-exit' : ''}`}>
+            <CoverPickerModal
+              folderId={coverFolder.id}
+              snapshot={snapshot}
+              store={store}
+              pinnedCovers={pinnedCovers}
+              currentCoverId={pinnedCovers[coverFolder.id] ?? null}
+              onPick={(imageId) => {
+                const name = imageId ? snapshot.images[imageId]?.name : undefined;
+                pinCover(coverFolder.id, imageId, name);
+                closeOverlay('cover');
+              }}
+              onCancel={() => closeOverlay('cover')}
+            />
+          </div>
+        );
+      })()}
 
-      {/* 设置 */}
-      {showTools && (
-        <MobileToolsScreen
-          onBack={() => closeOverlay('tools')}
-          onOpenSettings={openSettings}
-          onImport={() => void handleImport()}
-          imageCount={libraryStats.imageCount}
-          importReport={importReport}
-          lastManifest={lastManifest}
-          organizing={organizing}
-          onOrganize={() => {
-            if (rootFolder) openOrganizeFor(rootFolder);
-          }}
-          onExport={() => {
-            if (rootFolder) void handleExport(rootFolder);
-          }}
-          onUndo={() => void handleUndoOrganize()}
-          onShowReport={() => {
-            setShowReport(true);
-            openOverlay('report');
-          }}
+      {/* 设置（工具 tab 的二级页；页内分类详情为三级） */}
+      {settingsPresence.present && (
+        <MobileSettingsScreen
+          rules={customRules}
+          onChange={handleCustomRulesChange}
+          onBack={() => closeOverlay('settings')}
+          section={settingsSection}
+          onSectionChange={setSettingsSection}
+          exiting={settingsPresence.exiting}
         />
-      )}
-      {showSettings && (
-        <MobileSettingsScreen rules={customRules} onChange={handleCustomRulesChange} onBack={() => closeOverlay('settings')} />
       )}
 
       {/* 动作面板 */}
       {sheet && <MobileActionSheet title={sheet.title} subtitle={sheet.subtitle} actions={sheet.actions} onClose={() => closeOverlay('sheet')} />}
 
-      {/* 删除确认 */}
+      {/* 删除确认 + 输入对话框（共用退场动画） */}
+      {dialogPresence.present && (
+      <div className={dialogPresence.exiting ? 'm-fade-exit' : ''}>
       {deleteTarget && (
         <MobileConfirmDialog
           title="确认删除"
@@ -2672,10 +2788,15 @@ export function MobileApp({
           onCancel={() => closeOverlay('dialog')}
         />
       )}
+      </div>
+      )}
 
       {/* 导入报告 */}
-      {showReport && importReport && (
-        <div className="m-dialog-mask fixed inset-0 flex items-end justify-center" style={{ zIndex: Z_DIALOG }}>
+      {reportPresence.present && importReport && (
+        <div
+          className={`m-dialog-mask fixed inset-0 flex items-end justify-center ${reportPresence.exiting ? 'm-sheet-exit' : ''}`}
+          style={{ zIndex: Z_DIALOG }}
+        >
           <div className="m-overlay-scrim absolute inset-0" onClick={() => closeOverlay('report')} />
           <div
             className="m-sheet-panel relative w-full max-h-[70vh] flex flex-col"
@@ -2719,8 +2840,11 @@ export function MobileApp({
       )}
 
       {/* 整理结果 */}
-      {organizeResult && (
-        <div className="m-dialog-mask fixed inset-0 flex items-center justify-center p-8" style={{ zIndex: Z_DIALOG }}>
+      {resultPresence.present && organizeResult && (
+        <div
+          className={`m-dialog-mask fixed inset-0 flex items-center justify-center p-8 ${resultPresence.exiting ? 'm-fade-exit' : ''}`}
+          style={{ zIndex: Z_DIALOG }}
+        >
           <div className="m-overlay-scrim absolute inset-0" onClick={() => setOrganizeResult(null)} />
           <div className="m-dialog relative w-full max-w-sm p-5 max-h-[70vh] flex flex-col">
             <h3 className="m-dialog-title shrink-0">整理结果</h3>

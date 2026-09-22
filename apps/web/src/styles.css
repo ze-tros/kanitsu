@@ -3577,6 +3577,122 @@ body {
   to { transform: translateY(100%); }
 }
 
+/* —— 页面切换动画（目录前进/后退、搜索开合）——
+   动画由 MobileApp 挂在滚动容器上（视口大小，不为整页内容建合成层），
+   seq 变化时用 reflow 重放；方向决定从哪侧滑入。只动 opacity/transform。 */
+.m-page-in {
+  animation: m-page-fwd 230ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.m-page-in.is-back {
+  animation-name: m-page-back;
+}
+@keyframes m-page-fwd {
+  from { opacity: 0; transform: translateX(28px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes m-page-back {
+  from { opacity: 0; transform: translateX(-28px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* —— 底栏 tab 切换（图库/工具平级页面）——
+   图库和工具视为同一个页面：框架与底栏保持不动，仅内容区轻淡入完成切换，
+   不做整页滑动。两个方向用同一动画。 */
+.m-tab-enter {
+  animation: m-tab-in 180ms ease-out both;
+}
+@keyframes m-tab-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.m-page-in.is-tab-back {
+  animation: m-tab-in 180ms ease-out both;
+}
+
+/* —— 设置三级详情页推入（设置列表 → 分类详情）—— */
+.m-subpage-enter {
+  animation: m-subpage-in 260ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes m-subpage-in {
+  from { transform: translateX(100%); }
+  to { transform: none; }
+}
+
+/* —— 页面级返回动画 ——
+   二级/三级页关闭：整页滑出右侧（MobileApp 的 useExitPresence 在退出期间
+   保留挂载，动画播完才卸载）。三级详情返回列表：列表从左侧滑回。 */
+.m-page-exit-right {
+  animation: m-page-exit-right-kf 240ms cubic-bezier(0.32, 0.72, 0.35, 1) both;
+}
+@keyframes m-page-exit-right-kf {
+  to { transform: translateX(100%); }
+}
+.m-page-pop-left {
+  animation: m-page-pop-left-kf 260ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes m-page-pop-left-kf {
+  from { transform: translateX(-100%); }
+  to { transform: none; }
+}
+
+/* —— 抽屉关闭：面板滑出左侧，遮罩淡出 —— */
+.m-drawer-mask.m-exiting {
+  animation: m-mask-out 200ms ease-in both;
+}
+.m-directory-panel.m-exiting {
+  animation: m-drawer-out 220ms cubic-bezier(0.32, 0.72, 0.35, 1) both;
+}
+@keyframes m-drawer-out {
+  to { transform: translateX(-100%); }
+}
+
+/* —— 通用淡出（报告面板 / 全屏弹层 / 对话框关闭）—— */
+.m-fade-exit {
+  animation: m-fade-out 200ms ease-in both;
+}
+@keyframes m-fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+.m-sheet-exit .m-sheet-panel {
+  animation: m-sheet-out 200ms ease-in both;
+}
+.m-sheet-exit .m-overlay-scrim {
+  animation: m-mask-out 200ms ease-in both;
+}
+
+/* —— 抽屉面板滑入（遮罩淡入复用 m-mask-in）—— */
+.m-directory-panel {
+  animation: m-drawer-in 240ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes m-drawer-in {
+  from { transform: translateX(-100%); }
+  to { transform: none; }
+}
+
+/* —— 查看器打开淡入（关闭走已有的 .m-viewer-exit）—— */
+.m-viewer-root {
+  animation: m-mask-in 160ms ease-out both;
+}
+.m-viewer-root.m-viewer-exit {
+  animation: m-viewer-out 150ms ease-in both;
+}
+
+/* —— 快速滚动期间暂停占位动画（MobileApp 挂/摘 .is-fast-scrolling）——
+   用 paused 而不是 none：摘掉类后从暂停点继续，不会整屏重放一遍。 */
+.is-fast-scrolling .blob-image-shimmer::before,
+.is-fast-scrolling .blob-image-spinner::before {
+  animation-play-state: paused;
+}
+
+/* —— 模糊隐私预览（移动端）——
+   BlobImage 对模糊卡片改用 48px 极小缩略图，放大本身已是重模糊，CSS blur
+   只需少量半径抹平放大颗粒；blur(18px) 的大半径在 WebView 滚动时是持续的
+   栅格化负担。桌面端不在此作用域，维持原观感。 */
+.mobile-studio .blur-preview {
+  filter: blur(10px);
+}
+
 /* —— 侧滑抽屉 —— */
 .m-drawer-mask {
   animation: m-mask-in 200ms ease-out both;
@@ -3679,6 +3795,14 @@ body {
   .m-toast,
   .m-viewer-media-enter,
   .m-viewer-exit,
+  .m-viewer-root,
+  .m-directory-panel,
+  .m-page-in,
+  .m-tab-enter,
+  .m-subpage-enter,
+  .m-page-exit-right,
+  .m-page-pop-left,
+  .m-fade-exit,
   .m-fullscreen .modal-box {
     animation-duration: 1ms !important;
   }

@@ -787,17 +787,29 @@ html[data-theme='light'] .mobile-studio {
 
 .m-mine-content {
   min-height: 0;
-  padding: 24px 16px calc(env(safe-area-inset-bottom, 0px) + 24px);
+  /* 与图库首页大标题的顶部偏移对齐：那边是滚动容器 safe-area+14px
+     （.m-library-scroll.is-root）再加 intro 的 20px，合计 safe-area+34px。 */
+  padding: calc(env(safe-area-inset-top, 0px) + 34px) 16px calc(env(safe-area-inset-bottom, 0px) + 24px);
+}
+
+/* 图库首页标题上方是 eyebrow 行（被 32px 的刷新/查看目录按钮撑高），
+   工具页没有右侧按钮，这里把 eyebrow 固定为同样的 32px 行高，
+   保证两个 tab 的大标题起点一致。 */
+.m-mine-hero .m-eyebrow {
+  display: block;
+  height: 32px;
+  line-height: 32px;
 }
 
 .m-mine-hero h1 {
-  margin: 7px 0 0;
+  /* 字号/行高与 .mobile-studio .m-library-intro h1 完全一致（含窄屏覆盖）。 */
+  margin: 6px 0 0;
   color: var(--m-text);
   font-family: var(--m-font-display);
-  font-size: 29px;
+  font-size: clamp(28px, 8vw, 38px);
   font-weight: 650;
   letter-spacing: -0.045em;
-  line-height: 1.08;
+  line-height: 1.05;
 }
 
 .m-mine-hero p {
@@ -997,10 +1009,9 @@ html[data-theme='light'] .mobile-studio {
   gap: 8px;
   border: 1px solid var(--m-line-strong);
   border-radius: var(--m-radius-panel);
-  background: color-mix(in srgb, var(--m-surface-2) 94%, transparent);
+  background: var(--m-surface-2);
   padding: 6px 8px 6px 12px;
   box-shadow: var(--m-shadow-raised);
-  backdrop-filter: blur(20px);
 }
 
 .m-batch-count {
@@ -1038,10 +1049,11 @@ html[data-theme='light'] .mobile-studio {
 }
 
 /* Drawer */
+/* 遮罩不用 backdrop-filter：Android WebView 上全屏背景模糊会在弹层动画的
+   每一帧重新栅格化（长按弹面板卡顿的主因），加深底色达到相近的层级感。 */
 .m-overlay-scrim,
 .m-drawer-mask {
-  background: rgb(2 4 8 / 56%);
-  backdrop-filter: blur(2px);
+  background: rgb(2 4 8 / 62%);
 }
 
 .m-drawer-brand {
@@ -1370,11 +1382,10 @@ html[data-theme='light'] .mobile-studio {
 .m-progress-card {
   border: 1px solid var(--m-line-strong);
   border-radius: var(--m-radius-panel);
-  background: color-mix(in srgb, var(--m-surface-2) 96%, transparent);
+  background: var(--m-surface-2);
   color: var(--m-text);
   padding: 12px;
   box-shadow: var(--m-shadow-raised);
-  backdrop-filter: blur(20px);
 }
 
 .m-progress-spinner {
@@ -2499,7 +2510,11 @@ html[data-theme='light'] .m-viewer-root {
   text-align: left;
   box-shadow: 0 10px 24px rgb(2 5 11 / 15%);
 }
-.m-import-launch:hover { border-color: var(--m-accent); background: var(--m-accent-soft); }
+/* 触摸设备没有真正的 hover：长按期间面板滑到手指下方时，手指微动会把
+   :hover 粘在面板按钮上，看起来像被选中。hover 样式只给有鼠标的环境。 */
+@media (hover: hover) {
+  .m-import-launch:hover { border-color: var(--m-accent); background: var(--m-accent-soft); }
+}
 .m-import-launch-icon {
   display: grid;
   place-items: center;
@@ -2607,7 +2622,9 @@ html[data-theme='light'] .m-folder-cover, html[data-theme='light'] .m-image-card
 .m-import-launch-icon { border-radius: 9px; background: var(--m-accent); color: var(--m-accent-ink); }
 .m-sheet-panel, .m-dialog { border-color: var(--m-line-strong); background: var(--m-surface-1); box-shadow: var(--m-shadow-dialog); }
 .m-tree-row.is-selected { color: var(--m-text); background: var(--m-accent-soft); }
-.m-sheet-action:hover:not(:active), .m-mine-entry:hover:not(:active) { background: color-mix(in srgb, var(--m-text) 6%, transparent); }
+@media (hover: hover) {
+  .m-sheet-action:hover:not(:active), .m-mine-entry:hover:not(:active) { background: color-mix(in srgb, var(--m-text) 6%, transparent); }
+}
 
 html[data-accent='cobalt'] .mobile-studio { --m-accent: #8aa4e8; --m-accent-ink: #10172a; --m-accent-text: #b5c7f5; --m-accent-soft: rgba(138,164,232,.15); --m-accent-line: rgba(138,164,232,.45); }
 html[data-accent='amber'] .mobile-studio { --m-accent: #e2ad55; --m-accent-ink: #251803; --m-accent-text: #f0c275; --m-accent-soft: rgba(226,173,85,.15); --m-accent-line: rgba(226,173,85,.45); }
@@ -2659,7 +2676,8 @@ html[data-theme='light'][data-accent='graphite'] .mobile-studio { --m-accent: #5
 }
 
 @media (max-width: 430px) {
-  .mobile-studio .m-library-intro h1 {
+  .mobile-studio .m-library-intro h1,
+  .m-mine-hero h1 {
     font-size: 29px;
   }
 
