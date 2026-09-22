@@ -4,14 +4,14 @@
 // Electron ABI 兼容），支持 jpeg/png/webp/avif/bmp；sharp 解析失败的少见文件
 // 由主进程 nativeImage 兜底（见 main.ts，文件会进黑名单避免反复尝试）。
 // GIF 网格缩略图也走 sharp 的单帧输出；原始动画只在查看器中播放。
-// RAW 走 libraw 内嵌预览提取，HEIF/HEIC 走 libheif wasm 完整解码（sharp 的
-// libvips 预编译不含 HEVC 解码器）。
+// RAW 走 libraw 内嵌预览提取，HEIF/HEIC 优先解容器内嵌缩略图 item（毫秒级，
+// 无合格 item 时回退主图完整解码；sharp 的 libvips 预编译不含 HEVC 解码器）。
 import { parentPort } from 'node:worker_threads';
 import { readFile } from 'node:fs/promises';
 import sharp from 'sharp';
 import { GifReader, GifWriter } from 'omggif';
 import { isHeifImage, isRawImage, openNodeRawSession } from './rawDecoder';
-import { decodeHeifToRgba } from './heifDecoder';
+import { decodeHeifEmbeddedToRgba, decodeHeifToRgba } from './heifDecoder';
 
 // 多个 worker 已提供图片级并行；限制每条 libvips 管线为单线程，避免 CPU 过度订阅。
 sharp.concurrency(1);
@@ -443,13 +443,17 @@ export async function generateThumbnailFromFile(filePath: string, targetSize: nu
 }
 
 // —— HEIF/HEIC 缩略图（libheif wasm）——
-// sharp 的 libvips 预编译不含 HEVC 解码器，HEIF 由 libheif 完整解码出 RGBA
-// （libheif-js 的高级 API 只解主图；相机内嵌缩略图 item 的加速可后续优化），
-// 再交 sharp 限幅缩放编码。25MP 解码约 2~3s，主进程对该类任务放宽了超时。
+// sharp 的 libvips 预编译不含 HEVC 解码器，HEIF 由 libheif 解码出 RGBA 再交
+// sharp 限幅缩放编码。优先解容器内嵌的缩略图/预览 item（毫秒级；清晰度下限
+// 取 targetSize/3，覆盖 iPhone 类 240px 内嵌缩略图，允许网格卡片上 ≤2x 放大）；
+// 无合格 item（或像部分 Sony HIF 那样内嵌 item 被 libheif 的 ispe 一致性校验
+// 拒绝）时回退主图完整解码（25MP 约 2~3s，主进程对该类任务放宽了超时）。
 async function generateHeifThumbnail(filePath: string, targetSize: number): Promise<Uint8Array> {
   const raw = await readFile(filePath);
   const bytes = new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength);
-  const pixels = await decodeHeifToRgba(bytes);
+  const minLongEdge = Math.max(192, Math.ceil(targetSize / 3));
+  const embedded = await decodeHeifEmbeddedToRgba(bytes, minLongEdge).catch(() => null);
+  const pixels = embedded ?? (await decodeHeifToRgba(bytes));
   return await sharpResizeToJpeg(Buffer.from(pixels.rgba.buffer, pixels.rgba.byteOffset, pixels.rgba.byteLength), targetSize, {
     raw: { width: pixels.width, height: pixels.height, channels: 4 },
   });

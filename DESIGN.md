@@ -180,9 +180,9 @@ ImportSourcePicker + LibraryStore
 
 - 扩展名白名单为 `packages/core/src/path.ts` 的 `HEIF_IMAGE_EXT`（heic/heif/hif），经 `enableHeif` 扫描开关收录（桌面/Android 开启，Web 演示端关闭，开关变化触发索引重扫），与 RAW 的 `enableRaw` 相互独立。
 - 解码库为 libheif（wasm，自带 HEVC 解码器 libde265；sharp 预编译的 libvips 不含 HEVC 解码器，不能用于 HEIC）。解码经内存缓冲区读取，对个别声明长度略超文件尾的相机 HIF（Windows 看图可开）比文件源更宽容。
-- 桌面：缩略图走既有 worker 池内 libheif 完整解码（25MP 约 2~3s，超时放宽至 30s）；查看器与 `readBlob` 复用 RAW 派生管线（`userData/rawcache`，长边 ≤8192，JPEG 90），无独立预览级派生、直接完整解码。
+- 桌面：缩略图优先解容器内嵌的缩略图/预览 item（毫秒级；只考虑非隐藏的独立图像 item，主图常由隐藏网格分块拼成、单独解一块只会得到局部画面；清晰度下限取 targetSize/3，允许网格卡片上适度放大）。无合格 item 或 item 解码失败（如部分 Sony HIF 的内嵌 item 实际编码尺寸与 ispe 声明不符，被 libheif 的安全校验拒绝）时回退主图完整解码（25MP 约 2~3s，超时放宽至 30s）。查看器与 `readBlob` 复用 RAW 派生管线（`userData/rawcache`，长边 ≤8192，JPEG 90），始终主图完整解码，无独立预览级派生。
 - Android：缩略图原生可解（ImageDecoder/BitmapFactory 自带 HEIF 支持，ThumbnailService 零改动）；全图查看由 `DerivativeService` 原生解码转 JPEG 落盘（`getExternalFilesDir/cache/derivatives`，长边 ≤6000，LRU 上限 1GB，单路串行），经 `_capacitor_file_` 流式服务，位于图库外不进扫描。
-- 一期限制：HDR（10-bit HLG/BT2020）按 8-bit sRGB 呈现（观感偏灰）；动图/多图 HEIF 取首帧；libheif-js 的高级 API 只解主图，相机内嵌缩略图 item 的加速为后续优化项。
+- 一期限制：HDR（10-bit HLG/BT2020）按 8-bit sRGB 呈现（观感偏灰）；动图/多图 HEIF 取首帧；查看器全图始终解主图（内嵌 item 只用于网格缩略图加速）。
 - Web 演示端（memory store）不开启 HEIF 收录，理由同 RAW。
 
 ## 6. 性能约束
