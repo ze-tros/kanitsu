@@ -72,6 +72,12 @@ export interface LibraryStore {
   writeBlob(folder: FolderRef, name: string, blob: Blob): Promise<FileRef>;
   listChildren(folder: FolderRef): AsyncGenerator<FsEntry, void, void>;
   readBlob(file: FileRef): Promise<Blob>;
+  /**
+   * 读取原始文件的字节区间 [offset, offset + length)，不解码也不重编码。
+   * 元数据（EXIF）解析必须走这条：桌面端 readBlob 会经 nativeImage 重编码（EXIF 已剥离），
+   * Android 端整读大图会撑爆 base64 字节桥。越过文件尾返回更短片段。
+   */
+  readSlice(file: FileRef, offset: number, length: number): Promise<Uint8Array>;
   /** Small thumbnail for grids/folder covers. Implementations should avoid loading the full image. */
   readThumbnail(file: FileRef, maxSize?: number, options?: { priority?: number }): Promise<Blob>;
   /** Original-resolution viewable URL for an `<img>` (streamed for Electron). */

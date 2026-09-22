@@ -460,6 +460,9 @@ async function applyLibraryLocation(target: string): Promise<LibraryLocationChan
   }
 }
 
+/** library:readSlice 单次读取上限：元数据解析只用得到头部几 KB。 */
+const MAX_READ_SLICE = 16 * 1024 * 1024;
+
 function assertInsideLibrary(p: string): void {
   const root = path.resolve(getLibraryRoot());
   const target = path.resolve(p);
@@ -1489,6 +1492,24 @@ function registerIpc(): void {
     const height = Math.max(1, Math.round(size.height * scale));
     const resized = image.resize({ width, height, quality: 'good' });
     return ext === '.png' ? resized.toPNG() : resized.toJPEG(85);
+  });
+
+  // 原始文件的字节区间：不解码、不重编码，供 EXIF 等元数据解析用。
+  // readBlob 会经 nativeImage 重编码（EXIF 已剥离），元数据必须走这条。
+  ipcMain.handle('library:readSlice', async (_event, file: DesktopFsEntry, offset: number, length: number): Promise<Uint8Array> => {
+    assertInsideLibrary(file.id);
+    const start = Math.max(0, Math.floor(offset) || 0);
+    const size = Math.max(0, Math.min(Math.floor(length) || 0, MAX_READ_SLICE));
+    if (size === 0) return new Uint8Array(0);
+    const handle = await fs.open(file.id, 'r');
+    try {
+      const buffer = Buffer.alloc(size);
+      const { bytesRead } = await handle.read(buffer, 0, size, start);
+      // slice() 复制出独立缓冲区，避免整块 Buffer 随 IPC 一起被序列化。
+      return new Uint8Array(buffer.buffer, buffer.byteOffset, bytesRead).slice();
+    } finally {
+      await handle.close();
+    }
   });
 
   ipcMain.handle('library:readThumbnail', async (_event, file: DesktopFsEntry, maxSize: number, priority: number): Promise<Uint8Array> => {

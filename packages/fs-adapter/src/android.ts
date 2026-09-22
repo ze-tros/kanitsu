@@ -69,6 +69,7 @@ interface KanitsuPluginNative {
   writeLibraryBlob(opts: { folder: AndroidFsEntry; name: string; data: string }): Promise<AndroidFsEntry>;
   listLibraryChildren(opts: { folder: AndroidFsEntry }): Promise<{ entries: AndroidFsEntry[] }>;
   readLibraryBlob(opts: { file: AndroidFsEntry }): Promise<AndroidBinaryPayload>;
+  readLibrarySlice(opts: { file: AndroidFsEntry; offset: number; length: number }): Promise<AndroidBinaryPayload>;
   readLibraryThumbnail(opts: { file: AndroidFsEntry; maxSize: number; priority?: number }): Promise<AndroidBinaryPayload>;
   moveLibraryEntry(opts: { entry: AndroidFsEntry; toFolder: AndroidFsEntry; newName?: string }): Promise<AndroidFsEntry>;
   removeLibraryEntry(opts: { entry: AndroidFsEntry }): Promise<void>;
@@ -101,6 +102,7 @@ export interface KanitsuAndroidBridge {
   writeLibraryBlob(folder: AndroidFsEntry, name: string, data: Uint8Array): Promise<AndroidFsEntry>;
   listLibraryChildren(folder: AndroidFsEntry): Promise<AndroidFsEntry[]>;
   readLibraryBlob(file: AndroidFsEntry): Promise<{ data: Uint8Array; mime?: string }>;
+  readLibrarySlice(file: AndroidFsEntry, offset: number, length: number): Promise<Uint8Array>;
   readLibraryThumbnail(file: AndroidFsEntry, maxSize: number, priority?: number): Promise<{ data: Uint8Array; mime?: string }>;
   moveLibraryEntry(entry: AndroidFsEntry, toFolder: AndroidFsEntry, newName?: string): Promise<AndroidFsEntry>;
   removeLibraryEntry(entry: AndroidFsEntry): Promise<void>;
@@ -232,6 +234,9 @@ function requireBridge(): Promise<KanitsuAndroidBridge> {
           const payload = await p.readLibraryBlob({ file });
           return { data: b64ToBytes(payload.data), mime: payload.mime };
         },
+        readLibrarySlice: async (file, offset, length) => {
+          return b64ToBytes((await p.readLibrarySlice({ file, offset, length })).data);
+        },
         readLibraryThumbnail: async (file, maxSize, priority) => {
           const payload = await p.readLibraryThumbnail({ file, maxSize, priority: priority ?? 0 });
           return { data: b64ToBytes(payload.data), mime: payload.mime };
@@ -324,6 +329,10 @@ export class AndroidLibraryStore implements LibraryStore {
   async readBlob(file: FileRef): Promise<Blob> {
     const { data, mime } = await (await requireBridge()).readLibraryBlob(toEntry(file));
     return new Blob([data as BlobPart], mime ? { type: mime } : undefined);
+  }
+
+  async readSlice(file: FileRef, offset: number, length: number): Promise<Uint8Array> {
+    return (await requireBridge()).readLibrarySlice(toEntry(file), offset, length);
   }
 
   async readThumbnail(file: FileRef, maxSize = 512, options?: { priority?: number }): Promise<Blob> {

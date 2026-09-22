@@ -10,6 +10,7 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.RandomAccessFile;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.ArrayList;
@@ -126,6 +127,21 @@ public final class AlbumLibrary {
         try (FileInputStream in = new FileInputStream(file)) {
             return readAll(in);
         }
+    }
+
+    /** 读取文件的字节区间（不解码）：EXIF 等元数据解析用，避免整读大图过 base64 桥。 */
+    public byte[] readSlice(File file, long offset, int length) throws IOException {
+        assertInside(file);
+        if (offset < 0 || length <= 0) return new byte[0];
+        long size = file.length();
+        if (offset >= size) return new byte[0];
+        int want = (int) Math.min((long) length, size - offset);
+        byte[] out = new byte[want];
+        try (RandomAccessFile raf = new RandomAccessFile(file, "r")) {
+            raf.seek(offset);
+            raf.readFully(out);
+        }
+        return out;
     }
 
     public String mimeOf(File f) {

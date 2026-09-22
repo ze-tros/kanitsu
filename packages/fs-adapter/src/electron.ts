@@ -111,6 +111,8 @@ export interface KanitsuDesktopBridge {
   writeLibraryBlob(folder: DesktopFsEntry, name: string, data: Uint8Array): Promise<DesktopFsEntry>;
   listLibraryChildren(folder: DesktopFsEntry): Promise<DesktopFsEntry[]>;
   readLibraryBlob(file: DesktopFsEntry): Promise<Uint8Array>;
+  /** 原始文件字节区间（元数据解析用；readLibraryBlob 是重编码后的展示图）。 */
+  readLibrarySlice(file: DesktopFsEntry, offset: number, length: number): Promise<Uint8Array>;
   readLibraryThumbnail(file: DesktopFsEntry, maxSize: number, priority?: number): Promise<Uint8Array>;
   /** RAW 专用:确保解码派生图存在,返回其查看 URL(非 RAW 不应调用)。
    *  渲染端随调用传入当前查看模式(localStorage 镜像,同步可读,切换模式后
@@ -233,6 +235,10 @@ export class ElectronLibraryStore implements LibraryStore {
   async readBlob(file: FileRef): Promise<Blob> {
     const data = await requireBridge().readLibraryBlob(toEntry(file));
     return new Blob([data as BlobPart]);
+  }
+
+  async readSlice(file: FileRef, offset: number, length: number): Promise<Uint8Array> {
+    return requireBridge().readLibrarySlice(toEntry(file), offset, length);
   }
 
   async importSourceTree(

@@ -38,7 +38,7 @@ ImportSourcePicker + LibraryStore
 | `apps/web` | Vite 入口、平台检测、主题与全局样式 |
 | `apps/desktop` | Electron 窗口、系统对话框、文件协议、缩略图 worker、日志和打包 |
 | `apps/mobile` | Capacitor 配置、Android Activity 与原生插件 |
-| `packages/core` | 领域类型、路径、扫描、导入、整理落盘、删除和持久化索引 |
+| `packages/core` | 领域类型、路径、扫描、导入、整理落盘、删除、持久化索引和 EXIF 解析 |
 | `packages/fs-adapter` | 导入源与应用图库的统一接口及平台实现 |
 | `packages/organizer` | 内置与自定义命名规则 |
 | `packages/cover-picker` | 封面评分与用户固定封面优先级 |
@@ -51,7 +51,7 @@ ImportSourcePicker + LibraryStore
 平台能力收敛到两个接口：
 
 - `ImportSourcePicker`：选择源目录、遍历源文件和读取导入内容。
-- `LibraryStore`：管理应用图库、缩略图、原图 URL、移动删除、原生快速导入和 ZIP 导出。
+- `LibraryStore`：管理应用图库、原始字节区间读取（元数据用）、缩略图、原图 URL、移动删除、原生快速导入和 ZIP 导出。
 
 平台专属行为必须放在适配器或应用壳内，共享包不得散布平台判断。完整契约以 [`packages/fs-adapter/src/types.ts`](packages/fs-adapter/src/types.ts) 为准。
 
@@ -185,6 +185,14 @@ ImportSourcePicker + LibraryStore
 - 一期限制：HDR（10-bit HLG/BT2020）按 8-bit sRGB 呈现（观感偏灰）；动图/多图 HEIF 取首帧；查看器全图始终解主图（内嵌 item 只用于网格缩略图加速）。
 - Web 演示端（memory store）不开启 HEIF 收录，理由同 RAW。
 
+### 5.6 EXIF 拍摄信息
+
+- 展示位置：右侧栏检查器（单张图片的「拍摄信息」，另可展开「全部 EXIF 标签」）与看图页「图片信息」面板（桌面 + 移动）。行内容为拍摄时间、相机、镜头、焦距（含 35mm 等效）、光圈、快门、ISO、曝光补偿、白平衡、闪光灯、测光、场景、软件、作者与 GPS 定位/海拔；缺项自动跳过，无内容显示「无 EXIF 信息」。
+- 解析在渲染端完成（`packages/core/src/exif.ts`，零依赖），只读原始文件的字节区间：先读 256KB 头部窗口，HEIF/AVIF 的 Exif item 落在窗口外（多在 mdat）时再补读该段。TIFF 值偏移超出窗口的标签直接跳过，绝不整读大图。
+- 字节区间走 `LibraryStore.readSlice`（原始文件，不解码也不重编码）：桌面 `library:readSlice`（`library:readBlob` 经 nativeImage 重编码、EXIF 已被剥离，不能用于元数据）；Android `readLibrarySlice`（只取区间，避免整读大图过 base64 桥）；Web 演示端取 Blob 切片。
+- 覆盖容器：JPEG（APP1）、TIFF 系 RAW（CR2/NEF/NRW/ARW/DNG/PEF/SRW，含 ORF/RW2 变体头）、PNG（`eXIf`）、WebP（RIFF `EXIF `）、HEIF/HEIC/AVIF（`meta`/`iinf`/`iloc` 的 Exif item）、Canon CR3（`moov > uuid` 的 CMT1/CMT2/CMT4 小 TIFF）、富士 RAF（内嵌 JPEG 的 APP1）。GIF/BMP 无 EXIF 概念；CR3 的 CMT3（Canon MakerNote）是厂商私有标签表，不解析。
+- 解析结果按文件身份（id + mtime + size）缓存，检查器与查看器共用一份；面板未展开不发起读取，读取失败静默按「无 EXIF 信息」处理。日志不输出标签内容。
+
 ## 6. 性能约束
 
 - 网格只挂载可视区域及少量 overscan，不能随图片总数线性增长 DOM。
@@ -193,6 +201,7 @@ ImportSourcePicker + LibraryStore
 - 缩略图 worker 不得把源文件路径直接交给解码库：sharp/libvips 按路径打开源文件时不含共享删除语义，解码期间该文件在 Windows 上删不掉也改不了名（用户表现为随机 EPERM）。一律先读入内存再解码；删除、改名路径另带占用退避重试。
 - RAW 解码（libraw-wasm）在专用线程内执行：桌面在 worker_threads，Android 在 WebView Worker；网格缩略图只提取内嵌预览（毫秒级），完整解码（秒级）仅限查看器当前页且串行，无内嵌预览时以 halfSize 兜底。
 - object URL 和查看器页面缓存必须有上限，卸载时释放资源。
+- EXIF 等元数据只读原文件头部区间（256KB 窗口，HEIF/AVIF 至多再补读一段），禁止为元数据整读或解码原图。
 - 原图使用 URL 流式加载，相邻图只做有限预取。
 - 大库滚动期间避免同步布局读取、无界动画和无界预加载。
 

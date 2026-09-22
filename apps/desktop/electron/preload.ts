@@ -108,6 +108,9 @@ const bridge = {
   listLibraryChildren: (folder: DesktopEntry): Promise<DesktopEntry[]> =>
     ipcRenderer.invoke('library:listChildren', folder),
   readLibraryBlob: (file: DesktopEntry): Promise<Uint8Array> => ipcRenderer.invoke('library:readBlob', file),
+  // 原始文件字节区间（元数据解析用；readBlob 是重编码后的展示图）。
+  readLibrarySlice: (file: DesktopEntry, offset: number, length: number): Promise<Uint8Array> =>
+    ipcRenderer.invoke('library:readSlice', file, offset, length),
   readLibraryThumbnail: (file: DesktopEntry, maxSize: number, priority?: number): Promise<Uint8Array> =>
     ipcRenderer.invoke('library:readThumbnail', file, maxSize, priority ?? 0),
   // RAW 查看派生图:主进程按渲染端传入的查看模式(缺省用持久值)解码后返回

@@ -2106,6 +2106,27 @@ body {
   text-align: right;
 }
 
+/* 检查器「全部 EXIF 标签」：折叠列表，行沿用 desktop-data-list 的两列布局。 */
+.desktop-exif-details {
+  margin-top: 2px;
+}
+
+.desktop-exif-details > summary {
+  cursor: pointer;
+  padding: 4px 0 6px;
+  color: var(--desktop-muted);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.desktop-exif-details > summary:hover {
+  color: var(--desktop-text-soft);
+}
+
+.desktop-exif-details > summary + div {
+  border-top: 1px solid var(--desktop-line);
+}
+
 .desktop-action-row {
   width: 100%;
   min-width: 0;
@@ -2975,6 +2996,14 @@ body .desktop-library .desktop-settings-action.is-quiet:hover:not(:disabled) {
   color: var(--viewer-text);
   font-size: 13px;
   font-weight: 650;
+}
+
+.viewer-info h3 {
+  margin: 13px 0 2px;
+  color: var(--viewer-muted);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
 }
 
 .viewer-info > div {

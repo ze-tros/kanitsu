@@ -282,6 +282,23 @@ public class KanitsuPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void readLibrarySlice(PluginCall call) {
+        AndroidEntry file = AndroidEntry.fromJS(call.getObject("file"));
+        long offset = call.getLong("offset", 0L);
+        int length = call.getInt("length", 0);
+        executor.execute(() -> {
+            try {
+                byte[] bytes = albums.readSlice(albums.fileForId(file.id), offset, length);
+                JSObject out = new JSObject();
+                out.put("data", Base64.encodeToString(bytes, Base64.NO_WRAP));
+                call.resolve(out);
+            } catch (Exception e) {
+                call.reject(e.getMessage(), e);
+            }
+        });
+    }
+
+    @PluginMethod
     public void readLibraryThumbnail(PluginCall call) {
         AndroidEntry file = AndroidEntry.fromJS(call.getObject("file"));
         int maxSize = call.getInt("maxSize", 512);

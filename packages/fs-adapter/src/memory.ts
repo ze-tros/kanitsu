@@ -239,6 +239,13 @@ export class MemoryLibraryStore implements LibraryStore {
     return node.blob;
   }
 
+  async readSlice(file: FileRef, offset: number, length: number): Promise<Uint8Array> {
+    const blob = await this.readBlob(file);
+    const start = Math.max(0, Math.min(offset, blob.size));
+    const end = Math.max(start, Math.min(start + Math.max(0, length), blob.size));
+    return new Uint8Array(await blob.slice(start, end).arrayBuffer());
+  }
+
   async readThumbnail(file: FileRef, _maxSize?: number, _options?: { priority?: number }): Promise<Blob> {
     return this.readBlob(file);
   }
