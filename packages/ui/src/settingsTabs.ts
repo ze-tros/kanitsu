@@ -35,7 +35,10 @@ export const SETTINGS_TABS: ReadonlyArray<SettingsTab> = [
     id: 'organize',
     label: '整理规则',
     title: '整理规则',
-    keywords: ['整理规则', '自定义整理规则', '规则', '智能整理'],
+    keywords: [
+      '整理规则', '自定义整理规则', '规则', '智能整理',
+      '内置规则', '自定义规则', '正则表达式', '置信度', '目标目录模板', '测试文件名',
+    ],
   },
   {
     id: 'debug',

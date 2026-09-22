@@ -228,10 +228,10 @@ export function SettingsPage({
                 </section>
               </>
             )}
+            {/* 整理规则面板自带三张卡片（内置规则 / 自定义规则 / 编辑器），
+                所以这里不再套 .desktop-settings-section，避免卡片套卡片。 */}
             {activeTab === 'organize' && (
-              <section className="desktop-settings-section">
-                <OrganizeRulesManager rules={rules} onChange={onChange} />
-              </section>
+              <OrganizeRulesManager rules={rules} onChange={onChange} />
             )}
             {activeTab === 'debug' && <DebugPanel />}
             {activeTab === 'cache' && <CachePanel />}

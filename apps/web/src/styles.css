@@ -4760,4 +4760,375 @@ body .desktop-library .desktop-settings-back {
   }
 }
 
+/* ==========================================================================
+   设置 › 整理规则（packages/ui/src/OrganizeRulesModal.tsx 渲染）
+   同一个组件也挂在移动端设置里，那里的外观由 mobile.css 的 .m-settings-rules 负责；
+   这里只写桌面。三组内容（内置规则 / 自定义规则 / 编辑器）各自成卡：外层
+   `.desktop-settings-main section` 已经铺好卡片底色与描边，这里补内边距、圆角与列宽。
+   ========================================================================== */
+
+body .desktop-library .desktop-settings-main .organize-rules-manager {
+  gap: 14px;
+}
+
+body .desktop-library .desktop-settings-main .organize-rules-intro {
+  max-width: 64ch;
+  margin: 0 0 4px;
+  color: var(--desktop-muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+body .desktop-library .desktop-settings-main .organize-rules-section {
+  margin-top: 0;
+  padding: 18px 20px 20px;
+  border: 1px solid var(--desktop-line);
+  border-radius: 13px !important;
+  box-shadow: 0 16px 42px rgb(0 0 0 / 16%);
+}
+
+body .desktop-library .desktop-settings-main .organize-rules-subtitle {
+  margin: 0;
+  color: var(--desktop-text);
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -.01em;
+  text-transform: none;
+}
+
+body .desktop-library .desktop-settings-main .organize-rules-hint {
+  margin: 5px 0 0;
+  color: var(--desktop-muted);
+  font-size: 11px;
+  line-height: 1.5;
+  text-wrap: pretty;
+}
+
+/* 内置规则：两列紧凑清单，只作参考，不和自定义规则争注意力。 */
+body .desktop-library .desktop-settings-main .organize-rules-section.is-builtin .organize-rules-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 14px;
+}
+
+body .desktop-library .desktop-settings-main .organize-rules-section.is-builtin .organize-rule-card {
+  padding: 10px 12px;
+  border: 1px solid var(--desktop-line) !important;
+  border-radius: var(--desktop-radius-control) !important;
+  background: var(--desktop-surface-2) !important;
+}
+
+body .desktop-library .desktop-settings-main .organize-rules-section.is-builtin .organize-rule-card .font-medium {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--desktop-text-soft);
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body .desktop-library .desktop-settings-main .organize-rules-section.is-builtin .organize-rule-card p {
+  margin: 5px 0 0;
+  color: var(--desktop-muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+/* 置信度：自定义规则用强调色（可调参数），内置规则用中性色（只读）。 */
+body .desktop-library .desktop-settings-main .organize-rule-score {
+  min-height: 20px;
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  padding: 0 7px;
+  border: 1px solid var(--desktop-accent-line) !important;
+  border-radius: 999px;
+  background: var(--desktop-accent-soft) !important;
+  color: var(--desktop-accent-text);
+  font-size: 10px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+body .desktop-library .desktop-settings-main .organize-rules-section.is-builtin .organize-rule-score {
+  border-color: var(--desktop-line) !important;
+  background: var(--desktop-surface-3) !important;
+  color: var(--desktop-muted);
+}
+
+/* 自定义规则：名称/置信度占一行，正则与目标目录在左、操作用按钮贴右居中。 */
+body .desktop-library .desktop-settings-main .organize-rules-section.is-custom .organize-rules-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 14px 0 0;
+}
+
+body .desktop-library .desktop-settings-main .organize-rules-section.is-custom .organize-rule-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 2px 18px;
+  padding: 11px 13px;
+  border: 1px solid var(--desktop-line) !important;
+  border-radius: var(--desktop-radius-control) !important;
+  background: var(--desktop-surface-2) !important;
+}
+
+body .desktop-library .desktop-settings-main .organize-rules-section.is-custom .organize-rule-card > div:first-child {
+  grid-column: 1 / -1;
+}
+
+body .desktop-library .desktop-settings-main .organize-rules-section.is-custom .organize-rule-card > p {
+  grid-column: 1;
+  margin: 3px 0 0;
+  color: var(--desktop-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+body .desktop-library .desktop-settings-main .organize-rule-meta-label {
+  display: inline-block;
+  min-width: 4.8em;
+  color: var(--desktop-faint);
+}
+
+/* 停用只压暗内容，按钮保持可用的外观。 */
+body .desktop-library .desktop-settings-main .organize-rule-card.is-disabled .font-medium,
+body .desktop-library .desktop-settings-main .organize-rule-card.is-disabled .organize-rule-meta,
+body .desktop-library .desktop-settings-main .organize-rule-card.is-disabled .organize-rule-score {
+  opacity: .55;
+}
+
+body .desktop-library .desktop-settings-main .organize-rule-card.is-editing {
+  border-color: var(--desktop-accent-line) !important;
+  box-shadow: inset 0 0 0 1px var(--desktop-accent-line);
+}
+
+body .desktop-library .desktop-settings-main .organize-rules-empty {
+  margin: 14px 0 0;
+  padding: 16px;
+  border: 1px dashed var(--desktop-line-strong) !important;
+  border-radius: var(--desktop-radius-control) !important;
+  background: color-mix(in srgb, var(--desktop-canvas) 55%, transparent) !important;
+  color: var(--desktop-text-soft);
+  font-size: 11px;
+  line-height: 1.6;
+  opacity: 1;
+}
+
+body .desktop-library .desktop-settings-main .organize-rule-checkbox {
+  width: 17px;
+  height: 17px;
+  flex: none;
+  appearance: none;
+  -webkit-appearance: none;
+  border: 1px solid var(--desktop-line-strong) !important;
+  border-radius: 5px !important;
+  background: var(--desktop-surface-1) !important;
+  cursor: pointer;
+}
+
+body .desktop-library .desktop-settings-main .organize-rule-checkbox:checked {
+  border-color: var(--desktop-accent-line) !important;
+  /* 勾：左下短笔画（\，45deg 渐变）接右上长笔画（/，135deg 渐变）。每条渐变的
+     着色带垂直于渐变轴、横贯图层对角线，所以两层分别用 3px 与 6px 的方形图层
+     摆位，就能让两笔在下端顶点相接；百分比按各自对角线长度换算，保证粗细一致。 */
+  background:
+    linear-gradient(45deg, transparent 32%, var(--desktop-accent-ink) 33% 67%, transparent 68%) 4px 8.5px / 3px 3px no-repeat,
+    linear-gradient(135deg, transparent 41%, var(--desktop-accent-ink) 42% 58%, transparent 59%) 7px 5.5px / 6px 6px no-repeat,
+    var(--desktop-accent-fill) !important;
+}
+
+body .desktop-library .desktop-settings-main .organize-rule-checkbox:focus-visible {
+  outline: 2px solid var(--desktop-accent-line);
+  outline-offset: 2px;
+}
+
+/* 编辑器：两张并排的短字段 + 两行占满整行的模板字段。 */
+body .desktop-library .desktop-settings-main .organize-rule-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 16px 0 0;
+  padding: 0;
+  border: 0 !important;
+  background: transparent !important;
+  scroll-margin-top: 16px;
+}
+
+body .desktop-library .desktop-settings-main .organize-rule-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 16px;
+}
+
+body .desktop-library .desktop-settings-main .organize-rule-field {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+body .desktop-library .desktop-settings-main .organize-rule-field.is-wide {
+  grid-column: 1 / -1;
+}
+
+body .desktop-library .desktop-settings-main .organize-rule-field > span {
+  color: var(--desktop-text-soft);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+body .desktop-library .desktop-settings-main .organize-rule-field-hint {
+  margin-left: 7px;
+  color: var(--desktop-faint);
+  font-size: 10px;
+  font-weight: 400;
+}
+
+body .desktop-library .desktop-settings-main .organize-rule-input {
+  width: 100%;
+  min-width: 0;
+  min-height: 34px;
+  padding: 0 11px;
+  border: 1px solid var(--desktop-line) !important;
+  border-radius: var(--desktop-radius-control) !important;
+  outline: 0;
+  background: var(--desktop-surface-2) !important;
+  color: var(--desktop-text);
+  font-size: 12px;
+}
+
+body .desktop-library .desktop-settings-main .organize-rule-input::placeholder {
+  color: var(--desktop-faint);
+}
+
+body .desktop-library .desktop-settings-main .organize-rule-input:focus {
+  border-color: var(--desktop-accent-line) !important;
+  box-shadow: 0 0 0 3px var(--desktop-accent-soft);
+}
+
+body .desktop-library .desktop-settings-main .organize-rule-input.is-invalid {
+  border-color: color-mix(in srgb, var(--desktop-danger) 45%, var(--desktop-line)) !important;
+}
+
+body .desktop-library .desktop-settings-main .organize-rule-meta code,
+body .desktop-library .desktop-settings-main .organize-rule-preview-result code {
+  color: var(--desktop-text-soft);
+  font-family: 'Cascadia Mono', 'SFMono-Regular', Consolas, monospace;
+  font-size: 11px;
+}
+
+/* 试跑区：左边填样例文件名，右边实时显示会被整理到的位置。 */
+body .desktop-library .desktop-settings-main .organize-rule-preview {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+  align-items: end;
+  gap: 12px 16px;
+  padding: 13px 14px;
+  border: 1px solid var(--desktop-line) !important;
+  border-radius: var(--desktop-radius-control) !important;
+  background: var(--desktop-surface-2) !important;
+}
+
+body .desktop-library .desktop-settings-main .organize-rule-preview-result {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 11px;
+  border: 1px solid var(--desktop-line) !important;
+  border-radius: var(--desktop-radius-tight) !important;
+  background: var(--desktop-canvas) !important;
+  color: var(--desktop-muted);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+body .desktop-library .desktop-settings-main .organize-rule-preview-label {
+  flex: none;
+  color: var(--desktop-faint);
+  font-size: 10px;
+}
+
+body .desktop-library .desktop-settings-main .organize-rule-preview-result.is-hit {
+  border-color: var(--desktop-accent-line) !important;
+}
+
+body .desktop-library .desktop-settings-main .organize-rule-preview-result.is-hit code {
+  color: var(--desktop-accent-text);
+  font-weight: 600;
+}
+
+body .desktop-library .desktop-settings-main .organize-rule-preview-result.is-invalid {
+  border-color: color-mix(in srgb, var(--desktop-danger) 45%, var(--desktop-line)) !important;
+  background: var(--desktop-danger-soft) !important;
+}
+
+body .desktop-library .desktop-settings-main .organize-rule-error {
+  padding: 9px 11px;
+  border: 1px solid color-mix(in srgb, var(--desktop-danger) 32%, var(--desktop-line)) !important;
+  border-radius: var(--desktop-radius-tight) !important;
+  background: var(--desktop-danger-soft) !important;
+  color: var(--desktop-danger);
+  font-size: 11px;
+}
+
+body .desktop-library .desktop-settings-main .organize-rule-actions .btn,
+body .desktop-library .desktop-settings-main .organize-rule-form-actions .btn {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 11px;
+  border: 1px solid var(--desktop-line-strong) !important;
+  border-radius: var(--desktop-radius-tight) !important;
+  background: var(--desktop-surface-2) !important;
+  color: var(--desktop-text-soft);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+body .desktop-library .desktop-settings-main .organize-rule-actions .btn:hover,
+body .desktop-library .desktop-settings-main .organize-rule-form-actions .btn:not(.btn-primary):hover {
+  border-color: var(--desktop-muted) !important;
+  background: var(--desktop-surface-3) !important;
+  color: var(--desktop-text);
+}
+
+body .desktop-library .desktop-settings-main .organize-rule-actions .text-error {
+  border-color: var(--desktop-line) !important;
+  background: transparent !important;
+  color: var(--desktop-danger);
+}
+
+body .desktop-library .desktop-settings-main .organize-rule-actions .text-error:hover {
+  border-color: var(--desktop-danger) !important;
+  background: var(--desktop-danger-soft) !important;
+  color: var(--desktop-danger);
+}
+
+body .desktop-library .desktop-settings-main .organize-rule-form-actions .btn-primary {
+  border-color: transparent !important;
+  background: var(--desktop-accent-fill) !important;
+  color: var(--desktop-accent-ink);
+  box-shadow: inset 0 1px rgb(255 255 255 / 12%);
+}
+
+body .desktop-library .desktop-settings-main .organize-rule-form-actions .btn-primary:hover {
+  filter: brightness(1.06);
+}
+
+/* 窄桌面（分栏设置页只剩半屏）时字段回到单列，避免正则输入框被压得太窄。 */
+@media (max-width: 900px) {
+  body .desktop-library .desktop-settings-main .organize-rule-fields,
+  body .desktop-library .desktop-settings-main .organize-rule-preview,
+  body .desktop-library .desktop-settings-main .organize-rules-section.is-builtin .organize-rules-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 }
