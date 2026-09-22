@@ -205,7 +205,6 @@ export function MobileSettingsScreen({
                 <strong>Kanitsu</strong>
                 <small>Android 模式 · v{androidBridge()?.version ?? '0.1.0'}</small>
               </span>
-              <em>Local first</em>
             </div>
           </section>
         </main>

@@ -718,6 +718,9 @@ body {
   border-color: var(--desktop-accent-line);
 }
 .desktop-global-search input:focus-visible {
+  /* 字段外层已有 :focus-within 描边作为唯一聚焦信号，
+     豁免全局 input 光环，避免框中框。 */
+  outline: none;
   box-shadow: none;
 }
 
@@ -4119,6 +4122,8 @@ body .desktop-library .desktop-settings-search:focus-within {
   border-color: var(--desktop-accent-line);
 }
 body .desktop-library .desktop-settings-search input:focus-visible {
+  /* 同上：字段外层描边已是唯一聚焦信号。 */
+  outline: none;
   box-shadow: none;
 }
 

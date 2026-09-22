@@ -1716,7 +1716,7 @@ export function LibraryBrowser({
                                 <span className="desktop-package-body">
                                   <span className="desktop-package-title"><strong>{folder.name}</strong><CaretRight size={15} weight="bold" /></span>
                                   <span className="desktop-package-meta">{folder.imageCount.toLocaleString('zh-CN')} 张图片 · {folder.childCount} 个子图包</span>
-                                  <span className="desktop-package-path">{folder.relPath || '本地图库'}</span>
+                                  <span className="desktop-package-path">{folder.relPath || '图库'}</span>
                                 </span>
                               </button>
                             </div>
@@ -1899,7 +1899,7 @@ export function LibraryBrowser({
           <SidebarResizeHandle width={sidebarWidth} onResize={setSidebarWidth} max={360} />
           <div ref={sidebarScrollRef} className="desktop-sidebar-scroll">
             <div className="desktop-sidebar-heading">
-              <div><span>本地图库</span><strong>我的图包</strong></div>
+              <div><span>图库</span><strong>我的图包</strong></div>
               <DesktopIconButton label="新建子图包" disabled={!selectedFolder} onClick={() => selectedFolder && handleCreateSubfolder(selectedFolder)}><FolderPlus size={16} /></DesktopIconButton>
             </div>
             <nav className="desktop-sidebar-primary" aria-label="主要功能">
@@ -2346,7 +2346,7 @@ function DesktopInspector({
       </section>
       <section className="desktop-inspector-section desktop-data-list">
         <h3>{rootSelected ? '图库状态' : '图包状态'}</h3>
-        <div className="is-stacked"><span>所在路径</span><strong title={folder?.relPath || '本地图库'}>{folder?.relPath || '本地图库'}</strong></div>
+        <div className="is-stacked"><span>所在路径</span><strong title={folder?.relPath || '图库'}>{folder?.relPath || '图库'}</strong></div>
         <div><span>包含格式</span><strong>{formatSummary}</strong></div>
         <div><span>文件修改</span><strong>{formatModifiedTime(latestModified)}</strong></div>
         <div><span>隐私预览</span><strong>{blurredCount} 张</strong></div>
@@ -2625,7 +2625,7 @@ function TitleBar({
         <KanitsuLogo className="desktop-brand-mark" alt="" aria-hidden="true" />
         <div>
           <strong>Kanitsu</strong>
-          <span>本地图包工作台</span>
+          <span>图包工作台</span>
         </div>
       </div>
 

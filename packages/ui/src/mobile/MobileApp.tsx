@@ -670,7 +670,7 @@ function MobileToolsScreen({
       <main className="m-mine-content">
         <section className="m-mine-hero">
           <span className="m-eyebrow">工作区</span>
-          <h1>管理本地图库</h1>
+          <h1>管理图库</h1>
           <p>导入、整理和导出都集中在这里，任务离开页面后仍可继续。</p>
         </section>
         <section className="m-mine-group">
@@ -2158,7 +2158,6 @@ export function MobileApp({
         {snapshot && isRoot && !searchActive && !selectMode && (
           <section className="m-library-intro">
             <div className="m-eyebrow-row">
-              <span className="m-eyebrow">本地图书馆</span>
               <div className="m-library-head-actions">
                 <button
                   className={`m-mini-icon-button m-refresh-button ${refreshing ? 'is-loading' : ''}`}
@@ -2185,7 +2184,6 @@ export function MobileApp({
               <button className="m-search-launch" onClick={openSearch}>
                 <MobileIcon name="🔍" className="w-[18px] h-[18px]" />
                 <span>搜索图包或文件名</span>
-                <small>本地</small>
               </button>
             </div>
             {childFolders.length === 0 && (
@@ -2197,7 +2195,7 @@ export function MobileApp({
                 </span>
                 <span className="m-import-launch-copy">
                   <strong>导入图包</strong>
-                  <small>从设备选择文件夹，自动建立本地图库</small>
+                  <small>从设备选择文件夹，自动建立图库</small>
                 </span>
                 <svg viewBox="0 0 24 24" className="m-import-launch-arrow" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                   <path d="M5 12h14M13 6l6 6-6 6" />
@@ -2645,7 +2643,7 @@ export function MobileApp({
                 <KanitsuLogo className="object-contain shrink-0" alt="" aria-hidden="true" />
                 <span className="m-drawer-brand-copy">
                   <strong>目录</strong>
-                  <span>浏览你的本地图包</span>
+                  <span>浏览你的图包</span>
                 </span>
               </div>
             </div>
