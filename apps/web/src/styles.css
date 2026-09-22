@@ -322,6 +322,25 @@ body {
   to { transform: rotate(360deg); }
 }
 
+/* 骨架占位（移动端）：未加载的缩略图渲染为内容形状的骨架块，替代原来的
+   “透明底 + 小 spinner”——透明占位在快速滑动时几乎不可见，冻结的 spinner
+   弧线还像渲染故障。骨架块本身是纯静态底色，唯一的动画仍是上层扫光
+   （滚动期间由 .is-fast-scrolling 暂停），不新增持续动画，也不为骨架单独
+   建合成层。桌面端保持原扫光 + spinner 观感，不启用此层。 */
+.blob-image-skeleton {
+  position: absolute;
+  inset: 0;
+  display: none;
+}
+.mobile-studio .blob-image:not(.is-ready):not(.failed) .blob-image-skeleton {
+  display: block;
+  background: color-mix(in srgb, var(--color-base-content) 8%, var(--color-base-200));
+}
+/* 骨架已表达加载中，小 spinner 在缩略图尺寸里只会显得拥挤，移动端隐藏。 */
+.mobile-studio .blob-image:not(.is-ready):not(.failed) .blob-image-spinner {
+  display: none;
+}
+
 /* Blurred preview (per-album privacy setting). Scale up slightly so the
    blur does not reveal a clear frame edge around the image. */
 .blur-preview {
@@ -694,10 +713,12 @@ body {
     box-shadow 180ms var(--desktop-ease-standard);
 }
 
+/* 聚焦只换描边：不变底色、不叠外圈光环，避免“框中框”（对齐移动端 268f5a0）。 */
 .desktop-global-search:focus-within {
   border-color: var(--desktop-accent-line);
-  background: var(--desktop-surface-1);
-  box-shadow: 0 0 0 2px var(--desktop-accent-soft);
+}
+.desktop-global-search input:focus-visible {
+  box-shadow: none;
 }
 
 .desktop-global-search input {
@@ -4093,9 +4114,12 @@ body .desktop-library .desktop-settings-search {
   background: rgba(255,255,255,.045);
 }
 
+/* 聚焦只换描边：不变底色（对齐移动端单一信号原则）。 */
 body .desktop-library .desktop-settings-search:focus-within {
   border-color: var(--desktop-accent-line);
-  background: rgba(255,255,255,.07);
+}
+body .desktop-library .desktop-settings-search input:focus-visible {
+  box-shadow: none;
 }
 
 body .desktop-library .desktop-settings-search input {
