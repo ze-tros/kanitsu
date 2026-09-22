@@ -90,11 +90,24 @@ npm run build:android
 
 APK 固定位于 `apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk`。Android 项目已在 `gradle.properties` 中禁用常驻 Gradle Daemon，构建完成后会退出当前构建进程。
 
+## 持续集成
+
+仓库使用 GitHub Actions 做合并前门禁和跨平台产物构建：
+
+| 工作流 | 触发 | 内容 |
+|---|---|---|
+| `CI` | 推送 `master`、pull request、手动 | 类型检查、全工作区测试、Web 生产构建、Electron 主进程编译 |
+| `Android Debug APK` | 手动、`v*` tag | 构建调试 APK 并上传 Artifact |
+| `Windows Portable` | 手动、`v*` tag | 打包并校验 Windows x64 Portable |
+
+触发方式、失败排查和首次接入清单见 [GitHub Actions 持续集成指南](docs/GitHub-Actions-持续集成指南.md)。
+
 ## 文档
 
 - [产品与架构设计](DESIGN.md)
 - [开发进度与复盘](docs/开发进度与复盘.md)
 - [Android 平台实现](docs/Android端设计.md)
 - [Windows Portable 打包与发布](docs/Windows-Portable-打包与发布指南.md)
+- [GitHub Actions 持续集成](docs/GitHub-Actions-持续集成指南.md)
 
 文档描述稳定约束和当前状态；具体接口与参数以源码和类型定义为准。
