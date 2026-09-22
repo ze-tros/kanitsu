@@ -17,6 +17,7 @@ export type { LibraryLocationChangeResult, LibraryLocationInfo };
 export const LIBRARY_COPY_NOTICE: readonly string[] = [
   '导入时 Kanitsu 会把图片复制一份到下面这个文件夹，你的原始文件夹和其中的文件不会被修改或删除。',
   '之后在图库里做的整理、重命名、删除都只作用于这份副本，导出 ZIP 也从副本读取。',
+  '缩略图缓存也放在这里的 .kanitsu-cache 目录下（可随时重新生成）。',
   '副本由本应用管理：清空或删除这个文件夹等于清空图库，原处不会自动补回。',
 ];
 

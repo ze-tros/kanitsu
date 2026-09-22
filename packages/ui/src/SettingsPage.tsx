@@ -300,7 +300,7 @@ function LibraryLocationRow({ onApplied }: { onApplied?: () => void }) {
     <div className="desktop-settings-row">
       <div>
         <strong>图包保存位置</strong>
-        <span>导入的图片会复制一份到这里；整理、重命名、删除只作用于这份副本，原始文件夹不受影响。</span>
+        <span>导入的图片会复制一份到这里；整理、重命名、删除只作用于这份副本，原始文件夹不受影响。缩略图缓存也在该目录的 .kanitsu-cache 下。</span>
       </div>
       <div className="desktop-settings-location">
         <div className="desktop-settings-location-main">

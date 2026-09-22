@@ -9,7 +9,7 @@ import { pathToFileURL } from 'node:url';
 import archiver from 'archiver';
 import { imageSize } from 'image-size';
 import { logger, readLogTail, setLogLevel } from './logger';
-import { RAW_IMAGE_EXT, isRawImage, librawDistDir } from './rawDecoder';
+import { HEIF_IMAGE_EXT, RAW_IMAGE_EXT, isHeifImage, isRawImage, librawDistDir } from './rawDecoder';
 
 // 应用 bundle 协议：生产构建渲染层以 kanitsu-app:// 加载。file:// 下绝对路径会
 // 404、且 type=module 脚本会被 CORS 拦截（白屏）；自定义 scheme 一步规避，
@@ -27,9 +27,10 @@ protocol.registerSchemesAsPrivileged([
   },
 ]);
 
-// 普通图片 + 主流相机 RAW:RAW 进入库、导入与 ZIP 导出(原样拷贝/打包);
-// 解码不经 nativeImage/Chromium,而是 libraw 专用管线(见 rawDecoder.ts)。
-const IMAGE_EXT = new Set(['jpg', 'jpe', 'jpeg', 'png', 'webp', 'avif', 'bmp', 'gif', ...RAW_IMAGE_EXT]);
+// 普通图片 + 主流相机 RAW + HEIF/HEIC:后两类进入库、导入与 ZIP 导出(原样
+// 拷贝/打包);解码不经 nativeImage/Chromium,RAW 走 libraw 专用管线
+// (见 rawDecoder.ts),HEIF 走 libheif wasm 专用管线(见 heifDecoder.ts)。
+const IMAGE_EXT = new Set(['jpg', 'jpe', 'jpeg', 'png', 'webp', 'avif', 'bmp', 'gif', ...RAW_IMAGE_EXT, ...HEIF_IMAGE_EXT]);
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -44,6 +45,8 @@ async function collectLibraryFiles(dirPath: string, root: string, out: FsFileMet
   let count = 0;
   const entries = await fs.readdir(dirPath, { withFileTypes: true });
   for (const entry of entries) {
+    // 应用私有目录（缩略图缓存）不是图库内容，导出时跳过。
+    if (isLibraryInternalName(entry.name)) continue;
     const full = path.join(dirPath, entry.name);
     if (entry.isDirectory()) {
       count += await collectLibraryFiles(full, root, out);
@@ -132,6 +135,20 @@ interface ClearCacheResult {
 // 若允许把用户自己的照片目录整体选成图库，那些原片就会被纳入整理与删除范围。
 const SETTINGS_VERSION = 1;
 const LIBRARY_MARKER_FILE = '.kanitsu-library.json';
+/** 图库根目录下由本应用独占的私有目录（缩略图缓存等）。 */
+const LIBRARY_CACHE_DIR = '.kanitsu-cache';
+
+/** 目录项是否属于应用私有目录：图库扫描/导出/统计/搬移都必须跳过，
+ *  否则缓存里的 JPEG 会被当成图库图片。 */
+function isLibraryInternalName(name: string): boolean {
+  return name === LIBRARY_CACHE_DIR || name === LIBRARY_MARKER_FILE;
+}
+
+/** 拒绝把应用私有名字用作图包/子目录名：会与标记文件、缓存目录撞名，撞上之后
+ *  该目录会被当作私有目录从列表里隐藏，用户建了却看不到。 */
+function assertNotLibraryInternalName(name: string): void {
+  if (isLibraryInternalName(name.trim())) throw new Error(`“${name}”是应用保留名称，请换一个。`);
+}
 
 interface DesktopSettings {
   version: number;
@@ -217,15 +234,38 @@ async function pathExists(target: string): Promise<boolean> {
   }
 }
 
-/** 写入图库标记文件（已存在则跳过）。 */
-async function ensureLibraryMarker(root: string): Promise<void> {
+/**
+ * 建立图库的应用私有骨架：标记文件 + 缓存目录。缓存目录在这里就建出来，是为了
+ * 让「创建 .kanitsu-cache」这一步落在扫描取指纹之前——否则首次写缩略图会改动
+ * 图库根目录的 mtime，让已保存的扫描索引指纹失效，下次启动白扫一遍。
+ * 同一个根目录只跑一次（getRoot 与 fingerprint 在启动时是并发的）。
+ */
+function ensureLibraryScaffold(root: string): Promise<void> {
+  const key = path.resolve(root);
+  if (scaffoldFor !== key || !scaffoldRun) {
+    scaffoldFor = key;
+    scaffoldRun = buildLibraryScaffold(key);
+  }
+  return scaffoldRun;
+}
+
+let scaffoldFor: string | null = null;
+let scaffoldRun: Promise<void> | null = null;
+
+async function buildLibraryScaffold(root: string): Promise<void> {
   const marker = path.join(root, LIBRARY_MARKER_FILE);
   try {
-    if (await pathExists(marker)) return;
-    const content = { app: 'kanitsu', version: SETTINGS_VERSION, createdAt: new Date().toISOString() };
-    await fs.writeFile(marker, `${JSON.stringify(content, null, 2)}\n`, 'utf8');
+    if (!(await pathExists(marker))) {
+      const content = { app: 'kanitsu', version: SETTINGS_VERSION, createdAt: new Date().toISOString() };
+      await fs.writeFile(marker, `${JSON.stringify(content, null, 2)}\n`, 'utf8');
+    }
   } catch (error) {
     logger.warn('library', `写入图库标记失败：${String(error)}`);
+  }
+  try {
+    await fs.mkdir(path.join(root, LIBRARY_CACHE_DIR, 'thumbcache'), { recursive: true });
+  } catch (error) {
+    logger.warn('library', `创建缩略图缓存目录失败：${String(error)}`);
   }
 }
 
@@ -245,8 +285,9 @@ type LibraryDirKind = 'missing' | 'empty' | 'library' | 'foreign';
 async function inspectLibraryDir(target: string): Promise<{ kind: LibraryDirKind; entryCount: number }> {
   if (await hasLibraryMarker(target)) return { kind: 'library', entryCount: 0 };
   try {
-    const entries = await fs.readdir(target);
-    return entries.length === 0 ? { kind: 'empty', entryCount: 0 } : { kind: 'foreign', entryCount: entries.length };
+    // 只算用户内容：留下的缓存目录（例如换位置后回退到这里）不该让目录显得「非空」。
+    const visible = (await fs.readdir(target)).filter((name) => !isLibraryInternalName(name));
+    return visible.length === 0 ? { kind: 'empty', entryCount: 0 } : { kind: 'foreign', entryCount: visible.length };
   } catch {
     return { kind: 'missing', entryCount: 0 };
   }
@@ -283,6 +324,8 @@ async function countLibraryImages(root: string): Promise<number> {
   let count = 0;
   try {
     for (const entry of await fs.readdir(root, { withFileTypes: true })) {
+      // 缓存目录里的缩略图不是图库图片，不计入（也避免白白多走一遍 1.5GB）。
+      if (isLibraryInternalName(entry.name)) continue;
       if (entry.isDirectory()) count += await countLibraryImages(path.join(root, entry.name));
       else if (IMAGE_EXT.has(path.extname(entry.name).toLowerCase().slice(1))) count++;
     }
@@ -298,7 +341,9 @@ async function moveLibraryContents(from: string, to: string): Promise<{ moved: n
   let moved = 0;
   let skipped = 0;
   for (const entry of await fs.readdir(from, { withFileTypes: true })) {
-    if (entry.name === LIBRARY_MARKER_FILE) continue;
+    // 标记文件与缓存目录不是图库内容：缓存按绝对路径做键，跟着搬过去也会全部
+    // 失效重算，留在原处即可（原位置若重新启用，缓存仍然对得上）。
+    if (isLibraryInternalName(entry.name)) continue;
     const src = path.join(from, entry.name);
     const dest = path.join(to, entry.name);
     if (await pathExists(dest)) {
@@ -329,7 +374,7 @@ async function applyLibraryLocation(target: string): Promise<LibraryLocationChan
 
   if (resolved === current) {
     await ensureDir(resolved);
-    await ensureLibraryMarker(resolved);
+    await ensureLibraryScaffold(resolved);
     saveDesktopSettings(persist);
     return { canceled: false, path: resolved, isDefault };
   }
@@ -361,7 +406,7 @@ async function applyLibraryLocation(target: string): Promise<LibraryLocationChan
 
   try {
     await ensureDir(resolved);
-    await ensureLibraryMarker(resolved);
+    await ensureLibraryScaffold(resolved);
     const moved = move ? await moveLibraryContents(current, resolved) : { moved: 0, skipped: 0 };
     // 内容搬空后撤掉旧标记：原目录恢复成普通文件夹，避免被误认为仍是图库。
     if (move) await fs.rm(path.join(current, LIBRARY_MARKER_FILE), { force: true });
@@ -437,6 +482,9 @@ async function importSourceTreeNative(
     const entries = await fs.readdir(sourceDir, { withFileTypes: true });
     for (const entry of entries) {
       if (cancel.cancelled) return;
+      // 源目录若本身就是另一个 Kanitsu 图库，它的标记文件与缓存目录不是用户的
+      // 图片：缓存里的缩略图都是 JPEG，照搬进来会被当成图库内容。
+      if (isLibraryInternalName(entry.name)) continue;
       const sourcePath = path.join(sourceDir, entry.name);
       const targetPath = path.join(targetDir, entry.name);
       const childRelPath = relPath ? path.join(relPath, entry.name).split(path.sep).join('/') : entry.name;
@@ -496,8 +544,9 @@ async function readImageDimensions(filePath: string): Promise<{ width: number; h
     // fall through to nativeImage
   }
   // RAW 无法被 nativeImage 解码(TIFF 容器头尺寸探测已在上面的 image-size
-  // 尝试中完成),直接返回无尺寸,避免无谓的整文件解码尝试。
-  if (isRawImage(filePath)) return undefined;
+  // 尝试中完成),直接返回无尺寸,避免无谓的整文件解码尝试。HEIF/HEIC 同理
+  // (image-size 能读 ISOBMFF 容器头拿到尺寸;nativeImage 解不了 HEVC)。
+  if (isRawImage(filePath) || isHeifImage(filePath)) return undefined;
   const image = nativeImage.createFromPath(filePath);
   if (!image.isEmpty()) {
     const size = image.getSize();
@@ -635,13 +684,17 @@ function thumbCacheKey(file: DesktopFsEntry, targetSize: number): string {
 }
 
 // —— 缩略图磁盘持久化缓存 ——
-// 内存缓存随应用重启清空；缩略图落盘到 userData/thumbcache（按文件
-// mtime/size/尺寸/版本 做 SHA1 键），重启后直接读盘返回，免去重新解码。
+// 内存缓存随应用重启清空；缩略图落盘到「图库根目录/.kanitsu-cache/thumbcache」
+// （按文件 mtime/size/尺寸/版本 做 SHA1 键），重启后直接读盘返回，免去重新解码。
+// 放在图库内而不是 userData：缓存描述的就是这批文件，跟图库同处一块盘，换位置
+// 时不会让缓存在两个位置各留一份；用户想在设置里把整个图库挪到别的盘时，缓存
+// 也一起搬过去。代价是这个目录必须被当作应用私有目录（见 isLibraryInternalName），
+// 不能出现在图库列表、导出 ZIP 和搬移里。
 const THUMB_DISK_MAX_FILES = 20000;
 const THUMB_DISK_MAX_BYTES = 1536 * 1024 * 1024; // 1.5GB
 
 function thumbCacheDir(): string {
-  return path.join(app.getPath('userData'), 'thumbcache');
+  return path.join(getLibraryRoot(), LIBRARY_CACHE_DIR, 'thumbcache');
 }
 
 function thumbDiskKey(file: DesktopFsEntry, targetSize: number): string {
@@ -688,6 +741,23 @@ async function pruneThumbCache(): Promise<void> {
     }
   } catch {
     // 清理失败忽略。
+  }
+}
+
+/**
+ * 旧版缩略图缓存固定放在 userData/thumbcache。缓存改到图库内之后，那个目录
+ * 再也不会被读到，成了最多 1.5GB 的孤儿，启动时清一次。缩略图是可再生的派生
+ * 数据（设置页「清除缓存」做的也是同一件事），不涉及用户文件。
+ */
+async function dropLegacyThumbCache(): Promise<void> {
+  const legacy = path.join(app.getPath('userData'), 'thumbcache');
+  if (path.resolve(legacy) === path.resolve(thumbCacheDir())) return;
+  if (!(await pathExists(legacy))) return;
+  try {
+    await fs.rm(legacy, { recursive: true, force: true });
+    logger.info('cache', `已清理旧位置的缩略图缓存：${legacy}`);
+  } catch (error) {
+    logger.warn('cache', `清理旧缩略图缓存失败：${String(error)}`);
   }
 }
 
@@ -1161,7 +1231,7 @@ function registerIpc(): void {
   ipcMain.handle('library:acknowledgeLocation', async (): Promise<LibraryLocationInfo> => {
     const root = getLibraryRoot();
     await ensureDir(root);
-    await ensureLibraryMarker(root);
+    await ensureLibraryScaffold(root);
     saveDesktopSettings({ libraryLocationConfirmed: true });
     return {
       path: root,
@@ -1196,28 +1266,35 @@ function registerIpc(): void {
   ipcMain.handle('library:getRoot', async (): Promise<DesktopFsEntry> => {
     const root = getLibraryRoot();
     await ensureDir(root);
+    // 骨架必须先于扫描存在：否则首次写缩略图会改动根目录 mtime，取到的指纹
+    // 与下次启动不一致，白扫一遍（见 ensureLibraryScaffold）。
+    await ensureLibraryScaffold(root);
     return entryFor(root, '全部图包');
   });
 
   ipcMain.handle('library:ensureRoot', async (): Promise<DesktopFsEntry> => {
     const root = getLibraryRoot();
     await ensureDir(root);
-    await ensureLibraryMarker(root);
+    await ensureLibraryScaffold(root);
     return entryFor(root, '全部图包');
   });
 
   ipcMain.handle('library:fingerprint', async (): Promise<string> => {
     const root = getLibraryRoot();
     await ensureDir(root);
+    // fingerprint 与 getRoot 在启动时并发调用，取指纹前同样要等骨架建好。
+    await ensureLibraryScaffold(root);
     const stat = await fs.stat(root);
     return String(stat.mtimeMs);
   });
 
   ipcMain.handle('library:createFolder', async (_event, parent: DesktopFsEntry, name: string): Promise<DesktopFsEntry> => {
+    assertNotLibraryInternalName(name);
     return getOrCreateFolder(parent.id, name);
   });
 
   ipcMain.handle('library:createTopFolder', async (_event, name: string): Promise<DesktopFsEntry> => {
+    assertNotLibraryInternalName(name);
     return createTopFolder(name);
   });
 
@@ -1231,7 +1308,10 @@ function registerIpc(): void {
 
   ipcMain.handle('library:listChildren', async (_event, folder: DesktopFsEntry): Promise<DesktopFsEntry[]> => {
     assertInsideLibrary(folder.id);
-    return listEntries(folder.id);
+    // 应用私有目录（缩略图缓存）不出现在图库列表里：扫描基于这里的结果，
+    // 一旦露出来，缓存里的 JPEG 就会被当成图库图片。
+    const entries = await listEntries(folder.id);
+    return entries.filter((entry) => !isLibraryInternalName(entry.name));
   });
 
   ipcMain.handle('library:readBlob', async (_event, file: DesktopFsEntry): Promise<Uint8Array> => {
@@ -1401,6 +1481,7 @@ function registerIpc(): void {
   ipcMain.handle('library:move', async (_event, entry: DesktopFsEntry, toFolder: DesktopFsEntry, newName?: string): Promise<DesktopFsEntry> => {
     assertInsideLibrary(entry.id);
     assertInsideLibrary(toFolder.id);
+    if (newName) assertNotLibraryInternalName(newName);
     const target = path.join(toFolder.id, newName ?? path.basename(entry.id));
     await fs.rename(entry.id, target);
     return entryFor(target);
@@ -1653,8 +1734,9 @@ void app.whenReady().then(() => {
   registerWindowControlIpc();
   registerThemeBootstrap();
   createWindow();
-  // 后台清理缩略图磁盘缓存（超限时删除最旧）。
+  // 后台清理缩略图磁盘缓存（超限时删除最旧），并回收旧版本留在 userData 的缓存。
   void pruneThumbCache();
+  void dropLegacyThumbCache();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });

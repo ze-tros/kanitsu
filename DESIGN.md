@@ -81,13 +81,15 @@ ImportSourcePicker + LibraryStore
 
 | 平台 | 图包库 | 索引 | 缩略图 |
 |---|---|---|---|
-| Electron | 默认 `userData/albums`，可改到自选目录 | IndexedDB | `userData/thumbcache` + 内存缓存 |
+| Electron | 默认 `userData/albums`，可改到自选目录 | IndexedDB | 图库内 `.kanitsu-cache/thumbcache` + 内存缓存 |
 | Android | 应用外部文件目录 `albums/` | WebView IndexedDB | 原生磁盘缓存 + 渲染端缓存 |
 | Web demo | 内存 | 内存 | 内存 object URL |
 
 图包库和缓存属于应用数据。导出文件由用户选择保存位置，不随应用数据管理。
 
 桌面端图包库位置记录在 `userData/settings.json`：首次运行弹窗确认，之后可在「设置 → 通用 → 图包保存位置」更改。导入只把源文件复制一份进图库，图库内的整理与删除不触及源目录；为避免把用户自己的照片目录整体当成图库，新位置必须是空目录，或带 Kanitsu 标记文件（`.kanitsu-library.json`）的既有图库。
+
+图库根目录下有两个应用私有项：标记文件 `.kanitsu-library.json` 与缓存目录 `.kanitsu-cache/thumbcache`（缩略图磁盘缓存，上限 1.5GB）。缓存跟着图库走，是因为它描述的就是这批文件；两者必须被扫描、导出 ZIP、文件统计与位置搬移跳过，否则缓存里的 JPEG 会被当作图库图片。旧版本留在 `userData/thumbcache` 的缓存启动时清理一次。
 
 ## 4. 核心流程
 
