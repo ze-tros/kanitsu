@@ -10,6 +10,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { workerData } from 'node:worker_threads';
 
 /** 首期支持的主流相机 RAW 扩展名(规范来源 packages/core/src/path.ts;
  * 桌面主进程受 tsc rootDir 限制无法跨包引用,此处独立维护)。 */
@@ -72,7 +73,7 @@ const dynamicImport = new Function('specifier', 'return import(specifier);') as
 let modulePromise: Promise<{ LibRaw: new () => LibrawInstance }> | null = null;
 
 /** 定位 libraw-wasm 的 dist 目录(兼容 electron-builder asarUnpack 布局)。 */
-function librawDistDir(): string {
+export function librawDistDir(): string {
   // CJS 产物内 require 全局可用(由 tsc 转译保证)。
   const pkg = require.resolve('libraw-wasm/package.json') as string;
   let dir = path.dirname(pkg);
@@ -82,10 +83,19 @@ function librawDistDir(): string {
   return path.join(dir, 'dist');
 }
 
+/**
+ * worker 线程内优先使用主进程经 workerData 下发的目录:worker 的模块解析
+ * 在 asar 环境下不可靠,require.resolve 只应在主进程执行。
+ */
+function resolveLibrawDist(): string {
+  const passed = (workerData as { librawDist?: string } | null)?.librawDist;
+  return passed ?? librawDistDir();
+}
+
 async function loadLibraw(): Promise<{ LibRaw: new () => LibrawInstance }> {
   if (!modulePromise) {
     modulePromise = (async () => {
-      const distDir = librawDistDir();
+      const distDir = resolveLibrawDist();
       const wasmBinary = readFileSync(path.join(distDir, 'libraw.wasm'));
       const factoryUrl = pathToFileURL(path.join(distDir, 'libraw.js')).href;
       const mod = await dynamicImport(factoryUrl);

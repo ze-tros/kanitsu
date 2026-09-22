@@ -9,15 +9,26 @@ apps/desktop/dist-electron/
 apps/desktop/dist/
 apps/desktop/release*/
 apps/desktop/.portable-staging-*/
+# electron-builder 输出目录的勘察副本（可随时删除）
+apps/desktop/.dir-inspect*/
 *.js.map
 *.d.ts
 .test-build/
 
 .idea/
 
+# 本地环境变量与签名密钥（如 WIN_CSC_LINK），不入库
+.env
+.env.*
+!.env.example
+
+# 本地日志与调试输出
+*.log
+
 # Local agent tooling
 .agents/
 .zcode/
+.zcode-share/
 AGENTS.md
 CLAUDE.md
 skills-lock.json

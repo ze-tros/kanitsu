@@ -9,7 +9,7 @@ import { pathToFileURL } from 'node:url';
 import archiver from 'archiver';
 import { imageSize } from 'image-size';
 import { logger, readLogTail, setLogLevel } from './logger';
-import { RAW_IMAGE_EXT, isRawImage } from './rawDecoder';
+import { RAW_IMAGE_EXT, isRawImage, librawDistDir } from './rawDecoder';
 
 // 应用 bundle 协议：生产构建渲染层以 kanitsu-app:// 加载。file:// 下绝对路径会
 // 404、且 type=module 脚本会被 CORS 拦截（白屏）；自定义 scheme 一步规避，
@@ -557,7 +557,11 @@ function failWorkerJobs(worker: Worker, err: Error): void {
 
 function ensureThumbnailWorker(index: number): void {
   if (workerPool[index]) return;
-  const worker = new Worker(path.join(__dirname, 'thumbnailWorker.js'));
+  // librawDist:worker 内不做 require.resolve(asar 下 worker 模块解析不可靠),
+  // 由主进程解析一次后下发;开发/打包两种布局都由 librawDistDir 归一。
+  const worker = new Worker(path.join(__dirname, 'thumbnailWorker.js'), {
+    workerData: { librawDist: librawDistDir() },
+  });
   workerPool[index] = worker;
   worker.on('message', (msg: { requestId: number; ok: boolean; data?: Uint8Array; error?: string }) => {
     const job = inFlightJobs.get(msg.requestId);
@@ -740,7 +744,9 @@ const rawDerivativePending = new Map<string, Promise<string>>();
 
 function ensureRawDerivativeWorker(): Worker {
   if (rawDerivativeWorker) return rawDerivativeWorker;
-  const worker = new Worker(path.join(__dirname, 'rawWorker.js'));
+  const worker = new Worker(path.join(__dirname, 'rawWorker.js'), {
+    workerData: { librawDist: librawDistDir() },
+  });
   rawDerivativeWorker = worker;
   worker.on('message', (msg: { requestId: number; ok: boolean; data?: Uint8Array; error?: string }) => {
     const job = rawDerivativeInFlight.get(msg.requestId);
