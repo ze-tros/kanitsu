@@ -1,0 +1,254 @@
+diff --git a/apps/web/src/mobile.css b/apps/web/src/mobile.css
+index ebeb36b..82c11d6 100644
+--- a/apps/web/src/mobile.css
++++ b/apps/web/src/mobile.css
+@@ -526,8 +526,20 @@ html[data-theme='light'] .mobile-studio {
+   text-transform: none;
+ }
+ 
+-.m-directory-toolbar .m-sort-picker select {
++.m-directory-toolbar .m-sort-picker-value {
+   flex: 1;
++  min-width: 0;
++  overflow: hidden;
++  text-align: left;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
++
++.m-directory-toolbar .m-sort-picker-chevron {
++  width: 14px;
++  height: 14px;
++  flex: none;
++  color: var(--m-faint);
+ }
+ 
+ .m-directory-controls {
+diff --git a/apps/web/src/mobile.css b/apps/web/src/mobile.css
+index ebeb36b..82c11d6 100644
+--- a/apps/web/src/mobile.css
++++ b/apps/web/src/mobile.css
+@@ -600,48 +612,6 @@ html[data-theme='light'] .mobile-studio {
+   font-weight: 620;
+ }
+ 
+-.m-sort-picker {
+-  position: relative;
+-  min-width: 94px;
+-  border-right: 1px solid var(--m-line);
+-  border-radius: 0;
+-  padding-left: 6px;
+-}
+-
+-.m-sort-picker select {
+-  min-width: 0;
+-  appearance: none;
+-  -webkit-appearance: none;
+-  flex: 1;
+-  border: 0;
+-  outline: 0;
+-  background: transparent;
+-  color: var(--m-text-soft);
+-  cursor: pointer;
+-  font-size: 10px;
+-  font-weight: 620;
+-  padding-right: 18px;
+-}
+-
+-.m-sort-picker::after,
+-.m-select-wrap::after {
+-  width: 7px;
+-  height: 7px;
+-  position: absolute;
+-  top: 50%;
+-  right: 9px;
+-  border-right: 1.5px solid var(--m-muted);
+-  border-bottom: 1.5px solid var(--m-muted);
+-  content: '';
+-  pointer-events: none;
+-  transform: translateY(-65%) rotate(45deg);
+-}
+-
+-.m-sort-picker option {
+-  background: var(--m-surface-2);
+-  color: var(--m-text);
+-}
+-
+ .m-tool-button.is-active,
+ .m-view-switch button.is-active {
+   background: var(--m-accent-soft);
+diff --git a/apps/web/src/mobile.css b/apps/web/src/mobile.css
+index ebeb36b..82c11d6 100644
+--- a/apps/web/src/mobile.css
++++ b/apps/web/src/mobile.css
+@@ -1301,6 +1257,13 @@ html[data-theme='light'] .mobile-studio {
+   color: var(--m-danger);
+ }
+ 
++.m-sheet-action-check {
++  display: grid;
++  flex: none;
++  place-items: center;
++  color: var(--m-accent-text);
++}
++
+ .m-sheet-footer {
+   border-top: 1px solid var(--m-line);
+   padding: 8px 10px 0;
+diff --git a/apps/web/src/mobile.css b/apps/web/src/mobile.css
+index ebeb36b..82c11d6 100644
+--- a/apps/web/src/mobile.css
++++ b/apps/web/src/mobile.css
+@@ -1351,8 +1314,7 @@ html[data-theme='light'] .mobile-studio {
+   letter-spacing: 0.06em;
+ }
+ 
+-.m-input,
+-.m-select {
++.m-input {
+   width: 100%;
+   min-height: 40px;
+   border: 1px solid var(--m-line);
+diff --git a/apps/web/src/mobile.css b/apps/web/src/mobile.css
+index ebeb36b..82c11d6 100644
+--- a/apps/web/src/mobile.css
++++ b/apps/web/src/mobile.css
+@@ -1364,31 +1326,12 @@ html[data-theme='light'] .mobile-studio {
+   font-size: 12px;
+ }
+ 
+-.m-select {
+-  appearance: none;
+-  -webkit-appearance: none;
+-  cursor: pointer;
+-  padding-right: 32px;
+-}
+-
+-.m-select-wrap {
+-  position: relative;
+-  display: block;
+-  flex: none;
+-}
+-
+-.m-select-wrap .m-select {
+-  display: block;
+-}
+-
+-.m-input:focus,
+-.m-select:focus {
++.m-input:focus {
+   border-color: var(--m-line);
+   box-shadow: none;
+ }
+ 
+-.m-input:focus-visible,
+-.m-select:focus-visible {
++.m-input:focus-visible {
+   border-color: var(--m-focus-ring);
+   box-shadow: 0 0 0 3px var(--m-focus-halo);
+ }
+diff --git a/apps/web/src/mobile.css b/apps/web/src/mobile.css
+index ebeb36b..82c11d6 100644
+--- a/apps/web/src/mobile.css
++++ b/apps/web/src/mobile.css
+@@ -1796,22 +1739,6 @@ html[data-theme='light'] .mobile-studio {
+   line-height: 1.55;
+ }
+ 
+-.m-log-level-select {
+-  width: 88px;
+-  min-height: 36px;
+-  flex: none;
+-  padding-right: 6px;
+-  font-size: 10px;
+-}
+-
+-.m-log-level-wrap {
+-  width: 88px;
+-}
+-
+-.m-log-level-wrap::after {
+-  right: 10px;
+-}
+-
+ .m-log-panel {
+   max-height: 260px;
+   overflow: auto;
+diff --git a/packages/ui/src/mobile/MobileApp.tsx b/packages/ui/src/mobile/MobileApp.tsx
+index 459acc3..d7db20e 100644
+--- a/packages/ui/src/mobile/MobileApp.tsx
++++ b/packages/ui/src/mobile/MobileApp.tsx
+@@ -109,6 +109,7 @@ type PromptState =
+ 
+ type SortMode = 'default' | 'name' | 'date' | 'size';
+ type SortDirection = 'asc' | 'desc';
++const SORT_MODE_LABELS: Record<SortMode, string> = { default: '默认顺序', name: '按名称', date: '按日期', size: '按大小' };
+ 
+ type ToolsScreenProps = {
+   onBack: () => void;
+diff --git a/packages/ui/src/mobile/MobileApp.tsx b/packages/ui/src/mobile/MobileApp.tsx
+index 459acc3..d7db20e 100644
+--- a/packages/ui/src/mobile/MobileApp.tsx
++++ b/packages/ui/src/mobile/MobileApp.tsx
+@@ -1858,6 +1859,21 @@ export function MobileApp({
+     [blurredImages, navigateToFolder, toggleFolderBlur, openOrganizeFor, handleExport, copyText, openOverlay],
+   );
+ 
++  // 排序方式选择器（替代原生 select 弹层，复用底部动作面板）。
++  const openSortSheet = useCallback(() => {
++    const actions: SheetAction[] = (Object.keys(SORT_MODE_LABELS) as SortMode[]).map((mode) => ({
++      label: SORT_MODE_LABELS[mode],
++      checked: sortMode === mode,
++      onSelect: () => {
++        setSortMode(mode);
++        if (mode === 'name') setSortDirection('asc');
++        else if (mode === 'date' || mode === 'size') setSortDirection('desc');
++      },
++    }));
++    setSheet({ title: '排序方式', actions });
++    openOverlay('sheet');
++  }, [sortMode, openOverlay]);
++
+   // ===== 打开各 UI 层（history 栈配对）=====
+   const openViewer = useCallback(
+     (image: ImageEntry) => {
+diff --git a/packages/ui/src/mobile/MobileApp.tsx b/packages/ui/src/mobile/MobileApp.tsx
+index 459acc3..d7db20e 100644
+--- a/packages/ui/src/mobile/MobileApp.tsx
++++ b/packages/ui/src/mobile/MobileApp.tsx
+@@ -2233,24 +2249,18 @@ export function MobileApp({
+               <div className="m-directory-toolbar">
+                 <span>{isRoot ? '图包排列' : '内容排列'}</span>
+                 <div className="m-directory-controls">
+-                  <label className="m-sort-picker">
++                  <button
++                    type="button"
++                    className="m-sort-picker"
++                    onClick={openSortSheet}
++                    aria-label={`排序方式，当前${SORT_MODE_LABELS[sortMode]}`}
++                  >
+                     <MobileIcon name="📐" className="w-4 h-4" />
+-                    <select
+-                      value={sortMode}
+-                      onChange={(e) => {
+-                        const next = e.target.value as SortMode;
+-                        setSortMode(next);
+-                        if (next === 'name') setSortDirection('asc');
+-                        else if (next === 'date' || next === 'size') setSortDirection('desc');
+-                      }}
+-                      aria-label="图包和图片排序方式"
+-                    >
+-                      <option value="default">默认顺序</option>
+-                      <option value="name">按名称</option>
+-                      <option value="date">按日期</option>
+-                      <option value="size">按大小</option>
+-                    </select>
+-                  </label>
++                    <span className="m-sort-picker-value">{SORT_MODE_LABELS[sortMode]}</span>
++                    <svg viewBox="0 0 24 24" className="m-sort-picker-chevron" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
++                      <path d="M6 9l6 6 6-6" />
++                    </svg>
++                  </button>
+                   <button
+                     className="m-sort-direction"
+                     disabled={sortMode === 'default'}
