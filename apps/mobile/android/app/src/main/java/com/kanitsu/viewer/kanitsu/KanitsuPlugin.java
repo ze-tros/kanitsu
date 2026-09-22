@@ -75,7 +75,9 @@ public class KanitsuPlugin extends Plugin {
     // System bars
     // ------------------------------------------------------------------
 
-    /** 应用内主题切换时同步状态栏/导航栏底色与图标明暗（setSystemTheme: { dark })。 */
+    /** 应用内主题切换时同步状态栏/导航栏底色与图标明暗（setSystemTheme: { dark, statusBarColor?, navBarColor? }）。
+     *  色值由 JS 从设计令牌算出后下发，这里同时持久化，供 MainActivity 冷启动预置
+     *  （不再按系统 uiMode 猜应用内偏好）。 */
     @PluginMethod
     public void setSystemTheme(PluginCall call) {
         Boolean dark = call.getBoolean("dark");
@@ -88,7 +90,18 @@ public class KanitsuPlugin extends Plugin {
             call.reject("activity unavailable");
             return;
         }
-        activity.runOnUiThread(() -> com.kanitsu.viewer.SystemBars.apply(activity, dark));
+        String statusColor = call.getString("statusBarColor");
+        String navColor = call.getString("navBarColor");
+        Integer status = com.kanitsu.viewer.SystemBars.parseColor(statusColor);
+        Integer nav = com.kanitsu.viewer.SystemBars.parseColor(navColor);
+        getContext()
+                .getSharedPreferences("kanitsu-ui", android.content.Context.MODE_PRIVATE)
+                .edit()
+                .putBoolean("system_dark", dark)
+                .putString("status_bar_color", statusColor)
+                .putString("nav_bar_color", navColor)
+                .apply();
+        activity.runOnUiThread(() -> com.kanitsu.viewer.SystemBars.apply(activity, dark, status, nav));
         call.resolve();
     }
 
