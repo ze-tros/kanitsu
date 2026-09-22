@@ -34,14 +34,13 @@ import {
 import type { FileRef, ImportSourcePicker, LibraryStore } from '../../../fs-adapter/src/types';
 import { organizeByFolder, type CustomOrganizeRule } from '../../../organizer/src/index';
 import { pickCover } from '../../../cover-picker/src/index';
-import { BlobImage, setImageMotionSuppressed } from '../BlobImage';
+import { BlobImage } from '../BlobImage';
 import { KanitsuLogo } from '../KanitsuLogo';
 import {
   COVER_THUMBNAIL_SIZE,
   preloadThumbnails,
   setThumbnailPreloadPaused,
   THUMB_PRIORITY_CURRENT_DIR,
-  THUMB_PRIORITY_DIRECTIONAL,
   THUMB_PRIORITY_SUBFOLDER,
   THUMB_PRIORITY_WARMUP,
 } from '../thumbnailCache';
@@ -60,7 +59,6 @@ import {
 } from './MobileSheets';
 import { MobileSettingsScreen, type SettingsSectionId } from './MobileSettingsScreen';
 import { useExitPresence } from './useExitPresence';
-import { MOBILE_OVERSCAN_PX, virtualRowWindow, virtualWindowKey, windowPadFor } from '../mobileVirtualWindow';
 import {
   FOLDER_GRID,
   IMAGE_GRID,
@@ -87,10 +85,8 @@ const FOLDER_COLS = FOLDER_GRID.cols;
 const FOLDER_GAP = FOLDER_GRID.gap;
 const FOLDER_CAPTION_H = 50;
 const MOBILE_SCROLL_PRELOAD_RESUME_MS = 180;
-// 列表视图虚拟化行距：m-image-list-row min-height 68px + gap-0.5（2px）。
-const LIST_ROW_H = 68;
+// 列表视图行间距 gap-0.5（2px）；行高由 .m-image-list-row 的 min-height 决定。
 const LIST_ROW_GAP = 2;
-const LIST_ROW_STEP = LIST_ROW_H + LIST_ROW_GAP;
 
 import { closeOverlayEntries, reconcilePop, type OverlayLayer, type StackEntry } from './historyStack';
 
@@ -222,72 +218,46 @@ function useLongPress(onLongPress: () => void, ms = 460) {
   };
 }
 
-/** 虚拟化网格：只挂载可视区 ± 缓冲行。 */
-function VirtualGrid<T>({
+/**
+ * 平铺网格/列表容器：不做窗口虚拟化（全量挂载、永不卸载，滚动是纯合成器
+ * 行为，不存在“窗口追不上视口”的空白）。进大图包时为避免数百张卡片挤在
+ * 首帧前一次性挂载（主线程卡几百毫秒、响应不及时），按帧分批填充：首帧只
+ * 挂载一批，随后每帧补一批直到全部就位。填充单调递增、与滚动无关。
+ */
+const ROW_FILL_BATCH = 60;
+
+function RowGrid<T>({
   items,
   cols,
-  rowHeight,
   gap,
-  scrollTop,
-  viewportH,
-  padPx,
-  sectionTop,
   renderItem,
   getKey,
 }: {
   items: T[];
   cols: number;
-  rowHeight: number;
   gap: number;
-  scrollTop: number;
-  viewportH: number;
-  /** 速度补偿后的窗口缓冲（与滚动节流键同一值，见 windowPadFor）。 */
-  padPx: number;
-  sectionTop: number;
   renderItem: (item: T) => ReactNode;
   getKey: (item: T) => string;
 }) {
-  const totalRows = Math.ceil(items.length / cols);
-  // Hooks 必须先于任何 early-return 调用：rowHeight 从 0 翻正时 hook 数量不能变。
-  // 窗口计算与滚动节流键共用 mobileVirtualWindow：键变化 ⟺ 挂载窗口变化，
-  // 按构造不会再出现“键用网格几何、窗口用列表几何”的错位（快速滑动整屏空白）。
-  const gs = Math.max(0, scrollTop - sectionTop);
-  const win = virtualRowWindow(gs, viewportH, rowHeight, cols, items.length, padPx);
-  const first = win?.first ?? 0;
-  const last = win?.last ?? 0;
-  // 可视行号窗口：窗口未变时复用同一数组，避免每次滚动都重建（万级图时减少 GC）。
-  const rowIndexes = useMemo(() => {
-    const out: number[] = [];
-    for (let r = first; r < last; r++) out.push(r);
-    return out;
-  }, [first, last]);
-  if (!win) return null;
+  const [fill, setFill] = useState({ items, count: ROW_FILL_BATCH });
+  // 换目录/换结果集时重置填充进度（渲染期派生状态，避免闪现旧进度）。
+  if (fill.items !== items) setFill({ items, count: ROW_FILL_BATCH });
+  const count = fill.items === items ? fill.count : ROW_FILL_BATCH;
+  useEffect(() => {
+    if (count >= items.length) return;
+    const raf = requestAnimationFrame(() => {
+      setFill((prev) =>
+        prev.items === items ? { items, count: Math.min(items.length, prev.count + ROW_FILL_BATCH) } : prev,
+      );
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [count, items]);
+  if (items.length === 0 || cols <= 0) return null;
   return (
-    <div style={{ position: 'relative', height: Math.max(1, totalRows * rowHeight - gap) }}>
-      {rowIndexes.map((r) => {
-        const rowStart = r * cols;
-        const firstKey = items[rowStart] ? getKey(items[rowStart]!) : `row-${r}`;
-        return (
-          <div
-            // key 用行首条目的 id 而不是行号：快速滚动时 React 组件随条目走，
-            // 避免复用错误行的组件导致 BlobImage 的 lazy 状态串图。
-            key={firstKey}
-            style={{
-              position: 'absolute',
-              top: r * rowHeight,
-              left: 0,
-              right: 0,
-              display: 'grid',
-              gridTemplateColumns: `repeat(${cols}, 1fr)`,
-              gap,
-            }}
-          >
-            {items.slice(rowStart, Math.min(items.length, rowStart + cols)).map((item) => (
-              <Fragment key={getKey(item)}>{renderItem(item)}</Fragment>
-            ))}
-          </div>
-        );
-      })}
+    <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gap }}>
+      {items.slice(0, Math.min(count, items.length)).map((item) => (
+        <Fragment key={getKey(item)}>{renderItem(item)}</Fragment>
+      ))}
     </div>
   );
 }
@@ -358,14 +328,15 @@ function ImageCard({
             {selected ? '✓' : ''}
           </div>
         )}
-        {/* VirtualGrid 已经限制了挂载窗口，卡片内不再叠加 IntersectionObserver。 */}
+        {/* 全量挂载后缩略图必须走 IntersectionObserver 懒加载（rootMargin 300px），
+            否则进目录即发起数百个并发读取请求。 */}
         <BlobImage
           store={store}
           fileRef={imageToFileRef(image)}
           alt={image.name}
             className="w-full h-full object-cover"
             thumbnail
-            lazy={false}
+            lazy
             blur={blurred}
         />
       </div>
@@ -1418,39 +1389,16 @@ export function MobileApp({
   const scrollSaveFrameRef = useRef<number | null>(null);
   const scrollPreloadResumeTimerRef = useRef<number | null>(null);
   const scrollMotionRef = useRef(false);
-  const virtualWindowKeyRef = useRef('');
-  // 窗口更新按 rAF 合并；速度采样用于窗口缓冲的动态补偿（见 windowPadFor）。
-  const windowFrameRef = useRef<number | null>(null);
-  const speedSampleRef = useRef({ t: 0, st: 0 });
-  const speedRef = useRef(0);
-  const [windowPadPx, setWindowPadPx] = useState(MOBILE_OVERSCAN_PX);
-  const [scrollTop, setScrollTop] = useState(0);
-  const [viewportH, setViewportH] = useState(0);
-  const [contentW, setContentW] = useState(0);
-  const folderSectionRef = useRef<HTMLElement>(null);
-  const imageSectionRef = useRef<HTMLElement>(null);
-  const [sectionTops, setSectionTops] = useState({ folder: 0, image: 0 });
-
-  const imageCardSize = contentW > 0 ? (contentW - IMAGE_GAP * (IMAGE_COLS - 1)) / IMAGE_COLS : 0;
-  const imageRowHeight = imageCardSize + IMAGE_GAP + (showFileNames ? IMAGE_NAME_H : 0);
   // 只有一个图包时使用整行，避免根页面留下半屏空白；多个图包仍保持紧凑两列。
   const folderCols = childFolderCards.length === 1 ? 1 : FOLDER_COLS;
-  const folderCardWidth = contentW > 0 ? (contentW - FOLDER_GAP * (folderCols - 1)) / folderCols : 0;
-  const folderRowHeight = folderCardWidth > 0 ? folderCardWidth * 0.625 + FOLDER_CAPTION_H + FOLDER_GAP : 0;
   const searchFolderCols = searchFolderCards.length === 1 ? 1 : FOLDER_COLS;
-  const searchFolderCardWidth = contentW > 0 ? (contentW - FOLDER_GAP * (searchFolderCols - 1)) / searchFolderCols : 0;
-  const searchFolderRowHeight =
-    searchFolderCardWidth > 0 ? searchFolderCardWidth * 0.625 + FOLDER_CAPTION_H + FOLDER_GAP : 0;
 
   const onMainScroll = useCallback(() => {
     const el = mainScrollRef.current;
     if (!el) return;
     // 快速滚动时只保留可见/方向预取，暂停当前目录和全库预热，避免后台
     // 请求占满桥接与原生解码时隙。滚动停止一小段时间后再恢复。
-    // 同一窗口内还跳过新挂载图片的入场动画：动画洪峰与滚动争主线程，
-    // 是“快速滑动时卡片消失、停下才出现”的直接原因。
     setThumbnailPreloadPaused(true);
-    setImageMotionSuppressed(true);
     if (!scrollMotionRef.current) {
       scrollMotionRef.current = true;
       el.classList.add('is-fast-scrolling');
@@ -1461,59 +1409,9 @@ export function MobileApp({
     scrollPreloadResumeTimerRef.current = window.setTimeout(() => {
       scrollPreloadResumeTimerRef.current = null;
       setThumbnailPreloadPaused(false);
-      setImageMotionSuppressed(false);
       scrollMotionRef.current = false;
       mainScrollRef.current?.classList.remove('is-fast-scrolling');
     }, MOBILE_SCROLL_PRELOAD_RESUME_MS);
-    const st = el.scrollTop;
-    // 速度采样（px/ms，指数平滑）：连续快滑会把惯性速度叠加上去，单帧行程
-    // 可达上千像素，窗口缓冲必须按速度补偿渲染提交延迟（见 windowPadFor）。
-    const now = performance.now();
-    const prevSample = speedSampleRef.current;
-    speedSampleRef.current = { t: now, st };
-    const dt = Math.max(1, now - prevSample.t);
-    const instSpeed = Math.abs(st - prevSample.st) / dt;
-    speedRef.current = speedRef.current * 0.7 + instSpeed * 0.3;
-    // 窗口更新按 rAF 合并：每帧至多触发一次渲染、取帧末最新 scrollTop。
-    // 否则速度叠加上来后每个滚动事件都是一次独立渲染，提交洪峰本身就是
-    // “窗口滞后 → 整屏空白”的放大器。
-    // 滚动位置本身不需要驱动 React；只有虚拟行窗口（含速度补偿缓冲）变化时
-    // 才更新。节流键必须与对应 VirtualGrid 实例同一套几何：列表模式是 70px
-    // 行高/单列，若错按网格卡尺寸计算，键每 ~470px 才变化一次，冻结的挂载
-    // 窗口跟不上快速滑动的视口，整屏露出空白（骨架和图片都没挂载）。
-    if (windowFrameRef.current == null) {
-      windowFrameRef.current = requestAnimationFrame(() => {
-        windowFrameRef.current = null;
-        const node = mainScrollRef.current;
-        if (!node) return;
-        const frameSt = node.scrollTop;
-        const padPx = windowPadFor(speedRef.current);
-        // 列表模式的文件夹是非虚拟化整列渲染，没有窗口可言。
-        const folderKey =
-          viewMode === 'list'
-            ? 'empty'
-            : searching
-              ? virtualWindowKey(frameSt, sectionTops.folder, viewportH, searchFolderRowHeight, searchFolderCols, searchFolderCards.length, padPx)
-              : virtualWindowKey(frameSt, sectionTops.folder, viewportH, folderRowHeight, folderCols, childFolderCards.length, padPx);
-        const imageStep = viewMode === 'list' ? LIST_ROW_STEP : imageRowHeight;
-        const imageCols = viewMode === 'list' ? 1 : IMAGE_COLS;
-        const imageKey = virtualWindowKey(
-          frameSt,
-          sectionTops.image,
-          viewportH,
-          imageStep,
-          imageCols,
-          searching ? searchImages.length : displayImages.length,
-          padPx,
-        );
-        const nextWindowKey = `${searching ? 'search' : 'library'}:${folderKey}|${imageKey}`;
-        if (virtualWindowKeyRef.current !== nextWindowKey) {
-          virtualWindowKeyRef.current = nextWindowKey;
-          setScrollTop(frameSt);
-          setWindowPadPx(padPx);
-        }
-      });
-    }
     if (scrollSaveFrameRef.current != null) return;
     scrollSaveFrameRef.current = requestAnimationFrame(() => {
       scrollSaveFrameRef.current = null;
@@ -1521,80 +1419,24 @@ export function MobileApp({
       if (!node) return;
       scrollPositionsRef.current.set(currentFolderId, node.scrollTop);
     });
-  }, [
-    childFolderCards.length,
-    displayImages.length,
-    folderCols,
-    folderRowHeight,
-    imageRowHeight,
-    searchFolderCards.length,
-    searchFolderCols,
-    searchFolderRowHeight,
-    searchImages.length,
-    searching,
-    sectionTops,
-    viewportH,
-    currentFolderId,
-    viewMode,
-  ]);
+  }, [currentFolderId]);
 
   useEffect(() => {
     return () => {
-      if (windowFrameRef.current != null) {
-        cancelAnimationFrame(windowFrameRef.current);
-        windowFrameRef.current = null;
-      }
       if (scrollPreloadResumeTimerRef.current != null) {
         window.clearTimeout(scrollPreloadResumeTimerRef.current);
         scrollPreloadResumeTimerRef.current = null;
       }
       scrollMotionRef.current = false;
       setThumbnailPreloadPaused(false);
-      setImageMotionSuppressed(false);
     };
   }, []);
-
-  useEffect(() => {
-    const el = mainScrollRef.current;
-    if (!el) return;
-    const measure = () => {
-      setViewportH(el.clientHeight);
-      setContentW(el.clientWidth);
-    };
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [toolsTab]);
-
-  // 度量两个 section 相对内容顶部的偏移
-  useLayoutEffect(() => {
-    const main = mainScrollRef.current;
-    if (!main) return;
-    const top = (el: HTMLElement | null) =>
-      el ? el.getBoundingClientRect().top - main.getBoundingClientRect().top + main.scrollTop : 0;
-    setSectionTops({ folder: top(folderSectionRef.current), image: top(imageSectionRef.current) });
-  }, [
-    childFolderCards.length,
-    folderImages.length,
-    searchFolderCards.length,
-    searchImages.length,
-    searchTerm,
-    searching,
-    currentFolderId,
-    contentW,
-    viewMode,
-    showFileNames,
-    aggregate,
-    toolsTab,
-  ]);
 
   // 切换目录后恢复滚动位置（工具 tab 关闭、内容区重新挂载时也会走到这里）
   useLayoutEffect(() => {
     const el = mainScrollRef.current;
     if (!el) return;
     el.scrollTop = scrollPositionsRef.current.get(currentFolderId) ?? 0;
-    setScrollTop(el.scrollTop);
   }, [currentFolderId, snapshot, toolsTab]);
 
   // ===== 缩略图预取（与桌面同优先级策略）=====
@@ -1647,41 +1489,6 @@ export function MobileApp({
     }
     return;
   }, [snapshot, store]);
-
-  // 滚动方向预取：下一屏图片优先生成（带节流：快速来回滚动只在时间窗内触发一次，
-  // 避免方向一变就重新提交整屏任务，重复取消/重排造成无谓的 IPC 与解码压力）。
-  const lastScrollTopRef = useRef(0);
-  const lastDirPrefetchAtRef = useRef(0);
-  useEffect(() => {
-    if (folderImages.length === 0 || !isPrefetchEnabled() || imageRowHeight <= 0 || viewportH <= 0) return;
-    const st = scrollTop;
-    const prev = lastScrollTopRef.current;
-    const dir = st > prev ? 'down' : st < prev ? 'up' : null;
-    lastScrollTopRef.current = st;
-    if (!dir) return;
-    // 节流：距上次方向预取 <150ms 则跳过（下一帧滚动到位后自然恢复触发）。
-    const now = Date.now();
-    if (now - lastDirPrefetchAtRef.current < 150) return;
-    lastDirPrefetchAtRef.current = now;
-    const gs = Math.max(0, st - sectionTops.image);
-    const screenRows = Math.max(1, Math.ceil(viewportH / imageRowHeight));
-    const firstRow = Math.floor(gs / imageRowHeight);
-    const lastRow = Math.ceil((gs + viewportH) / imageRowHeight);
-    const from = dir === 'down' ? lastRow : firstRow - screenRows;
-    const to = dir === 'down' ? lastRow + screenRows : firstRow;
-    const start = Math.max(0, from * IMAGE_COLS);
-    const end = Math.min(folderImages.length, Math.max(0, to) * IMAGE_COLS);
-    if (end <= start) return;
-    const token = { cancelled: false };
-    preloadThumbnails(store, folderImages.slice(start, end).map(imageToFileRef), {
-      priority: THUMB_PRIORITY_DIRECTIONAL,
-      recheck: true,
-      shouldStop: () => token.cancelled,
-    });
-    return () => {
-      token.cancelled = true;
-    };
-  }, [scrollTop, viewportH, folderImages, store, imageRowHeight, sectionTops.image]);
 
   // ===== 业务操作 =====
   const handleImport = useCallback(async () => {
@@ -2394,7 +2201,7 @@ export function MobileApp({
           ) : (
             <div className="m-content-pad">
               {searchFolders.length > 0 && (
-                <section ref={folderSectionRef} className="m-section">
+                <section className="m-section">
                   <h3 className="m-section-label">
                     匹配的文件夹 <span className="tabular-nums">{searchFolders.length}</span>
                   </h3>
@@ -2415,15 +2222,11 @@ export function MobileApp({
                       ))}
                     </div>
                   ) : (
-                    <VirtualGrid
+                    <RowGrid
                       items={searchFolderCards}
                       cols={searchFolderCols}
-                      rowHeight={searchFolderRowHeight}
-                      gap={FOLDER_GAP}
-                      scrollTop={scrollTop}
-                      viewportH={viewportH} padPx={windowPadPx}
-                      sectionTop={sectionTops.folder}
-                      getKey={(c) => c.folder.id}
+                                            gap={FOLDER_GAP}
+                                                                                        getKey={(c) => c.folder.id}
                       renderItem={(card) => (
                         <FolderCard
                           folder={card.folder}
@@ -2441,21 +2244,17 @@ export function MobileApp({
                 </section>
               )}
               {searchImages.length > 0 && (
-                <section ref={imageSectionRef} className="m-section">
+                <section className="m-section">
                   <h3 className="m-section-label">
                     匹配的图片 <span className="tabular-nums">{searchImages.length}</span>
                   </h3>
                   {viewMode === 'list' ? (
                     <div className="px-0.5 pb-2">
-                      <VirtualGrid
+                      <RowGrid
                         items={searchImages}
                         cols={1}
-                        rowHeight={LIST_ROW_STEP}
-                        gap={LIST_ROW_GAP}
-                        scrollTop={scrollTop}
-                        viewportH={viewportH} padPx={windowPadPx}
-                        sectionTop={sectionTops.image}
-                        getKey={(img) => img.id}
+                                                gap={LIST_ROW_GAP}
+                                                                                                getKey={(img) => img.id}
                         renderItem={(img) => (
                           <ImageListRow
                             image={img}
@@ -2471,15 +2270,11 @@ export function MobileApp({
                       />
                     </div>
                   ) : (
-                    <VirtualGrid
+                    <RowGrid
                       items={searchImages}
                       cols={IMAGE_COLS}
-                      rowHeight={imageRowHeight}
-                      gap={IMAGE_GAP}
-                      scrollTop={scrollTop}
-                      viewportH={viewportH} padPx={windowPadPx}
-                      sectionTop={sectionTops.image}
-                      getKey={(img) => img.id}
+                                            gap={IMAGE_GAP}
+                                                                                        getKey={(img) => img.id}
                       renderItem={(img) => (
                         <ImageCard
                           image={img}
@@ -2585,7 +2380,7 @@ export function MobileApp({
                 </div>
               </div>
             )}
-            <section ref={folderSectionRef} className="m-section">
+            <section className="m-section">
               <div className="m-section-heading">
                 <h3 className="m-section-label">{isRoot ? '图包' : '子文件夹'} <span>{childFolders.length}</span></h3>
                 {!selectMode && selectedFolder && (
@@ -2621,15 +2416,11 @@ export function MobileApp({
                     ))}
                   </div>
                 ) : (
-                  <VirtualGrid
+                  <RowGrid
                     items={childFolderCards}
                     cols={folderCols}
-                    rowHeight={folderRowHeight}
-                    gap={FOLDER_GAP}
-                    scrollTop={scrollTop}
-                    viewportH={viewportH} padPx={windowPadPx}
-                    sectionTop={sectionTops.folder}
-                    getKey={(c) => c.folder.id}
+                                        gap={FOLDER_GAP}
+                                                                                getKey={(c) => c.folder.id}
                     renderItem={(card) => (
                       <FolderCard
                         folder={card.folder}
@@ -2647,7 +2438,7 @@ export function MobileApp({
               )}
             </section>
             {!isRoot && (folderImages.length > 0 || aggregateImages.length > 0) && (
-              <section ref={imageSectionRef} className="m-section">
+              <section className="m-section">
                 <div className="m-section-heading">
                   <h3 className="m-section-label">
                     {aggregate ? '全部图片' : '当前目录图片'} <span className="tabular-nums">{displayImages.length}</span>
@@ -2689,15 +2480,11 @@ export function MobileApp({
                   <div className="m-inline-empty">当前目录没有图片，开启“子目录”可查看全部图片</div>
                 ) : viewMode === 'list' ? (
                   <div className="px-0.5 pb-2">
-                    <VirtualGrid
+                    <RowGrid
                       items={displayImages}
                       cols={1}
-                      rowHeight={LIST_ROW_STEP}
-                      gap={LIST_ROW_GAP}
-                      scrollTop={scrollTop}
-                      viewportH={viewportH} padPx={windowPadPx}
-                      sectionTop={sectionTops.image}
-                      getKey={(img) => img.id}
+                                            gap={LIST_ROW_GAP}
+                                                                                        getKey={(img) => img.id}
                       renderItem={(img) => (
                         <ImageListRow
                           image={img}
@@ -2713,15 +2500,11 @@ export function MobileApp({
                     />
                   </div>
                 ) : (
-                  <VirtualGrid
+                  <RowGrid
                     items={displayImages}
                     cols={IMAGE_COLS}
-                    rowHeight={imageRowHeight}
-                    gap={IMAGE_GAP}
-                    scrollTop={scrollTop}
-                    viewportH={viewportH} padPx={windowPadPx}
-                    sectionTop={sectionTops.image}
-                    getKey={(img) => img.id}
+                                        gap={IMAGE_GAP}
+                                                                                getKey={(img) => img.id}
                     renderItem={(img) => (
                       <ImageCard
                         image={img}

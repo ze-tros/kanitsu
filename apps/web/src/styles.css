@@ -340,6 +340,12 @@ body {
 .mobile-studio .blob-image:not(.is-ready):not(.failed) .blob-image-spinner {
   display: none;
 }
+/* 移动端加载态由骨架块承担，隐藏扫光：其 will-change 图层在全量挂载下会铺出
+   数百个常驻合成层，图层分配拖慢进目录、图层压力又在极限速滑动下抢光栅预算
+   （来不及画出的瓦片就是残余的空白）。 */
+.mobile-studio .blob-image-shimmer {
+  display: none;
+}
 
 /* Blurred preview (per-album privacy setting). Scale up slightly so the
    blur does not reveal a clear frame edge around the image.
@@ -480,20 +486,8 @@ body {
 }
 
 /* —— 柔和动画 ——
-   kanitsu-image-in：缩略图/原图就绪换入时淡入，取代生硬硬切。
-   仅合成器属性（opacity），不触发 layout；尊重系统“减少动态效果”。 */
-@keyframes kanitsu-image-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-.kanitsu-image-in {
-  animation: kanitsu-image-in 180ms ease-out both;
-}
-@media (prefers-reduced-motion: reduce) {
-  .kanitsu-image-in {
-    animation: none !important;
-  }
-}
+   入场渐入（kanitsu-image-in）已移除：opacity 从 0 起的淡入在高速滑动时
+   会形成整屏透明卡片的洪峰（“卡片消失、停下才出现”），骨架→图片直接交接。 */
 
 /* ===========================================================================
    Formal workspace redesign
@@ -3703,6 +3697,10 @@ body {
 .m-viewer-root.m-viewer-exit {
   animation: m-viewer-out 150ms ease-in both;
 }
+
+/* —— 全量挂载行（无窗口虚拟化）。曾加过 content-visibility 跳过视口外
+   渲染，但极高速滑动下“行进入相关区先空一帧再翻面”本身就是空白来源，
+   而静态内容的布局/绘制本来就是一次性成本，遂移除。 */
 
 /* —— 快速滚动期间暂停占位动画（MobileApp 挂/摘 .is-fast-scrolling）——
    用 paused 而不是 none：摘掉类后从暂停点继续，不会整屏重放一遍。 */

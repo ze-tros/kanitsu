@@ -5,31 +5,7 @@ import { observeVisibility } from './visibleObserver';
 import { acquireObjectUrl, releaseObjectUrl } from './objectUrlPool';
 import { getBlurPreviewBlob, peekBlurPreviewBlob } from './blurPreview';
 
-type LoadedImage = { key: string; url: string; animate: boolean; degraded: boolean };
-
-// 虚拟列表会反复挂载同一张图片。记录已经出场过的资源，避免每次滚动回到
-// 同一行时重新触发淡入动画；key 包含 mtime/size，文件更新后会重新播放一次。
-const animatedImageKeys = new Set<string>();
-
-// 滚动期间跳过入场动画：快速滑动时每帧都有新卡片挂载，同时播放几十个淡入
-// 动画本身就是掉帧源（表现为“卡片消失、停下才出现”）。滚停后不补播——
-// 补播会让整屏图片同时闪一遍，所以直接把出场标记写掉。
-let imageMotionSuppressed = false;
-
-/** 滚动开始时置 true、滚动停止后置 false（移动端列表在 onScroll 里驱动）。 */
-export function setImageMotionSuppressed(suppressed: boolean): void {
-  imageMotionSuppressed = suppressed;
-}
-
-function takeAnimation(key: string): boolean {
-  if (imageMotionSuppressed) {
-    animatedImageKeys.add(key);
-    return false;
-  }
-  if (animatedImageKeys.has(key)) return false;
-  animatedImageKeys.add(key);
-  return true;
-}
+type LoadedImage = { key: string; url: string; degraded: boolean };
 
 /** 隐私模糊预览专用极小缩略图：展示前经 blurPreview.ts 降采样重采样糊化，
     小尺寸让生成、解码与内存开销都比全尺寸缩略图低一个量级。 */
@@ -67,18 +43,15 @@ export function BlobImage({
       ? peekThumbnailBlob(fileRef, thumbSize) ??
         (fallbackThumbSize !== null ? peekThumbnailBlob(fileRef, fallbackThumbSize) : null)
       : null;
-  // 入场动画按文件身份（不含缩略图尺寸变体）记账：切换隐私预览会让同一文件
-  // 在 48px/普通键之间切换，若按尺寸变体记账会让整屏重播淡入。
-  const animationKey = `${fileRef.id}::${fileRef.mtime ?? ''}::${fileRef.size ?? ''}`;
   const resourceKey = `${fileRef.id}\u0000${fileRef.mtime ?? ''}\u0000${fileRef.size ?? ''}\u0000${thumbnail ? `thumb-${thumbSize}` : 'full'}`;
   const [loaded, setLoaded] = useState<LoadedImage | null>(null);
   const [failedKey, setFailedKey] = useState<string | null>(null);
-  const [visible, setVisible] = useState(() => {
-    if (!lazy) return true;
-    // 懒加载只应延迟冷缓存请求；已经生成好的缩略图可以直接进入加载流程，
-    // 避免虚拟列表滚回时还要等待 IntersectionObserver 再闪一遍占位。
-    return peekCachedThumb() !== null;
-  });
+  const [shownKey, setShownKey] = useState<string | null>(null);
+  // 一律等 IntersectionObserver 触发再加载（缓存命中也不跳过）：全量挂载下
+  // 进图包即有数百张卡片，若缓存命中就同步取 URL/解码，几百个 object URL 与
+  // 解码请求的洪峰会把进目录卡成秒级。IO 的 rootMargin 300px 足以让可见卡片
+  // 一两帧内开始加载；回看不再重载由组件常驻保证（visible 只置真、不回退）。
+  const [visible, setVisible] = useState(() => !lazy);
   const containerRef = useRef<HTMLDivElement>(null);
   const url = loaded?.key === resourceKey ? loaded.url : null;
   const failed = failedKey === resourceKey;
@@ -110,7 +83,7 @@ export function BlobImage({
       if (cancelled) return;
       const next = acquireObjectUrl(blob);
       ownedUrl = next;
-      setLoaded({ key: resourceKey, url: next, degraded, animate: takeAnimation(animationKey) });
+      setLoaded({ key: resourceKey, url: next, degraded });
     };
     // 模糊隐私：源 Blob 先经降采样重采样模糊（见 blurPreview.ts），出图即已
     // 糊、无 CSS filter 光栅化。降采样结果同步命中时零等待；失败时回落源
@@ -154,14 +127,25 @@ export function BlobImage({
   const coverClass = thumbnail ? ' object-top' : '';
   // 降采样预览已自带糊化（degraded），去掉 CSS blur 及配套的 scale 补边；
   // 仅降采样失败回落源 Blob 时保留 .blur-preview 的高斯模糊兜底。
-  const imageClass = `${className ?? ''}${blur && !loaded?.degraded ? ' blur-preview' : ''}${coverClass}${loaded?.animate ? ' kanitsu-image-in' : ''}`;
+  // 入场不做渐入（opacity 从 0 起的淡入洪峰正是“快速滑动整屏空白”的来源），
+  // 骨架一直保留到 img 解码完成（onLoad）才交接——URL 就绪 ≠ 已画得出，
+  // 解码空窗期图片“可见但没画出来”，极高速滑动下就是空白卡片。
+  const imageClass = `${className ?? ''}${blur && !loaded?.degraded ? ' blur-preview' : ''}${coverClass}`;
+  const shown = url != null && shownKey === resourceKey;
   return (
     <div
-      className={`blob-image w-full h-full${url ? ' is-ready' : ''}${failed ? ' failed' : ''}`}
+      className={`blob-image w-full h-full${shown ? ' is-ready' : ''}${failed ? ' failed' : ''}`}
       ref={containerRef}
-      aria-label={!url && !failed ? '加载中' : undefined}
+      aria-label={!shown && !failed ? '加载中' : undefined}
     >
-      <img src={url ?? undefined} alt={alt ?? fileRef.name} className={imageClass} loading="eager" />
+      <img
+        src={url ?? undefined}
+        alt={alt ?? fileRef.name}
+        className={imageClass}
+        loading="eager"
+        onLoad={() => setShownKey(resourceKey)}
+        onError={() => setFailedKey(resourceKey)}
+      />
       {/* 骨架底色层（仅移动端经 CSS 启用，见 styles.css .blob-image-skeleton）：
           快速滑动时未加载项渲染为内容形状的骨架块，而不是透明底 + 冻结 spinner。 */}
       <div className="blob-image-skeleton" aria-hidden="true" />
