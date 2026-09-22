@@ -298,7 +298,12 @@ export function LibraryBrowser({
   const [importReport, setImportReport] = useState<ImportTask | null>(null);
   const [showImportReport, setShowImportReport] = useState(false);
   const [expandedFolders, setExpandedFolders] = useState<ReadonlySet<string>>(new Set());
-  const [deleteTarget, setDeleteTarget] = useState<{ kind: 'folder'; folder: FolderNode } | { kind: 'image'; image: ImageEntry } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<
+    | { kind: 'folder'; folder: FolderNode }
+    | { kind: 'folders'; folders: FolderNode[] }
+    | { kind: 'image'; image: ImageEntry }
+    | null
+  >(null);
   const [promptState, setPromptState] = useState<{
     kind: 'rename-image' | 'rename-folder' | 'create-folder';
     title: string;
@@ -333,6 +338,9 @@ export function LibraryBrowser({
   const [showNames, setShowNames] = useState(true);
   const [selectedImageIds, setSelectedImageIds] = useState<ReadonlySet<string>>(new Set());
   const lastSelectedImageRef = useRef<string | null>(null);
+  // 图包也能像图片一样勾选：两套选择集互不干扰，工具栏/检查器按内容分派动作。
+  const [selectedFolderIds, setSelectedFolderIds] = useState<ReadonlySet<string>>(new Set());
+  const lastSelectedFolderRef = useRef<string | null>(null);
   const [sidebarHidden, setSidebarHidden] = useState(() => {
     // 手机竖屏（<1024px）默认收起侧栏；桌面端沿用本地记忆。
     if (typeof window !== 'undefined' && window.innerWidth < 1024) return true;
@@ -912,6 +920,48 @@ export function LibraryBrowser({
     () => folderImages.filter((image) => selectedImageIds.has(image.id)),
     [folderImages, selectedImageIds],
   );
+  const selectedFolders = useMemo(
+    () => childFolders.filter((folder) => selectedFolderIds.has(folder.id)),
+    [childFolders, selectedFolderIds],
+  );
+  // 隐私预览的作用范围：所选图片 + 所选图包（含子目录）里的每一张图片。
+  const selectionBlurTargets = useMemo(() => {
+    const relPaths = new Set(selectedImages.map((image) => image.relPath));
+    if (snapshot) {
+      for (const folder of selectedFolders) {
+        for (const image of imagesOf(snapshot, folder.id)) relPaths.add(image.relPath);
+      }
+    }
+    return relPaths;
+  }, [selectedFolders, selectedImages, snapshot]);
+  const selectionAllBlurred = useMemo(
+    () => selectionBlurTargets.size > 0 && [...selectionBlurTargets].every((relPath) => blurredImages.has(relPath)),
+    [blurredImages, selectionBlurTargets],
+  );
+  // 图包选择的汇总数据（含各自子目录），供工具栏与检查器共用。
+  const selectedFolderStats = useMemo(() => {
+    let images = 0;
+    let bytes = 0;
+    let childFoldersCount = 0;
+    if (snapshot) {
+      for (const folder of selectedFolders) {
+        childFoldersCount += folder.childCount;
+        for (const image of imagesOf(snapshot, folder.id)) {
+          images += 1;
+          bytes += image.size;
+        }
+      }
+    }
+    return { images, bytes, childFolders: childFoldersCount };
+  }, [selectedFolders, snapshot]);
+  const selectionCount = selectedImages.length + selectedFolders.length;
+  const selectedFolderCovers = useMemo(
+    () => childFolderCards
+      .filter((card) => selectedFolderIds.has(card.folder.id))
+      .map((card) => card.covers[0])
+      .filter((image): image is ImageEntry => Boolean(image)),
+    [childFolderCards, selectedFolderIds],
+  );
   const allLibraryImages = useMemo(() => (snapshot ? Object.values(snapshot.images) : []), [snapshot]);
   const libraryBytes = useMemo(
     () => allLibraryImages.reduce((sum, image) => sum + image.size, 0),
@@ -951,7 +1001,20 @@ export function LibraryBrowser({
   useEffect(() => {
     setSelectedImageIds(new Set());
     lastSelectedImageRef.current = null;
+    setSelectedFolderIds(new Set());
+    lastSelectedFolderRef.current = null;
   }, [currentFolderId, searchQuery]);
+
+  // 图包被删除/重命名后（id 随 relPath 变化）把失效的勾选摘掉，避免计数虚高。
+  useEffect(() => {
+    if (!snapshot) return;
+    setSelectedFolderIds((current) => {
+      if (current.size === 0) return current;
+      const next = new Set<string>();
+      for (const id of current) if (snapshot.folders[id]) next.add(id);
+      return next.size === current.size ? current : next;
+    });
+  }, [snapshot]);
 
   const toggleFolder = useCallback((id: string) => {
     setExpandedFolders((prev) => {
@@ -1089,29 +1152,60 @@ export function LibraryBrowser({
     });
   }, [folderImages]);
 
-  const selectAllImages = useCallback(() => {
-    setSelectedImageIds(new Set(folderImages.map((image) => image.id)));
-  }, [folderImages]);
+  const selectFolder = useCallback((
+    folder: FolderNode,
+    checked: boolean,
+    shiftKey: boolean,
+  ) => {
+    setSelectedFolderIds((current) => {
+      if (shiftKey && lastSelectedFolderRef.current) {
+        const anchor = childFolders.findIndex((item) => item.id === lastSelectedFolderRef.current);
+        const target = childFolders.findIndex((item) => item.id === folder.id);
+        if (anchor >= 0 && target >= 0) {
+          const [start, end] = anchor < target ? [anchor, target] : [target, anchor];
+          const next = new Set(current);
+          childFolders.slice(start, end + 1).forEach((item) => {
+            if (checked) next.add(item.id);
+            else next.delete(item.id);
+          });
+          lastSelectedFolderRef.current = folder.id;
+          return next;
+        }
+      }
+      lastSelectedFolderRef.current = folder.id;
+      const next = new Set(current);
+      if (checked) next.add(folder.id);
+      else next.delete(folder.id);
+      return next;
+    });
+  }, [childFolders]);
 
-  const clearImageSelection = useCallback(() => {
+  const selectAllInView = useCallback(() => {
+    setSelectedImageIds(new Set(folderImages.map((image) => image.id)));
+    setSelectedFolderIds(new Set(childFolders.map((folder) => folder.id)));
+  }, [childFolders, folderImages]);
+
+  const clearSelection = useCallback(() => {
     setSelectedImageIds(new Set());
     lastSelectedImageRef.current = null;
+    setSelectedFolderIds(new Set());
+    lastSelectedFolderRef.current = null;
   }, []);
 
   const toggleSelectedBlur = useCallback(() => {
-    if (selectedImages.length === 0) return;
-    const allBlurred = selectedImages.every((image) => blurredImages.has(image.relPath));
+    if (selectionBlurTargets.size === 0) return;
+    const allBlurred = selectionAllBlurred;
     setBlurredImages((current) => {
       const next = new Set(current);
-      selectedImages.forEach((image) => {
-        if (allBlurred) next.delete(image.relPath);
-        else next.add(image.relPath);
+      selectionBlurTargets.forEach((relPath) => {
+        if (allBlurred) next.delete(relPath);
+        else next.add(relPath);
       });
       saveBlurredImages(next);
       return next;
     });
-    notify(allBlurred ? '已取消所选图片的隐私预览。' : '已为所选图片开启隐私预览。');
-  }, [blurredImages, notify, selectedImages]);
+    notify(allBlurred ? '已取消所选项目的隐私预览。' : '已为所选项目开启隐私预览。');
+  }, [notify, selectionAllBlurred, selectionBlurTargets]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1121,14 +1215,14 @@ export function LibraryBrowser({
       const typing = target?.matches('input, textarea, select, [contenteditable="true"]') ?? false;
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a' && !typing && !viewerImageId) {
         event.preventDefault();
-        selectAllImages();
-      } else if (event.key === 'Escape' && selectedImageIds.size > 0 && !viewerImageId) {
-        clearImageSelection();
+        selectAllInView();
+      } else if (event.key === 'Escape' && (selectedImageIds.size > 0 || selectedFolderIds.size > 0) && !viewerImageId) {
+        clearSelection();
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [clearImageSelection, selectAllImages, selectedImageIds.size, viewerImageId, showSettings]);
+  }, [clearSelection, selectAllInView, selectedFolderIds.size, selectedImageIds.size, viewerImageId, showSettings]);
 
   // In the viewer: switch to a sibling folder (same level) and show its first image.
   const handleViewerSwitchSibling = useCallback(
@@ -1300,6 +1394,42 @@ export function LibraryBrowser({
   const requestDeleteImage = (image: ImageEntry) => setDeleteTarget({ kind: 'image', image });
   const requestDeleteFolder = (folder: FolderNode) => setDeleteTarget({ kind: 'folder', folder });
 
+  /** 批量删除所选图包：逐个执行并统计失败，避免一个出错就吞掉整批。 */
+  const executeDeleteFolders = async (folders: FolderNode[]) => {
+    if (folders.length === 0) return;
+    setBusy(true);
+    notify(`正在删除 ${folders.length} 个图包…`);
+    let ok = 0;
+    let failed = 0;
+    try {
+      for (const folder of folders) {
+        try {
+          await deleteLibraryFolder(store, folder.relPath);
+          ok += 1;
+        } catch {
+          failed += 1;
+        }
+      }
+      await refresh();
+      notify(
+        failed > 0 ? `已删除 ${ok} 个图包，失败 ${failed} 个。` : `已删除 ${ok} 个图包。`,
+        failed > 0 ? 'error' : 'success',
+      );
+    } catch (err) {
+      notify(`删除失败：${String(err)}`, 'error');
+    } finally {
+      setBusy(false);
+      clearSelection();
+    }
+  };
+
+  const requestDeleteSelectedFolders = () => {
+    // 根目录（relPath 为空）不可删除，勾选时也不该出现在列表里。
+    const targets = selectedFolders.filter((folder) => folder.relPath);
+    if (targets.length === 0) return;
+    setDeleteTarget({ kind: 'folders', folders: targets });
+  };
+
   /** 一键开启/取消某相册及其全部子文件夹里每一张图片的隐私预览（逐图标记）。 */
   const toggleFolderBlur = useCallback((folder: FolderNode) => {
     if (!snapshot || !folder) return;
@@ -1392,6 +1522,7 @@ export function LibraryBrowser({
     const target = deleteTarget;
     setDeleteTarget(null);
     if (target.kind === 'image') await executeDeleteImage(target.image);
+    else if (target.kind === 'folders') await executeDeleteFolders(target.folders);
     else await performDelete(target.folder);
   };
 
@@ -1689,7 +1820,7 @@ export function LibraryBrowser({
                           {childFolderCards.slice(start, end).map(({ folder, covers }) => (
                             <div
                               key={folder.id}
-                              className="desktop-package-card"
+                              className={`desktop-package-card ${selectedFolderIds.has(folder.id) ? 'is-selected' : ''}`}
                               onContextMenu={(event) => openContextMenu(event, buildFolderMenu(folder))}
                             >
                               <button type="button" className="desktop-package-target" onClick={() => handleSelectFolder(folder)} aria-label={`打开图包${folder.name}`}>
@@ -1716,6 +1847,21 @@ export function LibraryBrowser({
                                   <span className="desktop-package-path">{folder.relPath || '图库'}</span>
                                 </span>
                               </button>
+                              <label className="desktop-selection-control" title={`选择图包${folder.name}`}>
+                                <input
+                                  type="checkbox"
+                                  className="desktop-selection-input"
+                                  aria-label={`选择图包${folder.name}`}
+                                  checked={selectedFolderIds.has(folder.id)}
+                                  onChange={(event) => {
+                                    const nativeEvent = event.nativeEvent as MouseEvent;
+                                    selectFolder(folder, event.currentTarget.checked, nativeEvent.shiftKey === true);
+                                  }}
+                                />
+                                <span className="desktop-selection-mark" aria-hidden="true">
+                                  {selectedFolderIds.has(folder.id) && <Check size={13} weight="bold" />}
+                                </span>
+                              </label>
                             </div>
                           ))}
                         </div>
@@ -1862,6 +2008,9 @@ export function LibraryBrowser({
             childFolderCount={childFolders.length}
             folderImages={folderAllImages}
             selectedImages={selectedImages}
+            selectedFolders={selectedFolders}
+            selectedFolderCovers={selectedFolderCovers}
+            selectedFolderStats={selectedFolderStats}
             coverImage={cover ? snapshot?.images[cover.imageId] ?? null : null}
             pinnedCovers={pinnedCovers}
             blurredImages={blurredImages}
@@ -1869,7 +2018,7 @@ export function LibraryBrowser({
             exporting={exporting}
             canUndo={Boolean(lastManifest)}
             onClose={() => setInspectorOpen(false)}
-            onClearSelection={clearImageSelection}
+            onClearSelection={clearSelection}
             onOpenImage={(image) => setViewerImageId(image.id)}
             onToggleSelectedBlur={toggleSelectedBlur}
             onToggleImageBlur={toggleImageBlur}
@@ -1877,6 +2026,8 @@ export function LibraryBrowser({
             onRenameImage={handleRenameImage}
             onCopyImagePath={(image) => void copyPath(image.relPath)}
             onDeleteImage={requestDeleteImage}
+            onExportSelectedFolder={(folder) => void exportFolder(folder)}
+            onDeleteSelectedFolders={requestDeleteSelectedFolders}
             onRefresh={() => void refresh()}
             onOrganize={openOrganizePreview}
             onUndo={() => void handleUndoOrganize()}
@@ -1954,20 +2105,36 @@ export function LibraryBrowser({
         </aside>
       </div>
 
-      {selectedImages.length > 0 && (
-        <div className="desktop-selection-toolbar" role="toolbar" aria-label="所选图片操作">
-          <strong>{selectedImages.length} 张已选择</strong>
+      {selectionCount > 0 && (
+        <div className="desktop-selection-toolbar" role="toolbar" aria-label="所选项目操作">
+          <strong>
+            {[
+              selectedImages.length > 0 ? `${selectedImages.length} 张图片` : '',
+              selectedFolders.length > 0 ? `${selectedFolders.length} 个图包` : '',
+            ].filter(Boolean).join(' · ')}已选择
+          </strong>
           <span className="desktop-selection-divider" />
-          <button type="button" onClick={selectAllImages}>全选当前结果</button>
-          <button type="button" onClick={toggleSelectedBlur}>{selectedImages.every((image) => blurredImages.has(image.relPath)) ? <Eye size={16} /> : <EyeSlash size={16} />}隐私预览</button>
-          {selectedImages.length === 1 && (
+          <button type="button" onClick={selectAllInView}>全选当前结果</button>
+          <button type="button" disabled={selectionBlurTargets.size === 0} onClick={toggleSelectedBlur}>{selectionAllBlurred ? <Eye size={16} /> : <EyeSlash size={16} />}隐私预览</button>
+          {selectionCount === 1 && selectedImages.length === 1 && (
             <>
               <button type="button" onClick={() => setViewerImageId(selectedImages[0]!.id)}><ArrowsOut size={16} />打开</button>
               <button type="button" onClick={() => pinCover(selectedImages[0]!.folderId, selectedImages[0]!.id, selectedImages[0]!.name)}><PushPin size={16} />设为封面</button>
               <button type="button" className="is-danger" onClick={() => requestDeleteImage(selectedImages[0]!)}><Trash size={16} />删除</button>
             </>
           )}
-          <button type="button" className="desktop-toolbar-close" aria-label="清除选择" onClick={clearImageSelection}><X size={15} /></button>
+          {selectionCount === 1 && selectedFolders.length === 1 && (
+            <>
+              <button type="button" disabled={busy} onClick={() => handleSelectFolder(selectedFolders[0]!)}><FolderOpen size={16} />打开</button>
+              <button type="button" disabled={busy} onClick={() => handleRenameFolder(selectedFolders[0]!)}><PencilSimple size={16} />重命名</button>
+              <button type="button" disabled={busy || exporting} onClick={() => selectedFolders[0] && void exportFolder(selectedFolders[0])}><FileZip size={16} />导出 ZIP</button>
+              <button type="button" className="is-danger" disabled={busy} onClick={requestDeleteSelectedFolders}><Trash size={16} />删除</button>
+            </>
+          )}
+          {selectedFolders.length > 0 && selectionCount > 1 && (
+            <button type="button" className="is-danger" disabled={busy} onClick={requestDeleteSelectedFolders}><Trash size={16} />删除图包</button>
+          )}
+          <button type="button" className="desktop-toolbar-close" aria-label="清除选择" onClick={clearSelection}><X size={15} /></button>
         </div>
       )}
 
@@ -2089,8 +2256,15 @@ export function LibraryBrowser({
               <p className="py-4 text-sm opacity-80">
                 {deleteTarget.kind === 'image'
                   ? `确定要删除图片“${deleteTarget.image.name}”吗？此操作不可撤销。`
-                  : `确定要删除图包“${deleteTarget.folder.name}”及其全部子目录吗？此操作不可撤销。`}
+                  : deleteTarget.kind === 'folders'
+                    ? `确定要删除选中的 ${deleteTarget.folders.length} 个图包及其全部子目录吗？此操作不可撤销。`
+                    : `确定要删除图包“${deleteTarget.folder.name}”及其全部子目录吗？此操作不可撤销。`}
               </p>
+              {deleteTarget.kind === 'folders' && (
+                <ul className="pb-2 text-xs opacity-70">
+                  {deleteTarget.folders.map((folder) => <li key={folder.id} className="truncate">{folder.relPath}</li>)}
+                </ul>
+              )}
             </div>
             <div className="modal-action shrink-0">
               <button className="btn btn-ghost" onClick={() => setDeleteTarget(null)}>取消</button>
@@ -2202,6 +2376,9 @@ function DesktopInspector({
   childFolderCount,
   folderImages,
   selectedImages,
+  selectedFolders,
+  selectedFolderCovers,
+  selectedFolderStats,
   coverImage,
   pinnedCovers,
   blurredImages,
@@ -2217,6 +2394,8 @@ function DesktopInspector({
   onRenameImage,
   onCopyImagePath,
   onDeleteImage,
+  onExportSelectedFolder,
+  onDeleteSelectedFolders,
   onRefresh,
   onOrganize,
   onUndo,
@@ -2233,6 +2412,10 @@ function DesktopInspector({
   childFolderCount: number;
   folderImages: ImageEntry[];
   selectedImages: ImageEntry[];
+  selectedFolders: FolderNode[];
+  /** 每个所选图包的代表封面（用于批量预览叠图）。 */
+  selectedFolderCovers: ImageEntry[];
+  selectedFolderStats: { images: number; bytes: number; childFolders: number };
   coverImage: ImageEntry | null;
   pinnedCovers: Record<string, string>;
   blurredImages: ReadonlySet<string>;
@@ -2248,6 +2431,8 @@ function DesktopInspector({
   onRenameImage: (image: ImageEntry) => void;
   onCopyImagePath: (image: ImageEntry) => void;
   onDeleteImage: (image: ImageEntry) => void;
+  onExportSelectedFolder: (folder: FolderNode) => void;
+  onDeleteSelectedFolders: () => void;
   onRefresh: () => void;
   onOrganize: () => void;
   onUndo: () => void;
@@ -2265,7 +2450,10 @@ function DesktopInspector({
     blurredCount: folderImages.reduce((count, image) => count + (blurredImages.has(image.relPath) ? 1 : 0), 0),
   }), [blurredImages, folderImages]);
 
-  if (selectedImages.length > 1) {
+  // 混选（图片 + 图包）：检查器展示图包侧（图片动作仍在工具栏），批量删除只作用于图包。
+  const imageOnlySelection = selectedImages.length > 0 && selectedFolders.length === 0;
+
+  if (imageOnlySelection && selectedImages.length > 1) {
     const selectedBytes = selectedImages.reduce((sum, image) => sum + image.size, 0);
     const selectedFormats = [...new Set(selectedImages.map((image) => image.ext.replace(/^\./, '').toUpperCase()))].join(' · ');
     return (
@@ -2298,7 +2486,7 @@ function DesktopInspector({
     );
   }
 
-  if (selectedImages.length === 1) {
+  if (imageOnlySelection && selectedImages.length === 1) {
     const image = selectedImages[0]!;
     const blurred = blurredImages.has(image.relPath);
     const pinned = pinnedCovers[image.folderId] === image.id;
@@ -2331,6 +2519,46 @@ function DesktopInspector({
           <button type="button" className="desktop-action-row" onClick={() => onRenameImage(image)}><PencilSimple size={17} /><span>重命名</span><CaretRight size={13} /></button>
           <button type="button" className="desktop-action-row" onClick={() => onCopyImagePath(image)}><Copy size={17} /><span>复制路径</span><CaretRight size={13} /></button>
           <button type="button" className="desktop-action-row is-danger" onClick={() => onDeleteImage(image)}><Trash size={17} /><span>删除图片</span><CaretRight size={13} /></button>
+        </section>
+      </aside>
+    );
+  }
+
+  if (selectedFolders.length > 0) {
+    const single = selectedFolders.length === 1 ? selectedFolders[0]! : null;
+    return (
+      <aside className="desktop-inspector" aria-label="图包选择">
+        <header className="desktop-inspector-header">
+          <div>
+            <span>图包选择</span>
+            <h2 title={single ? single.name : `${selectedFolders.length} 个图包`}>{single ? single.name : `${selectedFolders.length} 个图包`}</h2>
+          </div>
+          <span className="desktop-inspector-header-actions">
+            <DesktopIconButton label="清除选择" onClick={onClearSelection}><X size={16} /></DesktopIconButton>
+            <DesktopIconButton label="收起检查器" onClick={onClose}><SidebarSimple size={16} /></DesktopIconButton>
+          </span>
+        </header>
+        {selectedFolderCovers.length > 0 && (
+          <div className="desktop-selection-preview" aria-hidden="true">
+            {selectedFolderCovers.slice(0, 3).map((image, index) => (
+              <span key={image.id} style={{ transform: `translateX(${index * -13}px) rotate(${index * 2 - 2}deg)` }}>
+                <BlobImage store={store} fileRef={imageFileRef(image)} alt={image.name} className="desktop-selection-preview-image" thumbnail lazy />
+              </span>
+            ))}
+          </div>
+        )}
+        <section className="desktop-inspector-section desktop-data-list">
+          <div><span>包含图片</span><strong>{selectedFolderStats.images.toLocaleString('zh-CN')} 张</strong></div>
+          <div><span>子图包</span><strong>{selectedFolderStats.childFolders.toLocaleString('zh-CN')}</strong></div>
+          <div><span>合计大小</span><strong>{formatBytes(selectedFolderStats.bytes)}</strong></div>
+          {single && <div className="is-stacked"><span>所在路径</span><strong title={single.relPath}>{single.relPath}</strong></div>}
+        </section>
+        <section className="desktop-inspector-section">
+          <h3>批量操作</h3>
+          <button type="button" className="desktop-action-row" disabled={selectedFolderStats.images === 0} onClick={onToggleSelectedBlur}><EyeSlash size={17} /><span>切换隐私预览</span><CaretRight size={13} /></button>
+          {single && <button type="button" className="desktop-action-row" disabled={busy || exporting} onClick={() => onExportSelectedFolder(single)}><FileZip size={17} /><span>{exporting ? '正在导出' : '导出 ZIP'}</span><CaretRight size={13} /></button>}
+          <button type="button" className="desktop-action-row is-danger" disabled={busy} onClick={onDeleteSelectedFolders}><Trash size={17} /><span>{selectedFolders.length > 1 ? `删除 ${selectedFolders.length} 个图包` : '删除图包'}</span><CaretRight size={13} /></button>
+          <button type="button" className="desktop-action-row" onClick={onClearSelection}><X size={17} /><span>清除选择</span><CaretRight size={13} /></button>
         </section>
       </aside>
     );
