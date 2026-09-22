@@ -21,3 +21,7 @@ apps/desktop/.portable-staging-*/
 AGENTS.md
 CLAUDE.md
 skills-lock.json
+
+# 本地调试产物与 agent 工具配置
+.test-artifacts/
+.zcodeignore
