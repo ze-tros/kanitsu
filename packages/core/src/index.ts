@@ -9,4 +9,5 @@ export * from './indexed';
 export * from './snapshotMirror';
 export * from './remove';
 export * from './entry-ops';
+export * from './merge';
 export * from './log';

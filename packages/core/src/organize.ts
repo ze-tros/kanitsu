@@ -125,7 +125,7 @@ async function loadFileRefs(store: LibraryStore, folderRel: string, folder: Fold
   return refs;
 }
 
-function nextUniqueName(names: Set<string>, name: string): string {
+export function nextUniqueName(names: Set<string>, name: string): string {
   const dot = name.lastIndexOf('.');
   const stem = dot > 0 ? name.slice(0, dot) : name;
   const ext = dot > 0 ? name.slice(dot) : '';

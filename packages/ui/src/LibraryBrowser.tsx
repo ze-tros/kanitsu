@@ -43,6 +43,7 @@ import {
   SidebarSimple,
   SortAscending,
   SquaresFour,
+  Stack,
   Sun,
   Trash,
   UploadSimple,
@@ -60,6 +61,7 @@ import {
   importFolder,
   joinRelPath,
   loadOrScan,
+  mergeIntoNewPack,
   readSnapshotMirror,
   renameFolder,
   renameImage,
@@ -310,12 +312,16 @@ export function LibraryBrowser({
     | null
   >(null);
   const [promptState, setPromptState] = useState<{
-    kind: 'rename-image' | 'rename-folder' | 'create-folder';
+    kind: 'rename-image' | 'rename-folder' | 'create-folder' | 'merge-packs';
     title: string;
     label: string;
     initialValue: string;
+    hint?: string;
+    confirmLabel?: string;
     image?: ImageEntry;
     folder?: FolderNode;
+    imageIds?: string[];
+    folderIds?: string[];
   } | null>(null);
   const [promptValue, setPromptValue] = useState('');
   const [blurredImages, setBlurredImages] = useState<ReadonlySet<string>>(() => loadBlurredImages());
@@ -1582,6 +1588,50 @@ export function LibraryBrowser({
     }
   };
 
+  /** 多选图片/图包：合并进当前目录下的新图包（图包子树里的图片递归并入）。 */
+  const requestMergeSelection = () => {
+    if (!snapshot || !selectedFolder || selectionCount < 2) return;
+    const taken = new Set(childrenOf(snapshot, selectedFolder.id).map((folder) => folder.name));
+    const baseName = '合并图包';
+    let initial = baseName;
+    for (let i = 2; taken.has(initial); i++) initial = `${baseName} (${i})`;
+    setPromptState({
+      kind: 'merge-packs',
+      title: `合并 ${selectionCount} 项为新图包`,
+      label: '新图包名称',
+      hint: '选中的图片，以及选中图包（含全部子图包）里的每一张图片，都会移入新图包；被合并的图包会被删除，可用“撤销上次整理”还原。',
+      confirmLabel: '合并',
+      initialValue: initial,
+      imageIds: [...selectedImageIds],
+      folderIds: [...selectedFolderIds],
+    });
+    setPromptValue(initial);
+  };
+
+  const executeMergePacks = async (name: string, imageIds: string[], folderIds: string[]) => {
+    if (!snapshot || !selectedFolder) return;
+    setBusy(true);
+    notify('正在合并为新图包…');
+    try {
+      const result = await mergeIntoNewPack(store, snapshot, selectedFolder.relPath, name, { imageIds, folderIds });
+      setLastManifest(result.manifest);
+      await refresh();
+      clearSelection();
+      const notes: string[] = [];
+      if (result.conflicts.length > 0) notes.push(`${result.conflicts.length} 张图片移动失败`);
+      if (result.keptFolderRels.length > 0) notes.push(`${result.keptFolderRels.length} 个图包因仍有图片而保留`);
+      notify(
+        notes.length > 0
+          ? `已合并 ${result.movedCount} 张图片到“${name}”，${notes.join('；')}。`
+          : `已合并 ${result.movedCount} 张图片到“${name}”。`,
+      );
+    } catch (err) {
+      notify(`合并失败：${String(err)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const handleRenameFolder = (folder: FolderNode) => {
     if (!folder.relPath) return;
     setPromptState({ kind: 'rename-folder', title: '重命名图包', label: '新名称', initialValue: folder.name, folder });
@@ -1612,6 +1662,7 @@ export function LibraryBrowser({
     if (state.kind === 'rename-image' && state.image) await executeRenameImage(state.image, value);
     else if (state.kind === 'rename-folder' && state.folder) await executeRenameFolder(state.folder, value);
     else if (state.kind === 'create-folder' && state.folder) await executeCreateSubfolder(state.folder, value);
+    else if (state.kind === 'merge-packs') await executeMergePacks(value, state.imageIds ?? [], state.folderIds ?? []);
   };
 
   const openContextMenu = useCallback((event: ReactMouseEvent, items: ContextMenuItem[]) => {
@@ -1623,7 +1674,7 @@ export function LibraryBrowser({
   const buildImageMenu = (image: ImageEntry): ContextMenuItem[] => {
     const imageBlurred = blurredImages.has(image.relPath);
     const imagePinned = pinnedCovers[image.folderId] === image.id;
-    return [
+    const items: ContextMenuItem[] = [
       { label: '查看图片', icon: <Eye size={16} />, onSelect: () => setViewerImageId(image.id) },
       {
         label: imagePinned ? '取消固定封面' : '设为封面',
@@ -1638,9 +1689,16 @@ export function LibraryBrowser({
         onSelect: () => toggleImageBlur(image),
       },
       { label: '重命名…', icon: <PencilSimple size={16} />, onSelect: () => void handleRenameImage(image) },
+    ];
+    // 右键目标已在多选集合里时，允许把整个选择集合并进新图包。
+    if (selectedImageIds.has(image.id) && selectionCount > 1) {
+      items.push({ label: '合并为新图包…', icon: <Stack size={16} />, onSelect: () => requestMergeSelection() });
+    }
+    items.push(
       { label: '复制路径', icon: <Copy size={16} />, separator: true, onSelect: () => void copyPath(image.relPath) },
       { label: '删除', icon: <Trash size={16} />, danger: true, separator: true, onSelect: () => requestDeleteImage(image) },
-    ];
+    );
+    return items;
   };
 
   const buildFolderMenu = (folder: FolderNode): ContextMenuItem[] => {
@@ -1675,6 +1733,10 @@ export function LibraryBrowser({
       disabled: folderImagesList.length === 0,
       onSelect: () => setCoverPickerFolder(folder),
     });
+    // 右键目标已在多选集合里时，允许把整个选择集合并进新图包。
+    if (selectedFolderIds.has(folder.id) && selectionCount > 1) {
+      items.push({ label: '合并为新图包…', icon: <Stack size={16} />, onSelect: () => requestMergeSelection() });
+    }
     items.push(
       { label: '整理…', icon: <MagicWand size={16} />, onSelect: () => openOrganizePreviewFor(folder) },
       { label: '导出 ZIP…', icon: <FileZip size={16} />, separator: true, onSelect: () => void exportFolder(folder) },
@@ -2152,6 +2214,9 @@ export function LibraryBrowser({
               <button type="button" className="is-danger" disabled={busy} onClick={requestDeleteSelectedFolders}><Trash size={16} />删除</button>
             </>
           )}
+          {selectionCount > 1 && (
+            <button type="button" disabled={busy} onClick={requestMergeSelection}><Stack size={16} />合并为新图包</button>
+          )}
           {selectedFolders.length > 0 && selectionCount > 1 && (
             <button type="button" className="is-danger" disabled={busy} onClick={requestDeleteSelectedFolders}><Trash size={16} />删除图包</button>
           )}
@@ -2320,13 +2385,15 @@ export function LibraryBrowser({
                     if (event.key === 'Enter') void submitPrompt();
                     if (event.key === 'Escape') setPromptState(null);
                   }}
+                  onFocus={(event) => event.currentTarget.select()}
                   autoFocus
                 />
               </div>
+              {promptState.hint && <p className="mt-2 text-xs opacity-70">{promptState.hint}</p>}
             </div>
             <div className="modal-action shrink-0">
               <button className="btn btn-ghost btn-sm" onClick={() => setPromptState(null)}>取消</button>
-              <button className="btn btn-primary btn-sm" onClick={() => void submitPrompt()}>保存</button>
+              <button className="btn btn-primary btn-sm" onClick={() => void submitPrompt()}>{promptState.confirmLabel ?? '保存'}</button>
             </div>
           </div>
         </div>
