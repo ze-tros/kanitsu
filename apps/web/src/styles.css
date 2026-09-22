@@ -514,7 +514,6 @@ body {
 .desktop-content-shell { background: var(--desktop-canvas); }
 .desktop-drawer-side, .desktop-sidebar { background: var(--desktop-surface-1); }
 .desktop-sidebar-heading span, .desktop-panel-label { color: var(--desktop-faint); font-size: 9px; letter-spacing: .17em; font-weight: 700; text-transform: uppercase; }
-.desktop-sidebar-heading strong { letter-spacing: -.02em; }
 .desktop-sidebar-nav-item, .desktop-sidebar-settings { font-size: 12px; }
 .desktop-sidebar-nav-item.is-active > svg:first-child { color: var(--desktop-accent-fill); }
 .desktop-panel-label { margin: 5px 10px 8px; border: 0; }
@@ -642,8 +641,7 @@ body {
   width: 100%;
   height: var(--desktop-titlebar-height);
   flex: 0 0 var(--desktop-titlebar-height);
-  display: grid;
-  grid-template-columns: max-content minmax(220px, 520px) minmax(max-content, 1fr);
+  display: flex;
   align-items: center;
   gap: 22px;
   padding: 0 12px;
@@ -654,7 +652,7 @@ body {
 }
 
 .desktop-brand-lockup {
-  min-width: 188px;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -988,16 +986,24 @@ body {
 .desktop-sidebar-heading {
   min-height: 66px;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 11px 10px 9px 14px;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: 10px;
+  padding: 18px 10px 9px 14px;
 }
 
-.desktop-sidebar-heading > div {
+.desktop-sidebar-heading-tools {
   min-width: 0;
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.desktop-sidebar-heading-tools .desktop-global-search {
+  min-width: 0;
+  max-width: none;
+  flex: 1;
 }
 
 .desktop-sidebar-heading span,
@@ -1008,13 +1014,6 @@ body {
   font-weight: 700;
   line-height: 1.3;
   text-transform: uppercase;
-}
-
-.desktop-sidebar-heading strong {
-  margin-top: 2px;
-  color: var(--desktop-text);
-  font-size: 14px;
-  font-weight: 650;
 }
 
 .desktop-sidebar-primary {
@@ -3048,14 +3047,6 @@ body {
     gap: 14px;
   }
 
-  .desktop-brand-lockup {
-    min-width: 156px;
-  }
-
-  .desktop-brand-lockup > div > span {
-    display: none;
-  }
-
   .desktop-photo-meta {
     display: none;
   }
@@ -3210,7 +3201,6 @@ body {
   }
 
   .desktop-library > .app-titlebar {
-    grid-template-columns: max-content minmax(0, 1fr) max-content;
     gap: 8px;
     padding: 0 8px;
   }
@@ -4248,7 +4238,7 @@ body .desktop-library > .app-titlebar {
 }
 
 body .desktop-library .desktop-brand-lockup {
-  min-width: 180px;
+  min-width: 0;
   gap: 9px;
 }
 
@@ -4396,7 +4386,7 @@ body .desktop-library .desktop-sidebar {
 
 body .desktop-library .desktop-sidebar-heading {
   min-height: 60px;
-  padding: 12px 14px 10px;
+  padding: 20px 14px 12px;
   border: 0;
 }
 
@@ -4408,12 +4398,6 @@ body .desktop-library .desktop-panel-label {
   letter-spacing: .04em;
   line-height: 1.3;
   text-transform: none;
-}
-
-body .desktop-library .desktop-sidebar-heading strong {
-  margin-top: 3px;
-  font-size: 14px;
-  letter-spacing: -.01em;
 }
 
 body .desktop-library .desktop-sidebar-primary {
@@ -4502,11 +4486,7 @@ body .desktop-library .desktop-sidebar-settings {
 
 /* Shared top chrome: Codex keeps navigation in the upper-left control rail.
    The same rail is used by the settings return action, so both views keep
-   identical search, action, and window-control alignment. */
-body .desktop-library > .app-titlebar.has-nav {
-  grid-template-columns: max-content max-content minmax(200px, 440px) minmax(0, 1fr);
-}
-
+   identical action and window-control alignment. */
 body .desktop-library .desktop-titlebar-nav {
   display: flex;
   align-items: center;
@@ -4652,18 +4632,7 @@ body .desktop-library .desktop-settings-content {
   margin-inline: auto;
 }
 
-@media (max-width: 1023px) {
-  body .desktop-library > .app-titlebar.has-nav {
-    grid-template-columns: max-content max-content minmax(0, 1fr) max-content;
-  }
-}
-
 @media (max-width: 640px) {
-  /* 标题栏固定四个子项（导航 / 品牌 / 搜索 / 操作），列数不能少，否则操作区掉到第二行。 */
-  body .desktop-library > .app-titlebar.has-nav {
-    grid-template-columns: max-content max-content minmax(0, 1fr) max-content;
-  }
-
   body .desktop-library .desktop-titlebar-nav {
     width: auto;
     min-width: 0;

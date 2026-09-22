@@ -1574,9 +1574,6 @@ export function LibraryBrowser({
       >
         <TitleBar
           navigation={titlebarNavigation}
-          searchQuery={searchQuery}
-          onSearchChange={setSearchQuery}
-          searchPlaceholder="搜索图库"
           theme={effectiveTheme}
           onThemeChange={setTheme}
           busy={busy}
@@ -1616,9 +1613,6 @@ export function LibraryBrowser({
     >
       <TitleBar
         navigation={titlebarNavigation}
-        searchQuery={searchQuery}
-        onSearchChange={setSearchQuery}
-        searchPlaceholder={isRootSelected ? '搜索图包' : '搜索当前图包'}
         theme={effectiveTheme}
         onThemeChange={setTheme}
         busy={busy}
@@ -1902,8 +1896,30 @@ export function LibraryBrowser({
           <SidebarResizeHandle width={sidebarWidth} onResize={setSidebarWidth} max={360} />
           <div ref={sidebarScrollRef} className="desktop-sidebar-scroll">
             <div className="desktop-sidebar-heading">
-              <div><span>图库</span><strong>我的图包</strong></div>
-              <DesktopIconButton label="新建子图包" disabled={!selectedFolder} onClick={() => selectedFolder && handleCreateSubfolder(selectedFolder)}><FolderPlus size={16} /></DesktopIconButton>
+              <div className="desktop-brand-lockup" aria-label="Kanitsu">
+                <KanitsuLogo className="desktop-brand-mark" alt="" aria-hidden="true" />
+                <strong>Kanitsu</strong>
+              </div>
+              <div className="desktop-sidebar-heading-tools">
+                <label className="desktop-global-search">
+                  <MagnifyingGlass size={16} aria-hidden="true" />
+                  <input
+                    type="search"
+                    value={searchQuery}
+                    onChange={(event) => setSearchQuery(event.target.value)}
+                    placeholder={isRootSelected ? '搜索图包' : '搜索当前图包'}
+                    aria-label={isRootSelected ? '搜索图包' : '搜索当前图包'}
+                  />
+                  {searchQuery ? (
+                    <button type="button" aria-label="清除搜索" title="清除搜索" onClick={() => setSearchQuery('')}>
+                      <X size={14} />
+                    </button>
+                  ) : (
+                    <span className="desktop-search-spacer" aria-hidden="true" />
+                  )}
+                </label>
+                <DesktopIconButton label="新建子图包" disabled={!selectedFolder} onClick={() => selectedFolder && handleCreateSubfolder(selectedFolder)}><FolderPlus size={16} /></DesktopIconButton>
+              </div>
             </div>
             <nav className="desktop-sidebar-primary" aria-label="主要功能">
               {/* 常驻按钮：首次启动快照未加载时也可见可点，此时点击即回到根视图。 */}
@@ -2603,18 +2619,12 @@ const FolderTree = memo(function FolderTree({
 
 function TitleBar({
   navigation,
-  searchQuery,
-  onSearchChange,
-  searchPlaceholder,
   theme,
   onThemeChange,
   busy,
   onImport,
 }: {
   navigation?: ReactNode;
-  searchQuery: string;
-  onSearchChange: (value: string) => void;
-  searchPlaceholder: string;
   theme: ThemeOption;
   onThemeChange: (value: ThemeOption) => void;
   busy: boolean;
@@ -2624,32 +2634,6 @@ function TitleBar({
   return (
     <header className={`app-titlebar ${hasNavigation ? 'has-nav' : ''} ${window.kanitsuDesktop?.platform === 'electron' ? 'titlebar-drag' : ''}`}>
       {hasNavigation && <div className="desktop-titlebar-nav titlebar-no-drag">{navigation}</div>}
-      <div className="desktop-brand-lockup" aria-label="Kanitsu">
-        <KanitsuLogo className="desktop-brand-mark" alt="" aria-hidden="true" />
-        <div>
-          <strong>Kanitsu</strong>
-          <span>图包工作台</span>
-        </div>
-      </div>
-
-      <label className="desktop-global-search titlebar-no-drag">
-        <MagnifyingGlass size={16} aria-hidden="true" />
-        <input
-          type="search"
-          value={searchQuery}
-          onChange={(event) => onSearchChange(event.target.value)}
-          placeholder={searchPlaceholder}
-          aria-label={searchPlaceholder}
-        />
-        {searchQuery ? (
-          <button type="button" aria-label="清除搜索" title="清除搜索" onClick={() => onSearchChange('')}>
-            <X size={14} />
-          </button>
-        ) : (
-          <span className="desktop-search-spacer" aria-hidden="true" />
-        )}
-      </label>
-
       <div className="desktop-titlebar-actions titlebar-no-drag">
         <DesktopIconButton
           label={theme === 'dark' ? '切换到浅色模式' : '切换到深色模式'}
