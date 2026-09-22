@@ -53,3 +53,26 @@ const SUPPORTED_IMAGE_EXT = new Set(['jpg', 'jpe', 'jpeg', 'png', 'webp', 'avif'
 export function isSupportedImage(name: string): boolean {
   return SUPPORTED_IMAGE_EXT.has(extOf(name));
 }
+
+/**
+ * 主流相机 RAW 扩展名(小写)。与普通图片分开维护:只有显式开启 RAW 的平台
+ * (桌面/Android)才会把 RAW 计入扫描结果;web demo 不开启,避免收录后无法显示。
+ * RAW 的解码/缩略图由专门的管线处理,不经过浏览器 <img>。
+ */
+export const RAW_IMAGE_EXT = new Set([
+  'cr2', // Canon
+  'cr3', // Canon
+  'nef', // Nikon
+  'nrw', // Nikon
+  'arw', // Sony
+  'dng', // Adobe / 手机 DNG
+  'raf', // Fujifilm
+  'orf', // Olympus
+  'rw2', // Panasonic
+  'pef', // Pentax
+  'srw', // Samsung
+]);
+
+export function isRawImage(name: string): boolean {
+  return RAW_IMAGE_EXT.has(extOf(name));
+}

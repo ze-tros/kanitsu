@@ -88,6 +88,8 @@ const bridge = {
   readLibraryBlob: (file: DesktopEntry): Promise<Uint8Array> => ipcRenderer.invoke('library:readBlob', file),
   readLibraryThumbnail: (file: DesktopEntry, maxSize: number, priority?: number): Promise<Uint8Array> =>
     ipcRenderer.invoke('library:readThumbnail', file, maxSize, priority ?? 0),
+  // RAW 查看派生图:主进程完整解码后返回派生 JPEG 的 kanitsu-file URL。
+  ensureRawDerivative: (file: DesktopEntry): Promise<string> => ipcRenderer.invoke('raw:ensureDerivative', file),
   moveLibraryEntry: (entry: DesktopEntry, toFolder: DesktopEntry, newName?: string): Promise<DesktopEntry> =>
     ipcRenderer.invoke('library:move', entry, toFolder, newName),
   removeLibraryEntry: (entry: DesktopEntry): Promise<void> => ipcRenderer.invoke('library:remove', entry),

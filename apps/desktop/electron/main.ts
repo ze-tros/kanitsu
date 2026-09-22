@@ -9,6 +9,7 @@ import { pathToFileURL } from 'node:url';
 import archiver from 'archiver';
 import { imageSize } from 'image-size';
 import { logger, readLogTail, setLogLevel } from './logger';
+import { RAW_IMAGE_EXT, isRawImage } from './rawDecoder';
 
 // 应用 bundle 协议：生产构建渲染层以 kanitsu-app:// 加载。file:// 下绝对路径会
 // 404、且 type=module 脚本会被 CORS 拦截（白屏）；自定义 scheme 一步规避，
@@ -26,7 +27,9 @@ protocol.registerSchemesAsPrivileged([
   },
 ]);
 
-const IMAGE_EXT = new Set(['jpg', 'jpe', 'jpeg', 'png', 'webp', 'avif', 'bmp', 'gif']);
+// 普通图片 + 主流相机 RAW:RAW 进入库、导入与 ZIP 导出(原样拷贝/打包);
+// 解码不经 nativeImage/Chromium,而是 libraw 专用管线(见 rawDecoder.ts)。
+const IMAGE_EXT = new Set(['jpg', 'jpe', 'jpeg', 'png', 'webp', 'avif', 'bmp', 'gif', ...RAW_IMAGE_EXT]);
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -237,7 +240,8 @@ async function importSourceTreeNative(
 }
 
 async function readImageDimensions(filePath: string): Promise<{ width: number; height: number } | undefined> {
-  if (!IMAGE_EXT.has(path.extname(filePath).toLowerCase().slice(1))) return undefined;
+  const ext = path.extname(filePath).toLowerCase().slice(1);
+  if (!IMAGE_EXT.has(ext)) return undefined;
   try {
     const handle = await fs.open(filePath, 'r');
     try {
@@ -251,6 +255,9 @@ async function readImageDimensions(filePath: string): Promise<{ width: number; h
   } catch {
     // fall through to nativeImage
   }
+  // RAW 无法被 nativeImage 解码(TIFF 容器头尺寸探测已在上面的 image-size
+  // 尝试中完成),直接返回无尺寸,避免无谓的整文件解码尝试。
+  if (isRawImage(filePath)) return undefined;
   const image = nativeImage.createFromPath(filePath);
   if (!image.isEmpty()) {
     const size = image.getSize();
@@ -451,9 +458,14 @@ async function pruneThumbCache(): Promise<void> {
 //   0 可见 > 1 滚动方向预取 > 2 当前目录 > 3 子文件夹/封面 > 4 全库预热/无关，
 // 高优先级永远先取，保证“屏幕里看到的”永远优先于后台预热；滚动方向预取只
 // 落后可见请求一档，快速滚动时下一屏缩略图能抢在整目录预热洪峰前面生成。
-const THUMB_WORKER_FORMATS = new Set(['jpg', 'jpe', 'jpeg', 'png', 'webp', 'avif', 'bmp']);
+// sharp 直解格式 + RAW(libraw 内嵌预览提取,毫秒级;无预览时回退完整解码,
+// 用单独放宽的超时,见 pumpThumbnailQueue)。GIF 也走 worker 但走专属分支。
+const THUMB_WORKER_FORMATS = new Set(['jpg', 'jpe', 'jpeg', 'png', 'webp', 'avif', 'bmp', ...RAW_IMAGE_EXT]);
 const THUMB_WORKER_COUNT = 4;
 const THUMB_JOB_TIMEOUT_MS = 8000;
+/** RAW 任务超时:内嵌预览提取远低于此值;无预览回退完整解码时,高像素机身
+ *  可能需要数秒(45MP 约 2~5s),放宽到 30s,超时仍杀 worker 释放槽位。 */
+const THUMB_RAW_JOB_TIMEOUT_MS = 30000;
 const THUMB_PRIORITIES = 5;
 
 interface ThumbnailRequest {
@@ -511,6 +523,7 @@ function pumpThumbnailQueue(): void {
     if (!request) return;
     const requestId = ++thumbnailRequestSeq;
     busyWorkers.add(worker);
+    const isRawJob = isRawImage(request.file.id);
     const timer = setTimeout(() => {
       const job = inFlightJobs.get(requestId);
       if (!job) return;
@@ -525,7 +538,7 @@ function pumpThumbnailQueue(): void {
       markWorkerFailed(request.file.id);
       job.reject(new Error('缩略图生成超时'));
       pumpThumbnailQueue();
-    }, THUMB_JOB_TIMEOUT_MS);
+    }, isRawJob ? THUMB_RAW_JOB_TIMEOUT_MS : THUMB_JOB_TIMEOUT_MS);
     inFlightJobs.set(requestId, { worker, resolve: request.resolve, reject: request.reject, timer });
     worker.postMessage({ requestId, filePath: request.file.id, targetSize: request.targetSize });
   }
@@ -640,6 +653,178 @@ function generateThumbnailBytesNative(file: DesktopFsEntry, targetSize: number):
   const height = Math.max(1, Math.round(size.height * scale));
   const resized = image.resize({ width, height, quality: 'good' });
   return new Uint8Array(resized.toJPEG(80));
+}
+
+// —— RAW 查看派生服务 ——
+// RAW 原文件无法被 Chromium <img> 解码，查看器改用 ensureRawDerivative 换取
+// 「完整解码后」的 JPEG 派生图；派生文件落在 userData/rawcache，由
+// kanitsu-file 协议同样以流式服务（见 registerViewerProtocol 的放行逻辑）。
+// 单 worker 串行：全解码秒级且内存大（45MP ≈ 135MB RGB），并发只会挤爆内存；
+// 请求由查看器当前页 + ±2 预取驱动，FIFO 即可。
+const RAW_DERIVATIVE_TIMEOUT_MS = 60000;
+const RAW_DISK_MAX_FILES = 4096;
+const RAW_DISK_MAX_BYTES = 2 * 1024 * 1024 * 1024; // 2GB
+const RAW_DERIVATIVE_VERSION = 1;
+
+function rawDerivativeDir(): string {
+  return path.join(app.getPath('userData'), 'rawcache');
+}
+
+async function rawDerivativePathFor(filePath: string): Promise<string> {
+  // 键取真实文件的 stat,不信任渲染进程传来的 mtime/size(可能过期)。
+  let stamp = '0-0';
+  try {
+    const st = await fs.stat(filePath);
+    stamp = `${Math.round(st.mtimeMs)}-${st.size}`;
+  } catch {
+    // stat 失败时仍生成一个键,后续生成会自然失败并报错给调用方。
+  }
+  const raw = `${filePath}\u0000${stamp}\u0000v${RAW_DERIVATIVE_VERSION}`;
+  return path.join(rawDerivativeDir(), `${createHash('sha1').update(raw).digest('hex')}.jpg`);
+}
+
+async function rawDerivativeHit(derivPath: string): Promise<boolean> {
+  try {
+    const st = await fs.stat(derivPath);
+    if (st.isFile() && st.size > 0) {
+      // 触碰 mtime,让 LRU 清理按“最近使用”而非“最近生成”淘汰。
+      const now = new Date();
+      await fs.utimes(derivPath, now, now);
+      return true;
+    }
+  } catch {
+    // 未命中
+  }
+  return false;
+}
+
+async function pruneRawDerivativeCache(): Promise<void> {
+  try {
+    const dir = rawDerivativeDir();
+    const names = await fs.readdir(dir);
+    const files: { name: string; size: number; mtimeMs: number }[] = [];
+    for (const name of names) {
+      const st = await fs.stat(path.join(dir, name));
+      if (st.isFile()) files.push({ name, size: st.size, mtimeMs: st.mtimeMs });
+    }
+    let total = files.reduce((n, f) => n + f.size, 0);
+    if (files.length <= RAW_DISK_MAX_FILES && total <= RAW_DISK_MAX_BYTES) return;
+    files.sort((a, b) => a.mtimeMs - b.mtimeMs);
+    for (const f of files) {
+      if (files.length <= RAW_DISK_MAX_FILES && total <= RAW_DISK_MAX_BYTES) break;
+      await fs.rm(path.join(dir, f.name), { force: true });
+      files.length--;
+      total -= f.size;
+    }
+  } catch {
+    // 清理失败忽略。
+  }
+}
+
+interface RawDerivativeRequest {
+  /** 源 RAW 文件路径(worker 任务输入)。 */
+  sourcePath: string;
+  /** 派生 JPEG 目标路径(磁盘缓存键)。 */
+  derivPath: string;
+  resolve: (url: string) => void;
+  reject: (err: Error) => void;
+}
+
+let rawDerivativeWorker: Worker | null = null;
+let rawDerivativeBusy = false;
+let rawDerivativeSeq = 0;
+const rawDerivativeQueue: RawDerivativeRequest[] = [];
+const rawDerivativeInFlight = new Map<number, RawDerivativeRequest & { timer: NodeJS.Timeout }>();
+/** 同一派生文件的并发请求共享同一个 Promise。 */
+const rawDerivativePending = new Map<string, Promise<string>>();
+
+function ensureRawDerivativeWorker(): Worker {
+  if (rawDerivativeWorker) return rawDerivativeWorker;
+  const worker = new Worker(path.join(__dirname, 'rawWorker.js'));
+  rawDerivativeWorker = worker;
+  worker.on('message', (msg: { requestId: number; ok: boolean; data?: Uint8Array; error?: string }) => {
+    const job = rawDerivativeInFlight.get(msg.requestId);
+    if (!job) return; // 超时后迟到的响应
+    rawDerivativeInFlight.delete(msg.requestId);
+    clearTimeout(job.timer);
+    rawDerivativeBusy = false;
+    if (msg.ok && msg.data) {
+      void (async () => {
+        try {
+          await fs.mkdir(rawDerivativeDir(), { recursive: true });
+          await fs.writeFile(job.derivPath, msg.data!);
+          job.resolve(`kanitsu-file://file/?p=${encodeURIComponent(job.derivPath)}`);
+          void pruneRawDerivativeCache();
+        } catch (err) {
+          job.reject(err instanceof Error ? err : new Error(String(err)));
+        }
+        pumpRawDerivativeQueue();
+      })();
+    } else {
+      job.reject(new Error(msg.error ?? 'RAW 派生图生成失败'));
+      pumpRawDerivativeQueue();
+    }
+  });
+  worker.on('error', (err) => {
+    failAllRawDerivatives(err instanceof Error ? err : new Error(String(err)));
+  });
+  worker.on('exit', (code) => {
+    rawDerivativeWorker = null;
+    rawDerivativeBusy = false;
+    if (code !== 0) failAllRawDerivatives(new Error(`RAW 派生 worker 异常退出：${code}`));
+    pumpRawDerivativeQueue();
+  });
+  return worker;
+}
+
+function failAllRawDerivatives(err: Error): void {
+  for (const [, job] of rawDerivativeInFlight) {
+    clearTimeout(job.timer);
+    job.reject(err);
+  }
+  rawDerivativeInFlight.clear();
+  rawDerivativeBusy = false;
+}
+
+function pumpRawDerivativeQueue(): void {
+  if (rawDerivativeBusy || rawDerivativeQueue.length === 0) return;
+  const request = rawDerivativeQueue.shift()!;
+  const worker = ensureRawDerivativeWorker();
+  const requestId = ++rawDerivativeSeq;
+  rawDerivativeBusy = true;
+  const timer = setTimeout(() => {
+    const job = rawDerivativeInFlight.get(requestId);
+    if (!job) return;
+    rawDerivativeInFlight.delete(requestId);
+    rawDerivativeBusy = false;
+    // 解码卡死:终止 worker 释放线程,下次请求重建。
+    void worker.terminate().catch(() => {});
+    rawDerivativeWorker = null;
+    job.reject(new Error('RAW 派生图生成超时'));
+    pumpRawDerivativeQueue();
+  }, RAW_DERIVATIVE_TIMEOUT_MS);
+  rawDerivativeInFlight.set(requestId, { ...request, timer });
+  worker.postMessage({ requestId, filePath: request.sourcePath });
+}
+
+/** 为 RAW 文件确保查看派生图存在,返回其 kanitsu-file URL。 */
+function ensureRawDerivative(file: DesktopFsEntry): Promise<string> {
+  assertInsideLibrary(file.id);
+  return (async () => {
+    const derivPath = await rawDerivativePathFor(file.id);
+    if (await rawDerivativeHit(derivPath)) {
+      return `kanitsu-file://file/?p=${encodeURIComponent(derivPath)}`;
+    }
+    const pending = rawDerivativePending.get(derivPath);
+    if (pending) return pending;
+    const promise = new Promise<string>((resolve, reject) => {
+      rawDerivativeQueue.push({ sourcePath: file.id, derivPath, resolve, reject });
+    });
+    rawDerivativePending.set(derivPath, promise);
+    promise.finally(() => rawDerivativePending.delete(derivPath)).catch(() => undefined);
+    pumpRawDerivativeQueue();
+    return promise;
+  })();
 }
 
 function registerIpc(): void {
@@ -851,35 +1036,44 @@ function registerIpc(): void {
     return readLogTail(Math.max(10, Math.min(2000, maxLines ?? 300)));
   });
 
-  // 清除缓存（供设置页“调试→清除缓存”测试用）：主进程内存 + 磁盘缩略图缓存。
+  // 清除缓存（供设置页“调试→清除缓存”测试用）：主进程内存 + 磁盘缩略图/RAW 派生缓存。
   ipcMain.handle('cache:clear', async (): Promise<ClearCacheResult> => {
     const memStats = thumbCache.stats();
     thumbCache.clear();
     let diskFiles = 0;
     let diskBytes = 0;
-    try {
-      const dir = thumbCacheDir();
-      const names = await fs.readdir(dir);
-      for (const name of names) {
-        const full = path.join(dir, name);
-        try {
-          const st = await fs.stat(full);
-          diskBytes += st.size;
-          diskFiles++;
-          await fs.rm(full, { force: true });
-        } catch {
-          // 单个文件删除失败忽略
+    const clearDir = async (dir: string): Promise<void> => {
+      try {
+        const names = await fs.readdir(dir);
+        for (const name of names) {
+          const full = path.join(dir, name);
+          try {
+            const st = await fs.stat(full);
+            diskBytes += st.size;
+            diskFiles++;
+            await fs.rm(full, { force: true });
+          } catch {
+            // 单个文件删除失败忽略
+          }
         }
+      } catch {
+        // 目录不存在等情况忽略
       }
-    } catch {
-      // 目录不存在等情况忽略
-    }
+    };
+    await clearDir(thumbCacheDir());
+    await clearDir(rawDerivativeDir());
     return {
       memoryEntries: memStats.entries,
       memoryBytes: memStats.bytes,
       diskFiles,
       diskBytes,
     };
+  });
+
+  // RAW 查看派生图:确保完整解码 JPEG 存在并返回其 URL(RAW 无法被
+  // Chromium 直接解码,查看器对 RAW 文件改走此路径,见 ElectronLibraryStore)。
+  ipcMain.handle('raw:ensureDerivative', async (_event, file: DesktopFsEntry): Promise<string> => {
+    return ensureRawDerivative(file);
   });
 
   ipcMain.handle('library:move', async (_event, entry: DesktopFsEntry, toFolder: DesktopFsEntry, newName?: string): Promise<DesktopFsEntry> => {
@@ -1010,7 +1204,8 @@ function registerBundleProtocol(): void {
 /**
  * Registers a guarded `kanitsu-file://` protocol so the renderer can display the
  * ORIGINAL file: Chromium streams and decodes it in the renderer (no cap, no giant
- * IPC buffer). Only files inside the library are served.
+ * IPC buffer). Only files inside the library are served, plus RAW 查看派生图
+ * (userData/rawcache,见 ensureRawDerivative)。
  */
 function registerViewerProtocol(): void {
   protocol.handle('kanitsu-file', async (request) => {
@@ -1019,7 +1214,13 @@ function registerViewerProtocol(): void {
     try {
       assertInsideLibrary(filePath);
     } catch {
-      return new Response('禁止访问', { status: 403 });
+      // 图库外的唯一放行对象:RAW 派生缓存目录(路径由主进程生成,
+      // 渲染进程无法伪造目录穿越,这里仍做前缀校验)。
+      const dir = path.resolve(rawDerivativeDir());
+      const target = path.resolve(filePath);
+      if (!(target.startsWith(dir + path.sep))) {
+        return new Response('禁止访问', { status: 403 });
+      }
     }
 
     try {

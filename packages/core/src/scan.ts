@@ -1,9 +1,18 @@
 import type { FolderRef, LibraryStore } from '../../fs-adapter/src/types';
 import type { FolderNode, ImageEntry, LibrarySnapshot } from './types';
 import { folderIdFor, imageIdFor } from './hash';
-import { extOf, isSupportedImage, joinRelPath } from './path';
+import { extOf, isRawImage, isSupportedImage, joinRelPath } from './path';
 
-export async function scanLibrary(store: LibraryStore): Promise<LibrarySnapshot> {
+export interface ScanOptions {
+  /**
+   * 是否把主流相机 RAW(CR2/CR3/NEF/ARW 等)计入扫描结果。
+   * 只有具备 RAW 解码管线的平台(桌面/Android)应开启;web demo 不开启。
+   */
+  enableRaw?: boolean;
+}
+
+export async function scanLibrary(store: LibraryStore, opts?: ScanOptions): Promise<LibrarySnapshot> {
+  const enableRaw = opts?.enableRaw ?? false;
   const root = await store.getLibraryRoot();
   const fingerprint = await store.getLibraryFingerprint();
   const folders: Record<string, FolderNode> = {};
@@ -30,7 +39,7 @@ export async function scanLibrary(store: LibraryStore): Promise<LibrarySnapshot>
         childCount++;
         const childNode = await walk(child, joinRelPath(relPath, child.name), folderNode.id);
         descendantImageCount += childNode.imageCount;
-      } else if (isSupportedImage(child.name)) {
+      } else if (isSupportedImage(child.name) || (enableRaw && isRawImage(child.name))) {
         const childRel = joinRelPath(relPath, child.name);
         const image: ImageEntry = {
           id: imageIdFor(childRel),
@@ -57,7 +66,7 @@ export async function scanLibrary(store: LibraryStore): Promise<LibrarySnapshot>
 
   await walk(root, '', null);
   const rootId = folderIdFor('');
-  return { rootId, folders, images, fingerprint };
+  return { rootId, folders, images, fingerprint, rawScan: enableRaw };
 }
 
 interface SnapshotLookup {

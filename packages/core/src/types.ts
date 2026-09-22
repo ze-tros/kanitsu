@@ -76,6 +76,8 @@ export interface LibrarySnapshot {
   images: Record<string, ImageEntry>;
   /** Platform fingerprint captured at scan time; used to invalidate stale indexes. */
   fingerprint?: string;
+  /** 本次扫描是否收录 RAW(见 scanLibrary 的 enableRaw 选项);缓存命中校验用。 */
+  rawScan?: boolean;
 }
 
 export interface SyncProvider {

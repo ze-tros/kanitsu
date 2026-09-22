@@ -814,10 +814,13 @@ export function MobileApp({
   picker,
   store,
   index,
+  enableRaw,
 }: {
   picker: ImportSourcePicker;
   store: LibraryStore;
   index: PersistentIndex;
+  /** 是否收录主流相机 RAW(Android 开启;解码在 WebView 内完成)。 */
+  enableRaw?: boolean;
 }) {
   useEffect(() => startThemeModeSync(), []);
 
@@ -931,21 +934,21 @@ export function MobileApp({
   const loadLibrary = useCallback(async () => {
     setLoadError(null);
     try {
-      applySnapshot(await loadOrScan(store, index));
+      applySnapshot(await loadOrScan(store, index, { enableRaw: enableRaw ?? false }));
     } catch (err) {
       setLoadError(String(err));
     }
-  }, [store, index, applySnapshot]);
+  }, [store, index, applySnapshot, enableRaw]);
 
   useEffect(() => {
     void loadLibrary();
   }, [loadLibrary]);
 
   const refresh = useCallback(async () => {
-    const next = await rescanLibrary(store, index);
+    const next = await rescanLibrary(store, index, { enableRaw: enableRaw ?? false });
     applySnapshot(next);
     return next;
-  }, [store, index, applySnapshot]);
+  }, [store, index, applySnapshot, enableRaw]);
 
   // toast 自动消失
   useEffect(() => {

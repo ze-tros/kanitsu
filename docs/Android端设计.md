@@ -93,6 +93,7 @@ ACTION_OPEN_DOCUMENT_TREE
 - 缓存命中直接返回磁盘内容。
 - 渲染端限制全局并发和预取规模；原生 `priority` 参数目前为后续优先队列预留。
 - 设置页可查看队列、磁盘文件数和容量，并清理缓存。
+- RAW 文件（CR2/CR3/NEF/NRW/ARW/DNG/RAF/ORF/RW2/PEF/SRW）不进 `ThumbnailService`（平台解码器不支持）：`AndroidLibraryStore.readThumbnail` 检出 RAW 后在 WebView Worker 内用 libraw-wasm 提取相机内嵌预览（无预览时 halfSize 完整解码兜底）。原文件通过 `getViewerUrl` 的本地 HTTP 服务流式 fetch，不占用 base64 字节桥；解码任务渲染端串行执行。
 
 ## 7. 原图查看器
 

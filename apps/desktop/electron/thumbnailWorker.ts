@@ -8,6 +8,7 @@ import { parentPort } from 'node:worker_threads';
 import { readFile } from 'node:fs/promises';
 import sharp from 'sharp';
 import { GifReader, GifWriter } from 'omggif';
+import { isRawImage, openNodeRawSession } from './rawDecoder';
 
 // 多个 worker 已提供图片级并行；限制每条 libvips 管线为单线程，避免 CPU 过度订阅。
 sharp.concurrency(1);
@@ -343,8 +344,63 @@ export async function generateAnimatedGifThumb(filePath: string, targetSize: num
   return new Uint8Array(out);
 }
 
+// —— RAW 缩略图（libraw 内嵌预览优先）——
+// 相机 RAW 普遍内嵌机内全尺寸 JPEG 预览，提取是毫秒级；仅在无内嵌预览时
+// （部分 DNG/老机型）回退完整解码，并用 halfSize 控制耗时。
+async function sharpResizeToJpeg(input: Buffer, targetSize: number, raw?: { width: number; height: number; channels: 3 }): Promise<Uint8Array> {
+  const image = sharp(input, { raw, failOn: 'none' });
+  const meta = raw ? undefined : await image.metadata();
+  const width = raw?.width ?? meta?.width ?? 0;
+  const height = raw?.height ?? meta?.height ?? 0;
+  if (!width || !height) throw new Error('无法读取图像尺寸');
+  const finalScale = Math.min(1, targetSize / Math.max(width, height));
+  const out = await sharp(input, { raw, failOn: 'none' })
+    .resize({
+      width: Math.max(1, Math.round(width * finalScale)),
+      height: Math.max(1, Math.round(height * finalScale)),
+      fit: 'inside',
+    })
+    .jpeg({ quality: 80 })
+    .toBuffer();
+  return new Uint8Array(out);
+}
+
+async function generateRawThumbnail(filePath: string, targetSize: number): Promise<Uint8Array> {
+  const raw = await readFile(filePath);
+  const bytes = new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength);
+  let session = await openNodeRawSession(bytes);
+  try {
+    const thumb = await session.thumbnail();
+    if (thumb?.kind === 'jpeg') {
+      return await sharpResizeToJpeg(Buffer.from(thumb.data), targetSize);
+    }
+    if (thumb?.kind === 'rgb') {
+      return await sharpResizeToJpeg(Buffer.from(thumb.data), targetSize, {
+        width: thumb.width,
+        height: thumb.height,
+        channels: 3,
+      });
+    }
+    // 无内嵌预览：重新以 halfSize 打开，完整解码后缩放（会话的解码设置在
+    // open 时固定，因此必须重开会话）。
+    session.close();
+    session = await openNodeRawSession(bytes, { halfSize: true });
+    const pixels = await session.pixels();
+    return await sharpResizeToJpeg(Buffer.from(pixels.data), targetSize, {
+      width: pixels.width,
+      height: pixels.height,
+      channels: 3,
+    });
+  } finally {
+    session.close();
+  }
+}
+
 /** 完整流水线：所有格式均输出单帧 JPEG 缩略图。 */
 export async function generateThumbnailFromFile(filePath: string, targetSize: number): Promise<Uint8Array> {
+  if (isRawImage(filePath)) {
+    return generateRawThumbnail(filePath, targetSize);
+  }
   return generateThumbnailWithSharp(filePath, targetSize);
 }
 

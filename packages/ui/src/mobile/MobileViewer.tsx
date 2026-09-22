@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ImageEntry } from '../../../core/src/index';
 import type { FileRef, LibraryStore } from '../../../fs-adapter/src/types';
+import { decodeRawToJpeg, extractRawPreviewJpeg, isRawImage } from '../../../raw-decoder/src/index';
 import { getThumbnailBlob } from '../thumbnailCache';
 import { prefetchOriginal } from '../LibraryBrowser';
 import { acquireObjectUrl, releaseObjectUrl } from '../objectUrlPool';
@@ -41,6 +42,10 @@ interface PageInfo {
   fullReady: boolean;
   naturalW: number;
   naturalH: number;
+  /** RAW 页:fullUrl 是渲染端 object URL(解码派生图),释放走 objectUrlPool。 */
+  fullIsObjectUrl?: boolean;
+  /** RAW 页:当前 full 是相机内嵌预览,等待完整解码升级。 */
+  fullFromPreview?: boolean;
 }
 
 interface ImageTransform {
@@ -65,6 +70,14 @@ function toFileRef(image: ImageEntry): FileRef {
     width: image.width,
     height: image.height,
   };
+}
+
+/** RAW 原文件字节:经 getViewerUrl 的本地 HTTP 服务流式取回(不走 base64 桥)。 */
+async function fetchRawBytes(store: LibraryStore, ref: FileRef): Promise<Uint8Array> {
+  const url = await store.getViewerUrl(ref);
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`RAW 读取失败：HTTP ${resp.status}`);
+  return new Uint8Array(await resp.arrayBuffer());
 }
 
 /** 计算图片在视口中的基准显示尺寸（视图 scale=1 时）。
@@ -151,6 +164,8 @@ export function MobileViewer({
         fullReady: old?.fullReady ?? false,
         naturalW: old?.naturalW ?? 0,
         naturalH: old?.naturalH ?? 0,
+        fullIsObjectUrl: old?.fullIsObjectUrl ?? false,
+        fullFromPreview: old?.fullFromPreview ?? false,
         ...patch,
       };
       const map = new Map(prev);
@@ -173,13 +188,73 @@ export function MobileViewer({
           }
           // 淘汰页的原图 URL 必须归还：条目离开 Map 后卸载清理扫不到它，不释放
           // 就是每个淘汰页泄漏一个受控句柄（翻阅 64 张以上逐张累积）。
-          if (v.fullUrl) store.releaseViewerUrl(v.fullUrl);
+          if (v.fullUrl) {
+            if (v.fullIsObjectUrl && objectUrlsRef.current.has(v.fullUrl)) {
+              objectUrlsRef.current.delete(v.fullUrl);
+              releaseObjectUrl(v.fullUrl);
+            } else if (!v.fullIsObjectUrl) {
+              store.releaseViewerUrl(v.fullUrl);
+            }
+          }
           map.delete(k);
         }
       }
       return map;
     });
   }, [store]);
+
+  // —— RAW 完整解码升级队列（串行,一次一张）——
+  // 混合策略:内嵌预览先顶上(ensurePage),当前页再异步升级为完整解码
+  // (真实 RAW 色彩)。解码在 WebView Worker 内进行,halfSize 控内存/耗时。
+  const fullDecodeQueueRef = useRef<ImageEntry[]>([]);
+  const pumpingFullDecodeRef = useRef(false);
+  const pumpFullDecodeRef = useRef<() => void>(() => {});
+
+  const pumpFullDecode = useCallback(() => {
+    if (pumpingFullDecodeRef.current) return;
+    const next = fullDecodeQueueRef.current.shift();
+    if (!next) return;
+    // 页面已被淘汰/不处于预览层时无需升级
+    if (!pagesRef.current.get(next.id)?.fullFromPreview) {
+      pumpFullDecodeRef.current();
+      return;
+    }
+    pumpingFullDecodeRef.current = true;
+    decodingFullRef.current.add(next.id);
+    void (async () => {
+      const bytes = await fetchRawBytes(store, toFileRef(next));
+      const blob = await decodeRawToJpeg(bytes, { halfSize: true, maxDim: 6000 });
+      if (!mountedRef.current) return;
+      const page = pagesRef.current.get(next.id);
+      if (!page) return;
+      const url = acquireObjectUrl(blob);
+      objectUrlsRef.current.add(url);
+      const oldUrl = page.fullUrl;
+      patchPage(next.id, { fullUrl: url, fullReady: true, fullIsObjectUrl: true, fullFromPreview: false });
+      if (oldUrl && objectUrlsRef.current.has(oldUrl)) {
+        objectUrlsRef.current.delete(oldUrl);
+        releaseObjectUrl(oldUrl);
+      }
+    })()
+      .catch(() => undefined)
+      .finally(() => {
+        decodingFullRef.current.delete(next.id);
+        pumpingFullDecodeRef.current = false;
+        queueMicrotask(() => pumpFullDecodeRef.current());
+      });
+  }, [store, patchPage]);
+  pumpFullDecodeRef.current = pumpFullDecode;
+
+  const enqueueFullDecode = useCallback(
+    (image: ImageEntry) => {
+      if (decodingFullRef.current.has(image.id)) return;
+      if (fullDecodeQueueRef.current.some((item) => item.id === image.id)) return;
+      if (!pagesRef.current.get(image.id)?.fullFromPreview) return;
+      fullDecodeQueueRef.current.push(image);
+      pumpFullDecode();
+    },
+    [pumpFullDecode],
+  );
 
   // 加载某张图：缩略图立即占位，原图随后。
   const ensurePage = useCallback(
@@ -207,6 +282,37 @@ export function MobileViewer({
           .catch(() => undefined)
           .finally(() => loadingThumbsRef.current.delete(image.id));
       }
+      if (isRawImage(image.name)) {
+        // RAW:无法直接 <img>,先取相机内嵌预览(毫秒级)作为首层原图;
+        // 完整解码由升级队列在成为当前页后进行。无内嵌预览的文件直接
+        // 排队完整解码(halfSize),完成前保持缩略图占位。
+        if (!existing?.fullUrl && !loadingFullRef.current.has(image.id)) {
+          loadingFullRef.current.add(image.id);
+          void (async () => {
+            const bytes = await fetchRawBytes(store, toFileRef(image));
+            if (!mountedRef.current) return;
+            const preview = await extractRawPreviewJpeg(bytes);
+            if (!mountedRef.current) return;
+            if (preview) {
+              const url = acquireObjectUrl(preview);
+              objectUrlsRef.current.add(url);
+              patchPage(image.id, {
+                fullUrl: url,
+                fullReady: true,
+                fullIsObjectUrl: true,
+                fullFromPreview: true,
+              });
+            }
+          })()
+            .catch(() => undefined)
+            .finally(() => {
+              loadingFullRef.current.delete(image.id);
+              // 预览提取失败(或文件无内嵌预览):直接排完整解码兜底。
+              if (!pagesRef.current.get(image.id)?.fullUrl) enqueueFullDecode(image);
+            });
+        }
+        return;
+      }
       if (!existing?.fullUrl && !loadingFullRef.current.has(image.id)) {
         loadingFullRef.current.add(image.id);
         void store
@@ -222,7 +328,7 @@ export function MobileViewer({
           .finally(() => loadingFullRef.current.delete(image.id));
       }
     },
-    [store, patchPage],
+    [store, patchPage, enqueueFullDecode],
   );
 
   // 当前与前后两页持续加载。请求不随 activeIndex 变化取消：快速连续翻页时，
@@ -232,7 +338,10 @@ export function MobileViewer({
       const img = images[activeIndex + d];
       if (img) ensurePage(img);
     }
-  }, [activeIndex, images, ensurePage]);
+    // RAW:当前页安排完整解码升级(预览层已在 ensurePage 中先行展示)。
+    const cur = images[activeIndex];
+    if (cur && isRawImage(cur.name)) enqueueFullDecode(cur);
+  }, [activeIndex, images, ensurePage, enqueueFullDecode]);
 
   useEffect(() => {
     if (!images.length) return;
@@ -241,6 +350,7 @@ export function MobileViewer({
     for (const d of [2, -2]) {
       const img = images[activeIndex + d];
       if (!img) continue;
+      if (isRawImage(img.name)) continue; // RAW 的解码派生不适合 new Image() 预取
       tasks.push(() => {
         if (cancelled) return;
         void store
@@ -271,7 +381,10 @@ export function MobileViewer({
       urls.forEach((url) => releaseObjectUrl(url));
       urls.clear();
       pageMap.forEach((p) => {
-        if (p.fullUrl) store.releaseViewerUrl(p.fullUrl);
+        if (p.fullUrl) {
+          if (p.fullIsObjectUrl) releaseObjectUrl(p.fullUrl);
+          else store.releaseViewerUrl(p.fullUrl);
+        }
       });
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -1,6 +1,6 @@
 import type { LibraryStore } from '../../fs-adapter/src/types';
 import type { LibrarySnapshot } from './types';
-import { scanLibrary } from './scan';
+import { scanLibrary, type ScanOptions } from './scan';
 
 /**
  * A persistent store for the library scan index. The renderer keeps this index so
@@ -29,7 +29,8 @@ export function createMemoryPersistentIndex(): PersistentIndex {
 }
 
 /** Load the cached index if present, otherwise scan the library and persist it. */
-export async function loadOrScan(store: LibraryStore, index: PersistentIndex): Promise<LibrarySnapshot> {
+export async function loadOrScan(store: LibraryStore, index: PersistentIndex, opts?: ScanOptions): Promise<LibrarySnapshot> {
+  const enableRaw = opts?.enableRaw ?? false;
   // The three probes are independent (IndexedDB read vs. store IPC round-trips);
   // awaiting them sequentially stacks their latencies onto startup.
   const [cached, currentRoot, currentFingerprint] = await Promise.all([
@@ -37,7 +38,13 @@ export async function loadOrScan(store: LibraryStore, index: PersistentIndex): P
     store.getLibraryRoot(),
     store.getLibraryFingerprint(),
   ]);
-  if (cached && cached.fingerprint === currentFingerprint) {
+  if (
+    cached &&
+    cached.fingerprint === currentFingerprint &&
+    // RAW 收录开关变化时必须重扫:旧索引(未开 RAW)里没有 RAW 文件,
+    // 反之亦然,不能靠 fingerprint 察觉。
+    (cached.rawScan ?? false) === enableRaw
+  ) {
     // The library root display name is live metadata (it can change, e.g. through
     // i18n/localization), so never trust the cached root name: refresh it from the
     // store before returning, instead of doing a full re-scan just for a name change.
@@ -47,14 +54,14 @@ export async function loadOrScan(store: LibraryStore, index: PersistentIndex): P
       return cached;
     }
   }
-  const snapshot = await scanLibrary(store);
+  const snapshot = await scanLibrary(store, opts);
   await index.save(snapshot);
   return snapshot;
 }
 
 /** Rescan the library from disk and persist the fresh index (used after mutations). */
-export async function rescanLibrary(store: LibraryStore, index: PersistentIndex): Promise<LibrarySnapshot> {
-  const snapshot = await scanLibrary(store);
+export async function rescanLibrary(store: LibraryStore, index: PersistentIndex, opts?: ScanOptions): Promise<LibrarySnapshot> {
+  const snapshot = await scanLibrary(store, opts);
   await index.save(snapshot);
   return snapshot;
 }

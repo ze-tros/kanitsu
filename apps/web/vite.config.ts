@@ -56,6 +56,9 @@ export default defineConfig({
       '@kanitsu/cover-picker',
       '@kanitsu/image-pipeline',
       '@kanitsu/ui',
+      // emscripten 产物(运行期 wasm 实例化 + 内部 worker),预打包会破坏其
+      // import.meta.url 语义;已通过 wasmBinary 注入加载,不需要预打包。
+      'libraw-wasm',
     ],
   },
 });

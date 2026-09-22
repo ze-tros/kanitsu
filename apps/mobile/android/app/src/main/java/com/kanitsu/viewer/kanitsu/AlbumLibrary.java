@@ -129,8 +129,28 @@ public final class AlbumLibrary {
     }
 
     public String mimeOf(File f) {
+        // 主流 RAW:系统 MimeTypeMap 不认识,显式给 image/x-* 便于 JS 侧 Blob 标注。
+        String raw = RAW_MIME.get(extOf(f.getName()));
+        if (raw != null) {
+            return raw;
+        }
         String mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(extOf(f.getName()));
         return mime != null ? mime : "application/octet-stream";
+    }
+
+    private static final java.util.Map<String, String> RAW_MIME = new java.util.HashMap<>();
+    static {
+        RAW_MIME.put("cr2", "image/x-canon-cr2");
+        RAW_MIME.put("cr3", "image/x-canon-cr3");
+        RAW_MIME.put("nef", "image/x-nikon-nef");
+        RAW_MIME.put("nrw", "image/x-nikon-nrw");
+        RAW_MIME.put("arw", "image/x-sony-arw");
+        RAW_MIME.put("dng", "image/x-adobe-dng");
+        RAW_MIME.put("raf", "image/x-fuji-raf");
+        RAW_MIME.put("orf", "image/x-olympus-orf");
+        RAW_MIME.put("rw2", "image/x-panasonic-rw2");
+        RAW_MIME.put("pef", "image/x-pentax-pef");
+        RAW_MIME.put("srw", "image/x-samsung-srw");
     }
 
     public AndroidEntry move(File from, File toDir, String newName) throws IOException {

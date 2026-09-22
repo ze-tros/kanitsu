@@ -14,7 +14,7 @@ Kanitsu是图包管理和看图应用，主要面向 Windows 与 Android。用�
 - **跨端共享领域逻辑**：扫描、整理、封面与索引放在共享包，平台差异通过适配器隔离。
 - **大库可用**：缩略图、虚拟化、预取和缓存是基础能力，不是后期补丁。
 
-暂不支持 HEIC、TIFF、RAW 和在线同步。未来同步能力必须通过独立 provider 接入，不能侵入本地库核心流程。
+主流相机 RAW(CR2/CR3/NEF/NRW/ARW/DNG/RAF/ORF/RW2/PEF/SRW)在桌面与 Android 端支持:缩略图取相机内嵌预览,查看器做完整解码(见 5.4)。HEIC、TIFF 和在线同步暂不支持。未来同步能力必须通过独立 provider 接入,不能侵入本地库核心流程。
 
 ## 2. 架构
 
@@ -100,7 +100,7 @@ ImportSourcePicker + LibraryStore
   → 展示导入报告
 ```
 
-支持格式：JPG、JPEG、PNG、WebP、AVIF、BMP、GIF。
+支持格式：JPG、JPEG、PNG、WebP、AVIF、BMP、GIF；桌面与 Android 端额外收录主流相机 RAW（CR2/CR3/NEF/NRW/ARW/DNG/RAF/ORF/RW2/PEF/SRW，原样拷贝，Web 演示端不收录）。
 
 要求：
 
@@ -146,6 +146,7 @@ ImportSourcePicker + LibraryStore
 - 键盘左右键切图，上下键切同级目录，`Esc` 关闭。
 - 支持缩放、平移、旋转、胶片条、鼠标侧键和相邻原图预取。
 - 原图通过受控本地协议加载，不通过 IPC 复制大 Buffer。
+- RAW 文件无法被 Chromium 解码：查看器改用主进程完整解码的 JPEG 派生图（`rawcache` 磁盘缓存，同一协议流式服务），派生图最长边 8192、质量 90。
 
 ### 5.2 移动端
 
@@ -163,11 +164,20 @@ ImportSourcePicker + LibraryStore
 - 每次打开移动查看器使用独立会话，静止时只挂载当前页，避免复用上次内容。
 - 所有非必要动画尊重 `prefers-reduced-motion`。
 
+### 5.4 RAW 查看（桌面 / Android）
+
+- 解码库为 libraw-wasm（LibRaw 的 WebAssembly 编译），格式白名单维护在 `packages/core/src/path.ts`（桌面主进程持有一份受 tsc rootDir 限制的副本，两处需同步）。
+- 混合解码策略：网格缩略图提取相机内嵌全尺寸 JPEG 预览（毫秒级，字节直通）；查看器完整解码（demosaic + 相机白平衡 + sRGB，秒级），先以预览层顶上、当前页后台升级替换。
+- 桌面：缩略图走既有 worker 池（RAW 任务超时放宽至 30s）；查看器派生图由单并发 worker 生成并落盘 `userData/rawcache`（LRU 上限 2GB / 4096 文件），经 `kanitsu-file://` 流式服务。
+- Android：原生侧仅做原样导入/导出，解码在 WebView Worker 内；原文件经本地 HTTP 服务流式 fetch，不通过 base64 桥；缩略图串行解码，查看器当前页完整解码使用 halfSize 控内存。
+- Web 演示端（memory store）不开启 RAW 收录，避免收录后无法显示。
+
 ## 6. 性能约束
 
 - 网格只挂载可视区域及少量 overscan，不能随图片总数线性增长 DOM。
 - Electron 缩略图请求按“可见、滚动方向、当前目录、子目录、后台预热”排序；其他平台至少限制并发和预取规模。
 - Electron 解码在 worker 中执行；Android 使用原生解码和磁盘缓存。
+- RAW 解码（libraw-wasm）在专用线程内执行：桌面在 worker_threads，Android 在 WebView Worker；网格缩略图只提取内嵌预览（毫秒级），完整解码（秒级）仅限查看器当前页且串行，无内嵌预览时以 halfSize 兜底。
 - object URL 和查看器页面缓存必须有上限，卸载时释放资源。
 - 原图使用 URL 流式加载，相邻图只做有限预取。
 - 大库滚动期间避免同步布局读取、无界动画和无界预加载。

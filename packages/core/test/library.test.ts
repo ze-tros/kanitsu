@@ -68,3 +68,47 @@ describe('loadOrScan / rescanLibrary', () => {
     assert.equal(await index.load(), null);
   });
 });
+
+describe('RAW 扫描门控(enableRaw)', () => {
+  test('默认不收录 RAW;开启后收录且快照记录 rawScan', async () => {
+    const store = await seedStore();
+    const root = await store.ensureLibraryRoot();
+    await store.writeBlob(root, 'IMG_0001.CR2', new Blob(['raw'], { type: 'image/x-raw' }));
+    await store.writeBlob(root, 'DSC_0002.ARW', new Blob(['raw'], { type: 'image/x-raw' }));
+
+    const plain = await scanLibrary(store);
+    assert.equal(Object.keys(plain.images).length, 1, '未开启时 RAW 不可见');
+    assert.notEqual(plain.rawScan, true);
+
+    const enabled = await scanLibrary(store, { enableRaw: true });
+    const exts = Object.values(enabled.images).map((img) => img.ext).sort();
+    assert.deepEqual(exts, ['arw', 'cr2', 'jpg']);
+    assert.equal(enabled.rawScan, true);
+  });
+
+  test('enableRaw 开关变化使缓存索引失效并触发重扫', async () => {
+    const store = await seedStore();
+    const root = await store.ensureLibraryRoot();
+    await store.writeBlob(root, 'IMG_0001.CR2', new Blob(['raw'], { type: 'image/x-raw' }));
+
+    const index = createMemoryPersistentIndex();
+    const withoutRaw = await loadOrScan(store, index);
+    assert.equal(Object.keys(withoutRaw.images).length, 1, '默认扫描只有 jpg');
+
+    const withRaw = await loadOrScan(store, index, { enableRaw: true });
+    assert.equal(Object.keys(withRaw.images).length, 2, '开关变化后必须重扫并收录 RAW');
+
+    const again = await loadOrScan(store, index, { enableRaw: true });
+    assert.deepEqual(again.images, withRaw.images, '开关一致时缓存仍然命中');
+  });
+
+  test('rescanLibrary 透传 enableRaw', async () => {
+    const store = await seedStore();
+    await store.ensureLibraryRoot();
+    const index = createMemoryPersistentIndex();
+    const snapshot = await rescanLibrary(store, index, { enableRaw: true });
+    assert.equal(snapshot.rawScan, true);
+    const cached = await index.load();
+    assert.equal(cached?.rawScan, true);
+  });
+});

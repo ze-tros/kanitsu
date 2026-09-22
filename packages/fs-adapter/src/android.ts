@@ -8,6 +8,8 @@ import type {
   NativeImportProgress,
   ZipExportResult,
 } from './types';
+import { isRawImage } from '../../core/src/path';
+import { decodeRawThumbnailJpeg } from '../../raw-decoder/src/index';
 
 /** Capacitor native payload for a SAF/document or app-file entry. */
 export interface AndroidFsEntry {
@@ -166,6 +168,26 @@ function toEntry(ref: FolderRef | FileRef): AndroidFsEntry {
 
 let bridgePromise: Promise<KanitsuAndroidBridge> | undefined;
 
+// —— RAW 解码排队(Android WebView)——
+// RAW 原文件经 capacitor 本地 HTTP 服务流式取回(fetch,不经 base64 桥),
+// 在自管 Web Worker 内做 libraw 解码。解码占内存且是 CPU 密集,串行执行
+// 以免快速滚动时并发解码打爆 WebView 堆。
+let rawDecodeQueue: Promise<unknown> = Promise.resolve();
+
+function runSerialized<T>(task: () => Promise<T>): Promise<T> {
+  const run = rawDecodeQueue.then(task, task);
+  rawDecodeQueue = run.catch(() => undefined);
+  return run;
+}
+
+/** 取回 RAW 原文件字节(通过 getViewerUrl 的本地 HTTP 流式服务)。 */
+async function fetchRawBytes(store: { getViewerUrl(file: FileRef): Promise<string> }, file: FileRef): Promise<Uint8Array> {
+  const url = await store.getViewerUrl(file);
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`RAW 读取失败：HTTP ${resp.status}`);
+  return new Uint8Array(await resp.arrayBuffer());
+}
+
 /**
  * Eagerly registers the Capacitor plugin and exposes window.kanitsuAndroid.
  * Call once at app startup on Android so platform detection and later calls are synchronous.
@@ -302,6 +324,16 @@ export class AndroidLibraryStore implements LibraryStore {
   }
 
   async readThumbnail(file: FileRef, maxSize = 512, options?: { priority?: number }): Promise<Blob> {
+    // RAW 不进原生 ThumbnailService(BitmapFactory/ImageDecoder 解不了),
+    // 在 WebView 内提取内嵌预览(或回退 halfSize 完整解码),结果仅进渲染端
+    // 内存缓存(thumbnailCache 的 256MB LRU)。
+    if (isRawImage(file.name)) {
+      const blob = await runSerialized(async () => {
+        const bytes = await fetchRawBytes(this, file);
+        return await decodeRawThumbnailJpeg(bytes, { targetDim: Math.max(maxSize, 512) });
+      });
+      return blob;
+    }
     const { data, mime } = await (await requireBridge()).readLibraryThumbnail(toEntry(file), maxSize, options?.priority ?? 0);
     return new Blob([data as BlobPart], mime ? { type: mime } : undefined);
   }
