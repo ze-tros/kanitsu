@@ -27,9 +27,14 @@ export function extOf(name: string): string {
   return idx < 0 ? '' : name.slice(idx + 1).toLowerCase();
 }
 
-/** sharp 流水线：解码 → 等比缩小（最长边 ≤ targetSize）→ JPEG 80。 */
+/** sharp 流水线：解码 → 等比缩小（最长边 ≤ targetSize）→ JPEG 80。
+ *  输入先整份读进内存再交给 libvips：libvips 按路径打开文件时不带共享删除语义，
+ *  解码期间该文件在 Windows 上删不掉也改不了名（整库预热/网格刷新一旦与删除撞在
+ *  同一张图上就 EPERM）。经 Buffer 输入的句柄是 libuv 的（允许共享删除），解不解
+ *  码都不再挡住用户操作；与 RAW/HEIF 分支的读取方式也保持一致。 */
 export async function generateThumbnailWithSharp(filePath: string, targetSize: number): Promise<Uint8Array> {
-  const image = sharp(filePath, { failOn: 'none' });
+  const input = await readFile(filePath);
+  const image = sharp(input, { failOn: 'none' });
   const meta = await image.metadata();
   const width = meta.width ?? 0;
   const height = meta.height ?? 0;

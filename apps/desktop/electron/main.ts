@@ -234,6 +234,40 @@ async function pathExists(target: string): Promise<boolean> {
   }
 }
 
+/** Windows 上「目标文件正被别的进程打开」错误码。杀软实时扫描、资源管理器生成
+ *  缩略图、云同步、以及解码器持有句柄都属于这一类，通常毫秒级就会自行释放。 */
+const TRANSIENT_FILE_ERRORS = new Set(['EBUSY', 'EPERM', 'EACCES', 'ENOTEMPTY']);
+
+function isTransientFileError(error: unknown): boolean {
+  return TRANSIENT_FILE_ERRORS.has((error as NodeJS.ErrnoException | null)?.code ?? '');
+}
+
+/**
+ * 文件系统变更的退避重试（目前用于改名）。被占用的目标在 Windows 上会立刻失败
+ * （EBUSY/EPERM），但占用方多半只持有毫秒级——等一拍重试即可成功，用户看到的就是
+ * 「重命名偶发失败，再点一次又好了」。重试仍失败则抛出最后一次错误，由调用方按
+ * 原有方式上报。删除走 fs.rm 自带的重试，见 removeWithRetry。
+ */
+async function withFileRetry<T>(op: () => Promise<T>, attempts = 8, delayMs = 80): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await op();
+    } catch (error) {
+      if (attempt >= attempts - 1 || !isTransientFileError(error)) throw error;
+      await new Promise<void>((resolve) => setTimeout(resolve, delayMs * (attempt + 1)));
+    }
+  }
+}
+
+/**
+ * 删除文件或整个目录。retryDelay/maxRetries 的退避重试只在 recursive 模式下生效，
+ * 所以单文件删除也走 recursive（Node 在其中对每个条目单独重试，比整树重来更省）。
+ * 总窗口约 2.9s，覆盖杀软扫描、资源管理器缩略图、解码线程等短暂占用。
+ */
+async function removeWithRetry(target: string): Promise<void> {
+  await fs.rm(target, { recursive: true, force: true, maxRetries: 8, retryDelay: 80 });
+}
+
 /**
  * 建立图库的应用私有骨架：标记文件 + 缓存目录。缓存目录在这里就建出来，是为了
  * 让「创建 .kanitsu-cache」这一步落在扫描取指纹之前——否则首次写缩略图会改动
@@ -352,10 +386,11 @@ async function moveLibraryContents(from: string, to: string): Promise<{ moved: n
       continue;
     }
     try {
-      await fs.rename(src, dest);
+      // 被占用导致的 rename 失败重试即可恢复，不会被误判成跨盘搬移。
+      await withFileRetry(() => fs.rename(src, dest));
     } catch {
       await fs.cp(src, dest, { recursive: true, errorOnExist: true, force: false });
-      await fs.rm(src, { recursive: true, force: true });
+      await removeWithRetry(src);
     }
     moved++;
   }
@@ -1497,13 +1532,13 @@ function registerIpc(): void {
     assertInsideLibrary(toFolder.id);
     if (newName) assertNotLibraryInternalName(newName);
     const target = path.join(toFolder.id, newName ?? path.basename(entry.id));
-    await fs.rename(entry.id, target);
+    await withFileRetry(() => fs.rename(entry.id, target));
     return entryFor(target);
   });
 
   ipcMain.handle('library:remove', async (_event, entry: DesktopFsEntry): Promise<void> => {
     assertInsideLibrary(entry.id);
-    await fs.rm(entry.id, { recursive: true, force: true });
+    await removeWithRetry(entry.id);
   });
 
   // Export a folder (or the whole library) as a ZIP. Streams to a user-chosen path

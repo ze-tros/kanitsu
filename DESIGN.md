@@ -190,6 +190,7 @@ ImportSourcePicker + LibraryStore
 - 网格只挂载可视区域及少量 overscan，不能随图片总数线性增长 DOM。
 - Electron 缩略图请求按“可见、滚动方向、当前目录、子目录、后台预热”排序；其他平台至少限制并发和预取规模。
 - Electron 解码在 worker 中执行；Android 使用原生解码和磁盘缓存。
+- 缩略图 worker 不得把源文件路径直接交给解码库：sharp/libvips 按路径打开源文件时不含共享删除语义，解码期间该文件在 Windows 上删不掉也改不了名（用户表现为随机 EPERM）。一律先读入内存再解码；删除、改名路径另带占用退避重试。
 - RAW 解码（libraw-wasm）在专用线程内执行：桌面在 worker_threads，Android 在 WebView Worker；网格缩略图只提取内嵌预览（毫秒级），完整解码（秒级）仅限查看器当前页且串行，无内嵌预览时以 halfSize 兜底。
 - object URL 和查看器页面缓存必须有上限，卸载时释放资源。
 - 原图使用 URL 流式加载，相邻图只做有限预取。
@@ -224,6 +225,7 @@ npm run build:android
 - 导入、取消、重名、跳过文件和导入报告。
 - 整理预览、冲突、落盘和撤销。
 - 删除、重命名、新建目录及索引刷新。
+- 删除/重命名与缩略图生成、后台预热并发进行（Windows 文件占用重试路径）。
 - 大图、GIF、长图、连续翻页、缩放和缩略图到原图过渡。
 - Android 返回键、安全区、横竖屏和后台恢复。
 - ZIP 解压、目录结构和 `index.json`。
