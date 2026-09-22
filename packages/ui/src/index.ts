@@ -8,6 +8,8 @@ export * from './smoothScroll';
 export * from './visibleObserver';
 export * from './ContextMenu';
 export * from './LibraryBrowser';
+export * from './LibraryLocationModal';
+export * from './libraryLocation';
 export * from './NavButton';
 export * from './OrganizePreview';
 export * from './OrganizeRulesModal';

@@ -39,6 +39,28 @@ export interface ClearCacheResult {
   diskBytes: number;
 }
 
+/** 图包保存位置（桌面端专有设置）。 */
+export interface LibraryLocationInfo {
+  path: string;
+  isDefault: boolean;
+  /** 首次运行引导是否已确认；false 时渲染端弹窗确认保存位置。 */
+  confirmed: boolean;
+  exists: boolean;
+}
+
+/** 更改图包保存位置的结果；error 为面向用户的中文说明。 */
+export interface LibraryLocationChangeResult {
+  canceled: boolean;
+  path?: string;
+  isDefault?: boolean;
+  /** 是否把原位置的图库内容一并搬到了新位置。 */
+  moved?: boolean;
+  movedCount?: number;
+  /** 搬移时因目标已有同名项而跳过的项数（这些文件仍留在原位置）。 */
+  skippedCount?: number;
+  error?: string;
+}
+
 export interface KanitsuDesktopBridge {
   platform: 'electron';
   version: string;
@@ -54,6 +76,14 @@ export interface KanitsuDesktopBridge {
   onImportProgress(callback: (progress: NativeImportProgress) => void): () => void;
   cancelTask(token: string): Promise<void>;
   releaseSource(): Promise<void>;
+  /** 图包保存位置：首次运行引导与「设置 → 通用」共用。 */
+  getLibraryLocation(): Promise<LibraryLocationInfo>;
+  /** 确认当前保存位置（首次运行引导的「使用此位置」）。 */
+  acknowledgeLibraryLocation(): Promise<LibraryLocationInfo>;
+  /** 打开系统文件夹选择框并切换保存位置；取消时 canceled 为 true。 */
+  chooseLibraryLocation(): Promise<LibraryLocationChangeResult>;
+  /** 切回默认保存位置。 */
+  resetLibraryLocation(): Promise<LibraryLocationChangeResult>;
   getLibraryRoot(): Promise<DesktopFsEntry>;
   ensureLibraryRoot(): Promise<DesktopFsEntry>;
   createLibraryFolder(parent: DesktopFsEntry, name: string): Promise<DesktopFsEntry>;

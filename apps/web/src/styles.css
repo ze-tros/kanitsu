@@ -2451,6 +2451,78 @@ body {
   text-wrap: pretty;
 }
 
+/* 图包保存位置：右侧是「路径 + 操作」一行。两者必须同处一行：拆成两行时它们
+   分别贴到行的上下边缘，整行 66px 里控件占满 63px，看起来像两个不相干的项。 */
+.desktop-settings-location {
+  min-width: 0;
+  max-width: 62%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  text-align: right;
+}
+
+.desktop-settings-location-main {
+  max-width: 100%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.desktop-settings-path {
+  min-width: 0;
+  color: var(--desktop-text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  word-break: break-all;
+  user-select: text;
+}
+
+/* 行内操作按钮走设置页自己的控件语言（1px 描边 + surface-2 底 + 26px 高度，
+   与「界面模式」分段控件内的按钮同尺寸）。不用 daisyUI 的 .btn：它的填充、
+   阴影与圆角在这页里像外来控件，跟同行的路径文字排在一起格外跳。 */
+body .desktop-library .desktop-settings-action {
+  flex: 0 0 auto;
+  height: 26px;
+  padding: 0 11px;
+  border: 1px solid var(--desktop-line);
+  border-radius: var(--desktop-radius-tight);
+  background: var(--desktop-surface-2);
+  color: var(--desktop-text-soft);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+body .desktop-library .desktop-settings-action:hover:not(:disabled) {
+  border-color: var(--desktop-line-strong);
+  background: var(--desktop-surface-3);
+  color: var(--desktop-text);
+}
+
+/* 次要操作（恢复默认）：不描边、低对比，只在悬停时浮出底色。 */
+body .desktop-library .desktop-settings-action.is-quiet {
+  border-color: transparent;
+  background: transparent;
+  color: var(--desktop-muted);
+  font-weight: 400;
+}
+
+body .desktop-library .desktop-settings-action.is-quiet:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--desktop-surface-2);
+  color: var(--desktop-text-soft);
+}
+
+.desktop-settings-hint {
+  max-width: 100%;
+}
+
 .desktop-settings-mode-control {
   height: 32px;
   display: inline-flex;
@@ -3372,6 +3444,18 @@ body {
     flex-direction: column;
     gap: 10px;
     padding: 13px 0;
+  }
+
+  /* 行内改为纵向堆叠后，路径块跟着左对齐（右对齐会显得像悬空）。 */
+  .desktop-settings-location {
+    align-items: flex-start;
+    max-width: 100%;
+    text-align: left;
+  }
+
+  .desktop-settings-location-main {
+    flex-wrap: wrap;
+    justify-content: flex-start;
   }
 
   .viewer-toolbar {

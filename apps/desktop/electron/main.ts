@@ -1,6 +1,6 @@
 // Electron main process: native file system for import and album library.
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, net, protocol } from 'electron';
-import { promises as fs, createWriteStream } from 'node:fs';
+import { promises as fs, createWriteStream, readFileSync, writeFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -125,13 +125,253 @@ interface ClearCacheResult {
   diskBytes: number;
 }
 
+// —— 图包保存位置（桌面端可配置） ——
+// 默认仍是 userData/albums，用户可在首次启动引导或「设置 → 通用」改到自选目录。
+// 位置存在 userData/settings.json（与图库内容分离），选定的目录里写一个标记文件
+// 用于识别「这个目录由 Kanitsu 管理」。之所以要标记：整理/删除只作用于图库内部，
+// 若允许把用户自己的照片目录整体选成图库，那些原片就会被纳入整理与删除范围。
+const SETTINGS_VERSION = 1;
+const LIBRARY_MARKER_FILE = '.kanitsu-library.json';
+
+interface DesktopSettings {
+  version: number;
+  /** 用户选定的图包保存目录；空串表示使用默认位置。 */
+  libraryRoot: string;
+  /** 首次运行时的保存位置确认弹窗是否已完成。 */
+  libraryLocationConfirmed: boolean;
+}
+
+/** 图包保存位置信息（供渲染端展示与首次运行引导）。 */
+interface LibraryLocationInfo {
+  path: string;
+  isDefault: boolean;
+  confirmed: boolean;
+  exists: boolean;
+}
+
+/** 更改图包保存位置的结果；错误文案由主进程给出，渲染端只负责讲给用户听。 */
+interface LibraryLocationChangeResult {
+  canceled: boolean;
+  path?: string;
+  isDefault?: boolean;
+  /** 是否把原位置的图库内容一并搬到了新位置。 */
+  moved?: boolean;
+  movedCount?: number;
+  /** 搬移时因目标已有同名项而跳过的项数。 */
+  skippedCount?: number;
+  error?: string;
+}
+
+let settingsCache: DesktopSettings | null = null;
+
+function settingsFilePath(): string {
+  return path.join(app.getPath('userData'), 'settings.json');
+}
+
+function loadDesktopSettings(): DesktopSettings {
+  if (settingsCache) return settingsCache;
+  settingsCache = { version: SETTINGS_VERSION, libraryRoot: '', libraryLocationConfirmed: false };
+  try {
+    const raw = JSON.parse(readFileSync(settingsFilePath(), 'utf8')) as Partial<DesktopSettings>;
+    if (typeof raw.libraryRoot === 'string' && raw.libraryRoot) settingsCache.libraryRoot = raw.libraryRoot;
+    settingsCache.libraryLocationConfirmed = raw.libraryLocationConfirmed === true;
+  } catch {
+    // 文件不存在或损坏：按「未设置」处理，用默认位置。
+  }
+  return settingsCache;
+}
+
+function saveDesktopSettings(patch: Partial<DesktopSettings>): void {
+  const next: DesktopSettings = { ...loadDesktopSettings(), ...patch, version: SETTINGS_VERSION };
+  settingsCache = next;
+  try {
+    writeFileSync(settingsFilePath(), `${JSON.stringify(next, null, 2)}\n`, 'utf8');
+  } catch (error) {
+    // 写盘失败不影响本次会话（内存值已生效），下次启动退回默认位置。
+    logger.warn('library', `写入设置失败：${String(error)}`);
+  }
+}
+
+function defaultLibraryRoot(): string {
+  return path.join(app.getPath('userData'), 'albums');
+}
+
 function getLibraryRoot(): string {
-  if (!libraryRoot) libraryRoot = path.join(app.getPath('userData'), 'albums');
+  if (!libraryRoot) {
+    const configured = loadDesktopSettings().libraryRoot;
+    libraryRoot = configured ? path.resolve(configured) : defaultLibraryRoot();
+  }
   return libraryRoot;
 }
 
 async function ensureDir(p: string): Promise<void> {
   await fs.mkdir(p, { recursive: true });
+}
+
+async function pathExists(target: string): Promise<boolean> {
+  try {
+    await fs.access(target);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** 写入图库标记文件（已存在则跳过）。 */
+async function ensureLibraryMarker(root: string): Promise<void> {
+  const marker = path.join(root, LIBRARY_MARKER_FILE);
+  try {
+    if (await pathExists(marker)) return;
+    const content = { app: 'kanitsu', version: SETTINGS_VERSION, createdAt: new Date().toISOString() };
+    await fs.writeFile(marker, `${JSON.stringify(content, null, 2)}\n`, 'utf8');
+  } catch (error) {
+    logger.warn('library', `写入图库标记失败：${String(error)}`);
+  }
+}
+
+async function hasLibraryMarker(root: string): Promise<boolean> {
+  try {
+    const text = (await fs.readFile(path.join(root, LIBRARY_MARKER_FILE))).toString('utf8');
+    return (JSON.parse(text) as { app?: string }).app === 'kanitsu';
+  } catch {
+    return false;
+  }
+}
+
+type LibraryDirKind = 'missing' | 'empty' | 'library' | 'foreign';
+
+/** 判定候选目录能否直接作为图库：缺省/空目录可以，带标记的既有图库可以，
+ *  其余非空目录拒绝（见上方标记文件的说明）。 */
+async function inspectLibraryDir(target: string): Promise<{ kind: LibraryDirKind; entryCount: number }> {
+  if (await hasLibraryMarker(target)) return { kind: 'library', entryCount: 0 };
+  try {
+    const entries = await fs.readdir(target);
+    return entries.length === 0 ? { kind: 'empty', entryCount: 0 } : { kind: 'foreign', entryCount: entries.length };
+  } catch {
+    return { kind: 'missing', entryCount: 0 };
+  }
+}
+
+/** 拒绝磁盘根目录与系统目录：它们一旦成为图库，整理/删除会波及无关文件。 */
+function validateLibraryLocation(target: string): string | null {
+  const resolved = path.resolve(target);
+  if (resolved === path.resolve(getLibraryRoot())) return null;
+  if (path.parse(resolved).root === resolved) {
+    return '不能把磁盘根目录作为图包保存位置，请先在其中新建一个专用文件夹。';
+  }
+  const systemKeys = ['home', 'desktop', 'documents', 'downloads', 'pictures', 'videos', 'music', 'appData', 'temp', 'userData'] as const;
+  for (const key of systemKeys) {
+    let dir = '';
+    try {
+      dir = app.getPath(key);
+    } catch {
+      continue; // 该平台没有这个路径
+    }
+    if (dir && path.resolve(dir) === resolved) {
+      return '不能把系统目录本身作为图包保存位置，请改用其中的一个新文件夹。';
+    }
+  }
+  const current = path.resolve(getLibraryRoot());
+  if (resolved.startsWith(current + path.sep)) {
+    return '新位置不能在当前图库内部，请选择其他文件夹。';
+  }
+  return null;
+}
+
+/** 统计图库内的图片数量：用来决定是否要询问「是否搬移现有图包」。 */
+async function countLibraryImages(root: string): Promise<number> {
+  let count = 0;
+  try {
+    for (const entry of await fs.readdir(root, { withFileTypes: true })) {
+      if (entry.isDirectory()) count += await countLibraryImages(path.join(root, entry.name));
+      else if (IMAGE_EXT.has(path.extname(entry.name).toLowerCase().slice(1))) count++;
+    }
+  } catch {
+    // 目录不可读按空处理
+  }
+  return count;
+}
+
+/** 把图库内容搬到新位置：优先 rename（同盘瞬时完成），跨盘回退为复制后删除；
+ *  目标已有同名项时跳过（绝不覆盖），并把跳过数报给调用方。 */
+async function moveLibraryContents(from: string, to: string): Promise<{ moved: number; skipped: number }> {
+  let moved = 0;
+  let skipped = 0;
+  for (const entry of await fs.readdir(from, { withFileTypes: true })) {
+    if (entry.name === LIBRARY_MARKER_FILE) continue;
+    const src = path.join(from, entry.name);
+    const dest = path.join(to, entry.name);
+    if (await pathExists(dest)) {
+      logger.warn('library', `目标位置已存在同名项，跳过：${dest}`);
+      skipped++;
+      continue;
+    }
+    try {
+      await fs.rename(src, dest);
+    } catch {
+      await fs.cp(src, dest, { recursive: true, errorOnExist: true, force: false });
+      await fs.rm(src, { recursive: true, force: true });
+    }
+    moved++;
+  }
+  return { moved, skipped };
+}
+
+/** 切换图包保存位置：校验目录 → 询问是否搬移现有图包 → 落盘设置。 */
+async function applyLibraryLocation(target: string): Promise<LibraryLocationChangeResult> {
+  const resolved = path.resolve(target);
+  const invalid = validateLibraryLocation(resolved);
+  if (invalid) return { canceled: false, error: invalid };
+
+  const current = path.resolve(getLibraryRoot());
+  const isDefault = resolved === path.resolve(defaultLibraryRoot());
+  const persist = { libraryRoot: isDefault ? '' : resolved, libraryLocationConfirmed: true };
+
+  if (resolved === current) {
+    await ensureDir(resolved);
+    await ensureLibraryMarker(resolved);
+    saveDesktopSettings(persist);
+    return { canceled: false, path: resolved, isDefault };
+  }
+
+  // 默认位置是应用自己的目录，直接接管（升级上来的旧图库没有标记文件）。
+  if (!isDefault) {
+    const info = await inspectLibraryDir(resolved);
+    if (info.kind === 'foreign') {
+      return {
+        canceled: false,
+        error: `该文件夹里已有 ${info.entryCount} 项内容，且不是 Kanitsu 图库，不能选作保存位置。请选一个空文件夹或新建专用文件夹，避免把已有文件卷进图库的整理与删除。`,
+      };
+    }
+  }
+
+  let move = false;
+  if ((await countLibraryImages(current)) > 0) {
+    const answer = await dialog.showMessageBox({
+      type: 'question',
+      buttons: ['移动图包', '仅切换位置', '取消'],
+      defaultId: 0,
+      cancelId: 2,
+      message: '要一并移动现有图包吗？',
+      detail: `「移动图包」会把 ${current} 里的内容搬到新位置；「仅切换位置」保留在原处不删除，新位置从空图库开始。`,
+    });
+    if (answer.response === 2) return { canceled: true };
+    move = answer.response === 0;
+  }
+
+  try {
+    await ensureDir(resolved);
+    await ensureLibraryMarker(resolved);
+    const moved = move ? await moveLibraryContents(current, resolved) : { moved: 0, skipped: 0 };
+    // 内容搬空后撤掉旧标记：原目录恢复成普通文件夹，避免被误认为仍是图库。
+    if (move) await fs.rm(path.join(current, LIBRARY_MARKER_FILE), { force: true });
+    libraryRoot = resolved;
+    saveDesktopSettings(persist);
+    logger.info('library', `图包保存位置切换为 ${resolved}${move ? `（已搬移 ${moved.moved} 项，跳过 ${moved.skipped} 项）` : ''}`);
+    return { canceled: false, path: resolved, isDefault, moved: move, movedCount: moved.moved, skippedCount: moved.skipped };
+  } catch (error) {
+    return { canceled: false, error: `切换保存位置失败：${String(error)}` };
+  }
 }
 
 function assertInsideLibrary(p: string): void {
@@ -877,6 +1117,51 @@ function registerIpc(): void {
     if (state) state.cancelled = true;
   });
 
+  // —— 图包保存位置（仅桌面端：Web/Android 各自用应用目录，无此设置） ——
+  ipcMain.handle('library:getLocation', async (): Promise<LibraryLocationInfo> => {
+    const root = getLibraryRoot();
+    return {
+      path: root,
+      isDefault: path.resolve(root) === path.resolve(defaultLibraryRoot()),
+      confirmed: loadDesktopSettings().libraryLocationConfirmed,
+      exists: await pathExists(root),
+    };
+  });
+
+  ipcMain.handle('library:acknowledgeLocation', async (): Promise<LibraryLocationInfo> => {
+    const root = getLibraryRoot();
+    await ensureDir(root);
+    await ensureLibraryMarker(root);
+    saveDesktopSettings({ libraryLocationConfirmed: true });
+    return {
+      path: root,
+      isDefault: path.resolve(root) === path.resolve(defaultLibraryRoot()),
+      confirmed: true,
+      exists: true,
+    };
+  });
+
+  ipcMain.handle('library:chooseLocation', async (): Promise<LibraryLocationChangeResult> => {
+    if (importCancelStates.size > 0) {
+      return { canceled: false, error: '有导入任务正在进行，请等它结束后再更改保存位置。' };
+    }
+    const result = await dialog.showOpenDialog({
+      title: '选择图包保存位置',
+      defaultPath: getLibraryRoot(),
+      buttonLabel: '选择此文件夹',
+      properties: ['openDirectory', 'createDirectory'],
+    });
+    if (result.canceled || result.filePaths.length === 0) return { canceled: true };
+    return applyLibraryLocation(result.filePaths[0]!);
+  });
+
+  ipcMain.handle('library:resetLocation', async (): Promise<LibraryLocationChangeResult> => {
+    if (importCancelStates.size > 0) {
+      return { canceled: false, error: '有导入任务正在进行，请等它结束后再更改保存位置。' };
+    }
+    return applyLibraryLocation(defaultLibraryRoot());
+  });
+
   // Album library (app-managed copy)
   ipcMain.handle('library:getRoot', async (): Promise<DesktopFsEntry> => {
     const root = getLibraryRoot();
@@ -887,6 +1172,7 @@ function registerIpc(): void {
   ipcMain.handle('library:ensureRoot', async (): Promise<DesktopFsEntry> => {
     const root = getLibraryRoot();
     await ensureDir(root);
+    await ensureLibraryMarker(root);
     return entryFor(root, '全部图包');
   });
 

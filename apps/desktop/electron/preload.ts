@@ -54,6 +54,23 @@ type ClearCacheResult = {
   diskBytes: number;
 };
 
+type LibraryLocationInfo = {
+  path: string;
+  isDefault: boolean;
+  confirmed: boolean;
+  exists: boolean;
+};
+
+type LibraryLocationChangeResult = {
+  canceled: boolean;
+  path?: string;
+  isDefault?: boolean;
+  moved?: boolean;
+  movedCount?: number;
+  skippedCount?: number;
+  error?: string;
+};
+
 const bridge = {
   platform: 'electron' as const,
   version: '0.1.0',
@@ -75,6 +92,11 @@ const bridge = {
   },
   cancelTask: (token: string): Promise<void> => ipcRenderer.invoke('import:cancel', token),
   releaseSource: (): Promise<void> => ipcRenderer.invoke('import:releaseSource'),
+  // 图包保存位置：首次运行引导与「设置 → 通用」共用（仅桌面端）。
+  getLibraryLocation: (): Promise<LibraryLocationInfo> => ipcRenderer.invoke('library:getLocation'),
+  acknowledgeLibraryLocation: (): Promise<LibraryLocationInfo> => ipcRenderer.invoke('library:acknowledgeLocation'),
+  chooseLibraryLocation: (): Promise<LibraryLocationChangeResult> => ipcRenderer.invoke('library:chooseLocation'),
+  resetLibraryLocation: (): Promise<LibraryLocationChangeResult> => ipcRenderer.invoke('library:resetLocation'),
   getLibraryRoot: (): Promise<DesktopEntry> => ipcRenderer.invoke('library:getRoot'),
   ensureLibraryRoot: (): Promise<DesktopEntry> => ipcRenderer.invoke('library:ensureRoot'),
   createLibraryFolder: (parent: DesktopEntry, name: string): Promise<DesktopEntry> =>

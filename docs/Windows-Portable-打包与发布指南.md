@@ -11,7 +11,7 @@ Kanitsu-Portable-<version>-x64.exe
 SHA256SUMS.txt
 ```
 
-Portable 在这里表示“单 EXE、免安装”，不表示“数据随 EXE 携带”。图包库、缩略图缓存和日志仍写入 Electron `userData` 目录。
+Portable 在这里表示“单 EXE、免安装”，不表示“数据随 EXE 携带”。图包库、缩略图缓存和日志仍写入 Electron `userData` 目录。图包库默认是 `userData/albums`，可在首次启动的弹窗或「设置 → 通用 → 图包保存位置」改到自选目录；缩略图缓存与日志始终留在 `userData`。
 
 当前还没有 Windows 代码签名证书和自定义 `.ico` 图标，因此：
 
