@@ -85,6 +85,7 @@ import type { DesktopRawViewMode } from '../../fs-adapter/src/electron';
 import { organizeByFolder, type CustomOrganizeRule } from '../../organizer/src/index';
 import { pickCover } from '../../cover-picker/src/index';
 import { BlobImage } from './BlobImage';
+import { ExifFieldList, ExifRows, useExifInfo } from './exifInfo';
 import { KanitsuLogo } from './KanitsuLogo';
 import {
   COVER_THUMBNAIL_SIZE,
@@ -294,6 +295,9 @@ export function LibraryBrowser({
   const [snapshot, setSnapshot] = useState<LibrarySnapshot | null>(readSnapshotMirror);
   const [selectedFolderId, setSelectedFolderId] = useState<string>('');
   const [viewerImageId, setViewerImageId] = useState<string | null>(null);
+  // 图片信息面板开关放在本层：Viewer 按图片 id 重挂载（key），状态留在这里，
+  // 切换图片时面板保持打开，只换内容。
+  const [viewerInfoOpen, setViewerInfoOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [messageKind, setMessageKind] = useState<'info' | 'success' | 'error'>('info');
@@ -2460,6 +2464,8 @@ export function LibraryBrowser({
             showFilmstrip={false}
             rawViewMode={rawViewMode}
             onRawViewModeChange={handleRawViewModeChange}
+            infoOpen={viewerInfoOpen}
+            onInfoOpenChange={setViewerInfoOpen}
           />
           <div className="viewer-filmstrip-overlay">
             <ViewerFilmstrip images={viewerImages} activeIndex={viewerIndex} store={store} onNavigate={setViewerImageId} />
@@ -2598,6 +2604,9 @@ function DesktopInspector({
 
   // 混选（图片 + 图包）：检查器展示图包侧（图片动作仍在工具栏），批量删除只作用于图包。
   const imageOnlySelection = selectedImages.length > 0 && selectedFolders.length === 0;
+  // Hook 顺序固定，取值放在早退分支之前；只有单张图片才读 EXIF。
+  const inspectedImage = imageOnlySelection && selectedImages.length === 1 ? selectedImages[0]! : null;
+  const exif = useExifInfo(store, inspectedImage);
 
   if (imageOnlySelection && selectedImages.length > 1) {
     const selectedBytes = selectedImages.reduce((sum, image) => sum + image.size, 0);
@@ -2661,6 +2670,19 @@ function DesktopInspector({
           <div><span>文件修改</span><strong>{formatModifiedTime(image.mtime)}</strong></div>
           <div className="is-stacked"><span>所在路径</span><strong title={image.relPath}>{image.relPath}</strong></div>
         </section>
+        <section className="desktop-inspector-section desktop-data-list">
+          <h3>拍摄信息</h3>
+          <ExifRows state={exif} />
+        </section>
+        {exif.fields.length > 0 && (
+          <section className="desktop-inspector-section">
+            <h3>全部 EXIF 标签</h3>
+            <details className="desktop-data-list desktop-exif-details">
+              <summary>{exif.fields.length} 个标签</summary>
+              <ExifFieldList fields={exif.fields} />
+            </details>
+          </section>
+        )}
         <section className="desktop-inspector-section">
           <button type="button" className="desktop-action-row" onClick={() => onRenameImage(image)}><PencilSimple size={17} /><span>重命名</span><CaretRight size={13} /></button>
           <button type="button" className="desktop-action-row" onClick={() => onCopyImagePath(image)}><Copy size={17} /><span>复制路径</span><CaretRight size={13} /></button>
@@ -3299,6 +3321,8 @@ function Viewer({
   showFilmstrip = true,
   rawViewMode,
   onRawViewModeChange,
+  infoOpen,
+  onInfoOpenChange,
 }: {
   images: ImageEntry[];
   index: number;
@@ -3311,6 +3335,9 @@ function Viewer({
   /** RAW 观感:工具栏切换按钮与完整解码加载指示仅 RAW 文件渲染。 */
   rawViewMode: DesktopRawViewMode;
   onRawViewModeChange: (mode: DesktopRawViewMode) => void;
+  /** 图片信息面板开关（受控）：状态在 LibraryBrowser，切换图片时面板保留。 */
+  infoOpen: boolean;
+  onInfoOpenChange: (open: boolean) => void;
 }) {
   const image = images[index];
   // displayUrl：当前正在显示的图（只在确已解码完成后换入）；pendingUrl：当前图正在
@@ -3326,7 +3353,10 @@ function Viewer({
   const [rotate, setRotate] = useState(0);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [containerSize, setContainerSize] = useState({ w: 0, h: 0 });
-  const [showInfo, setShowInfo] = useState(false);
+  // 面板开关由父层持有（切换图片会重挂载本组件，见外层 key），这里只读。
+  const showInfo = infoOpen;
+  // 图片信息面板里的拍摄参数；面板没开就不读文件。
+  const exif = useExifInfo(store, image, showInfo);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -3713,7 +3743,7 @@ function Viewer({
           <button type="button" className="viewer-button" aria-label="适应窗口" title="适应窗口" onClick={fit}><ArrowsOut size={17} /></button>
           <button type="button" className="viewer-button viewer-tool-text" aria-label="原始大小" title="原始大小" onClick={percent}>1:1</button>
           <button type="button" className="viewer-button" aria-label="顺时针旋转" title="顺时针旋转" onClick={rotateCW}><ArrowClockwise size={17} /></button>
-          <button type="button" className={`viewer-button ${showInfo ? 'is-active' : ''}`} aria-label="图片信息" aria-pressed={showInfo} title="图片信息" onClick={() => setShowInfo((value) => !value)}><Info size={17} /></button>
+          <button type="button" className={`viewer-button ${showInfo ? 'is-active' : ''}`} aria-label="图片信息" aria-pressed={showInfo} title="图片信息" onClick={() => onInfoOpenChange(!showInfo)}><Info size={17} /></button>
           {/* RAW 观感切换:显影=完整解码(与 Windows 照片等查看器显影后的稳定
               画面一致);直出=相机内嵌预览(机内创意外观)。顺序与设置页一致:
               完整解码在前(默认),相机直出在后。 */}
@@ -3845,13 +3875,23 @@ function Viewer({
           <ArrowRight size={21} />
         </button>
         {showInfo && (
-          <aside className="viewer-info" aria-label="图片信息">
+          <aside
+            className="viewer-info"
+            aria-label="图片信息"
+            // 信息面板浮在画布上：这里的滚动/拖拽/双击是面板自己的交互，
+            // 不下传到 viewer-stage 的缩放与平移，否则滚信息栏会缩放图片。
+            onWheel={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+            onDoubleClick={(e) => e.stopPropagation()}
+          >
             <h2>图片信息</h2>
             <div><span>格式</span><strong>{image.ext.replace(/^\./, '').toUpperCase() || '未知'}</strong></div>
             <div><span>尺寸</span><strong>{natural ? `${natural.w} × ${natural.h}` : image.width && image.height ? `${image.width} × ${image.height}` : '未知'}</strong></div>
             <div><span>大小</span><strong>{formatBytes(image.size)}</strong></div>
             <div><span>文件修改</span><strong>{formatModifiedTime(image.mtime)}</strong></div>
             <div className="is-stacked"><span>所在路径</span><strong title={image.relPath}>{image.relPath}</strong></div>
+            <h3>拍摄信息</h3>
+            <ExifRows state={exif} />
             <button type="button" className="viewer-info-action" onClick={(event) => onImageContextMenu(event, image)}><Info size={14} />更多文件操作</button>
           </aside>
         )}

@@ -2281,6 +2281,9 @@ html[data-theme='light'][data-accent='graphite'] .m-viewer-root {
 .m-viewer-info {
   max-height: min(56dvh, 420px);
   overflow-y: auto;
+  /* 外层 m-viewer-root 是 touch-action: none（手势层独占触摸），
+     面板要自己放开纵向滚动，否则内容超出后滚不动。 */
+  touch-action: pan-y;
   overscroll-behavior: contain;
   border: 1px solid rgb(255 255 255 / 13%);
   border-radius: 9px;

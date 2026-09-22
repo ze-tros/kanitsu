@@ -5,6 +5,7 @@ import { decodeRawToJpeg, extractRawPreviewJpeg, isRawImage } from '../../../raw
 import { getThumbnailBlob } from '../thumbnailCache';
 import { prefetchOriginal } from '../LibraryBrowser';
 import { acquireObjectUrl, releaseObjectUrl } from '../objectUrlPool';
+import { useExifInfo } from '../exifInfo';
 import { formatBytes, prefersReducedMotion } from './mobileShared';
 import { Z_VIEWER } from './zindex';
 
@@ -124,6 +125,8 @@ export function MobileViewer({
   const [uiVisible, setUiVisible] = useState(true);
   const [rotation, setRotation] = useState(0); // 0/90/180/270
   const [showInfo, setShowInfo] = useState(false);
+  // 图片信息面板里的拍摄参数；面板没开就不读文件。
+  const exif = useExifInfo(store, current ?? null, showInfo);
 
   // —— 页面图片缓存：imageId → PageInfo ——
   const [pages, setPages] = useState<ReadonlyMap<string, PageInfo>>(new Map());
@@ -499,7 +502,7 @@ export function MobileViewer({
     applyTransform();
   }, [applyTransform, cancelZoomAnimation, setTransformTransition]);
 
-  // 切图时重置缩放
+  // 切图时重置缩放与旋转；信息面板保持打开（与桌面查看器一致），只换内容。
   const prevIndexRef = useRef(activeIndex);
   const swipeAnimationRef = useRef<{ frame: number; current: number; cancelled: boolean } | null>(null);
   const dragPositionRef = useRef(0);
@@ -509,7 +512,6 @@ export function MobileViewer({
       prevIndexRef.current = activeIndex;
       resetTransform();
       setRotation(0);
-      setShowInfo(false);
       forceRender((n) => n + 1);
     }
   }, [activeIndex, resetTransform]);
@@ -1119,6 +1121,12 @@ export function MobileViewer({
         <div
           className="m-viewer-info absolute left-3 right-3 z-20"
           style={{ top: 'calc(env(safe-area-inset-top, 0px) + 72px)' }}
+          // 信息面板浮在舞台上：这里的指针手势是面板自己的（滚动内容），
+          // 不下传到手势层的翻页/平移/捏合。
+          onPointerDown={(e) => e.stopPropagation()}
+          onPointerMove={(e) => e.stopPropagation()}
+          onPointerUp={(e) => e.stopPropagation()}
+          onPointerCancel={(e) => e.stopPropagation()}
         >
           <div className="flex items-start justify-between gap-3">
             <div className="m-viewer-info-title truncate">{current.name}</div>
@@ -1140,6 +1148,11 @@ export function MobileViewer({
             <InfoRow label="大小" value={current.size ? formatBytes(current.size) : '—'} />
             <InfoRow label="修改时间" value={current.mtime ? new Date(current.mtime).toLocaleString('zh-CN', { hour12: false }) : '—'} />
             <InfoRow label="路径" value={current.relPath} />
+            {exif.status === 'loading' && <InfoRow label="拍摄信息" value="读取中…" />}
+            {exif.status === 'ready' && exif.rows.length === 0 && <InfoRow label="拍摄信息" value="无 EXIF 信息" />}
+            {exif.rows.map((row) => (
+              <InfoRow key={row.label} label={row.label} value={row.value} />
+            ))}
           </div>
         </div>
       )}
