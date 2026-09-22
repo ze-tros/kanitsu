@@ -60,10 +60,10 @@ import {
 } from './MobileSheets';
 import { MobileSettingsScreen, type SettingsSectionId } from './MobileSettingsScreen';
 import { useExitPresence } from './useExitPresence';
+import { MOBILE_OVERSCAN_PX, virtualRowWindow, virtualWindowKey, windowPadFor } from '../mobileVirtualWindow';
 import {
   FOLDER_GRID,
   IMAGE_GRID,
-  OVERSCAN_ROWS,
   conflictReasonLabel,
   formatBytes,
   haptic,
@@ -86,9 +86,6 @@ const IMAGE_NAME_H = 16;
 const FOLDER_COLS = FOLDER_GRID.cols;
 const FOLDER_GAP = FOLDER_GRID.gap;
 const FOLDER_CAPTION_H = 50;
-// 移动端极高速惯性滚动一帧内可能跨过多行；缓冲 8 行避免视口追上窗口时
-// 露出空白，同时仍只保留有限的图片 DOM。
-const MOBILE_OVERSCAN_ROWS = Math.max(OVERSCAN_ROWS, 8);
 const MOBILE_SCROLL_PRELOAD_RESUME_MS = 180;
 // 列表视图虚拟化行距：m-image-list-row min-height 68px + gap-0.5（2px）。
 const LIST_ROW_H = 68;
@@ -233,6 +230,7 @@ function VirtualGrid<T>({
   gap,
   scrollTop,
   viewportH,
+  padPx,
   sectionTop,
   renderItem,
   getKey,
@@ -243,23 +241,27 @@ function VirtualGrid<T>({
   gap: number;
   scrollTop: number;
   viewportH: number;
+  /** 速度补偿后的窗口缓冲（与滚动节流键同一值，见 windowPadFor）。 */
+  padPx: number;
   sectionTop: number;
   renderItem: (item: T) => ReactNode;
   getKey: (item: T) => string;
 }) {
   const totalRows = Math.ceil(items.length / cols);
   // Hooks 必须先于任何 early-return 调用：rowHeight 从 0 翻正时 hook 数量不能变。
+  // 窗口计算与滚动节流键共用 mobileVirtualWindow：键变化 ⟺ 挂载窗口变化，
+  // 按构造不会再出现“键用网格几何、窗口用列表几何”的错位（快速滑动整屏空白）。
   const gs = Math.max(0, scrollTop - sectionTop);
-  const step = rowHeight > 0 ? rowHeight : 1;
-  const first = Math.max(0, Math.floor(gs / step) - MOBILE_OVERSCAN_ROWS);
-  const last = Math.min(totalRows, Math.ceil((gs + viewportH) / step) + MOBILE_OVERSCAN_ROWS);
+  const win = virtualRowWindow(gs, viewportH, rowHeight, cols, items.length, padPx);
+  const first = win?.first ?? 0;
+  const last = win?.last ?? 0;
   // 可视行号窗口：窗口未变时复用同一数组，避免每次滚动都重建（万级图时减少 GC）。
   const rowIndexes = useMemo(() => {
     const out: number[] = [];
     for (let r = first; r < last; r++) out.push(r);
     return out;
   }, [first, last]);
-  if (totalRows === 0 || rowHeight <= 0) return null;
+  if (!win) return null;
   return (
     <div style={{ position: 'relative', height: Math.max(1, totalRows * rowHeight - gap) }}>
       {rowIndexes.map((r) => {
@@ -544,22 +546,6 @@ function FolderCard({
       </div>
     </div>
   );
-}
-
-function virtualWindowKey(
-  scrollTop: number,
-  sectionTop: number,
-  viewportH: number,
-  rowHeight: number,
-  cols: number,
-  itemCount: number,
-): string {
-  if (rowHeight <= 0 || viewportH <= 0 || cols <= 0 || itemCount <= 0) return 'empty';
-  const totalRows = Math.ceil(itemCount / cols);
-  const gs = Math.max(0, scrollTop - sectionTop);
-  const first = Math.max(0, Math.floor(gs / rowHeight) - MOBILE_OVERSCAN_ROWS);
-  const last = Math.min(totalRows, Math.ceil((gs + viewportH) / rowHeight) + MOBILE_OVERSCAN_ROWS);
-  return `${first}:${last}`;
 }
 
 /** 文件夹列表行（封面 + 名称 + 递归图片/子目录计数）。 */
@@ -1433,6 +1419,11 @@ export function MobileApp({
   const scrollPreloadResumeTimerRef = useRef<number | null>(null);
   const scrollMotionRef = useRef(false);
   const virtualWindowKeyRef = useRef('');
+  // 窗口更新按 rAF 合并；速度采样用于窗口缓冲的动态补偿（见 windowPadFor）。
+  const windowFrameRef = useRef<number | null>(null);
+  const speedSampleRef = useRef({ t: 0, st: 0 });
+  const speedRef = useRef(0);
+  const [windowPadPx, setWindowPadPx] = useState(MOBILE_OVERSCAN_PX);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportH, setViewportH] = useState(0);
   const [contentW, setContentW] = useState(0);
@@ -1475,23 +1466,53 @@ export function MobileApp({
       mainScrollRef.current?.classList.remove('is-fast-scrolling');
     }, MOBILE_SCROLL_PRELOAD_RESUME_MS);
     const st = el.scrollTop;
-    // 滚动位置本身不需要驱动 React；只有虚拟行窗口变化时才更新，避免
-    // 高刷设备每个滚动事件都重渲染整页。
-    const folderKey = searching
-      ? virtualWindowKey(st, sectionTops.folder, viewportH, searchFolderRowHeight, searchFolderCols, searchFolderCards.length)
-      : virtualWindowKey(st, sectionTops.folder, viewportH, folderRowHeight, folderCols, childFolderCards.length);
-    const imageKey = virtualWindowKey(
-      st,
-      sectionTops.image,
-      viewportH,
-      imageRowHeight,
-      IMAGE_COLS,
-      searching ? searchImages.length : displayImages.length,
-    );
-    const nextWindowKey = `${searching ? 'search' : 'library'}:${folderKey}|${imageKey}`;
-    if (virtualWindowKeyRef.current !== nextWindowKey) {
-      virtualWindowKeyRef.current = nextWindowKey;
-      setScrollTop(st);
+    // 速度采样（px/ms，指数平滑）：连续快滑会把惯性速度叠加上去，单帧行程
+    // 可达上千像素，窗口缓冲必须按速度补偿渲染提交延迟（见 windowPadFor）。
+    const now = performance.now();
+    const prevSample = speedSampleRef.current;
+    speedSampleRef.current = { t: now, st };
+    const dt = Math.max(1, now - prevSample.t);
+    const instSpeed = Math.abs(st - prevSample.st) / dt;
+    speedRef.current = speedRef.current * 0.7 + instSpeed * 0.3;
+    // 窗口更新按 rAF 合并：每帧至多触发一次渲染、取帧末最新 scrollTop。
+    // 否则速度叠加上来后每个滚动事件都是一次独立渲染，提交洪峰本身就是
+    // “窗口滞后 → 整屏空白”的放大器。
+    // 滚动位置本身不需要驱动 React；只有虚拟行窗口（含速度补偿缓冲）变化时
+    // 才更新。节流键必须与对应 VirtualGrid 实例同一套几何：列表模式是 70px
+    // 行高/单列，若错按网格卡尺寸计算，键每 ~470px 才变化一次，冻结的挂载
+    // 窗口跟不上快速滑动的视口，整屏露出空白（骨架和图片都没挂载）。
+    if (windowFrameRef.current == null) {
+      windowFrameRef.current = requestAnimationFrame(() => {
+        windowFrameRef.current = null;
+        const node = mainScrollRef.current;
+        if (!node) return;
+        const frameSt = node.scrollTop;
+        const padPx = windowPadFor(speedRef.current);
+        // 列表模式的文件夹是非虚拟化整列渲染，没有窗口可言。
+        const folderKey =
+          viewMode === 'list'
+            ? 'empty'
+            : searching
+              ? virtualWindowKey(frameSt, sectionTops.folder, viewportH, searchFolderRowHeight, searchFolderCols, searchFolderCards.length, padPx)
+              : virtualWindowKey(frameSt, sectionTops.folder, viewportH, folderRowHeight, folderCols, childFolderCards.length, padPx);
+        const imageStep = viewMode === 'list' ? LIST_ROW_STEP : imageRowHeight;
+        const imageCols = viewMode === 'list' ? 1 : IMAGE_COLS;
+        const imageKey = virtualWindowKey(
+          frameSt,
+          sectionTops.image,
+          viewportH,
+          imageStep,
+          imageCols,
+          searching ? searchImages.length : displayImages.length,
+          padPx,
+        );
+        const nextWindowKey = `${searching ? 'search' : 'library'}:${folderKey}|${imageKey}`;
+        if (virtualWindowKeyRef.current !== nextWindowKey) {
+          virtualWindowKeyRef.current = nextWindowKey;
+          setScrollTop(frameSt);
+          setWindowPadPx(padPx);
+        }
+      });
     }
     if (scrollSaveFrameRef.current != null) return;
     scrollSaveFrameRef.current = requestAnimationFrame(() => {
@@ -1514,10 +1535,15 @@ export function MobileApp({
     sectionTops,
     viewportH,
     currentFolderId,
+    viewMode,
   ]);
 
   useEffect(() => {
     return () => {
+      if (windowFrameRef.current != null) {
+        cancelAnimationFrame(windowFrameRef.current);
+        windowFrameRef.current = null;
+      }
       if (scrollPreloadResumeTimerRef.current != null) {
         window.clearTimeout(scrollPreloadResumeTimerRef.current);
         scrollPreloadResumeTimerRef.current = null;
@@ -2395,7 +2421,7 @@ export function MobileApp({
                       rowHeight={searchFolderRowHeight}
                       gap={FOLDER_GAP}
                       scrollTop={scrollTop}
-                      viewportH={viewportH}
+                      viewportH={viewportH} padPx={windowPadPx}
                       sectionTop={sectionTops.folder}
                       getKey={(c) => c.folder.id}
                       renderItem={(card) => (
@@ -2427,7 +2453,7 @@ export function MobileApp({
                         rowHeight={LIST_ROW_STEP}
                         gap={LIST_ROW_GAP}
                         scrollTop={scrollTop}
-                        viewportH={viewportH}
+                        viewportH={viewportH} padPx={windowPadPx}
                         sectionTop={sectionTops.image}
                         getKey={(img) => img.id}
                         renderItem={(img) => (
@@ -2451,7 +2477,7 @@ export function MobileApp({
                       rowHeight={imageRowHeight}
                       gap={IMAGE_GAP}
                       scrollTop={scrollTop}
-                      viewportH={viewportH}
+                      viewportH={viewportH} padPx={windowPadPx}
                       sectionTop={sectionTops.image}
                       getKey={(img) => img.id}
                       renderItem={(img) => (
@@ -2601,7 +2627,7 @@ export function MobileApp({
                     rowHeight={folderRowHeight}
                     gap={FOLDER_GAP}
                     scrollTop={scrollTop}
-                    viewportH={viewportH}
+                    viewportH={viewportH} padPx={windowPadPx}
                     sectionTop={sectionTops.folder}
                     getKey={(c) => c.folder.id}
                     renderItem={(card) => (
@@ -2669,7 +2695,7 @@ export function MobileApp({
                       rowHeight={LIST_ROW_STEP}
                       gap={LIST_ROW_GAP}
                       scrollTop={scrollTop}
-                      viewportH={viewportH}
+                      viewportH={viewportH} padPx={windowPadPx}
                       sectionTop={sectionTops.image}
                       getKey={(img) => img.id}
                       renderItem={(img) => (
@@ -2693,7 +2719,7 @@ export function MobileApp({
                     rowHeight={imageRowHeight}
                     gap={IMAGE_GAP}
                     scrollTop={scrollTop}
-                    viewportH={viewportH}
+                    viewportH={viewportH} padPx={windowPadPx}
                     sectionTop={sectionTops.image}
                     getKey={(img) => img.id}
                     renderItem={(img) => (
