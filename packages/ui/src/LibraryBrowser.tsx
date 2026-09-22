@@ -3729,7 +3729,7 @@ function Viewer({
                   role="radio"
                   aria-checked={rawViewMode === 'developed'}
                   className={rawViewMode === 'developed' ? 'is-active' : ''}
-                  title="完整解码：应用重新显影，与 Windows 照片等查看器的最终画面一致"
+                  title="完整解码"
                   onClick={() => onRawViewModeChange('developed')}
                 >
                   显影
@@ -3739,7 +3739,7 @@ function Viewer({
                   role="radio"
                   aria-checked={rawViewMode === 'camera'}
                   className={rawViewMode === 'camera' ? 'is-active' : ''}
-                  title="相机直出：显示相机内嵌预览（机内创意外观）"
+                  title="相机直出"
                   onClick={() => onRawViewModeChange('camera')}
                 >
                   直出

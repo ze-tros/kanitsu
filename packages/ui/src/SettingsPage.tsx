@@ -243,7 +243,7 @@ export function SettingsPage({
                     <div className="desktop-settings-row">
                       <div>
                         <strong>RAW 观感</strong>
-                        <span>相机直出显示相机内嵌预览，即机身创意外观的效果；完整解码（默认）由应用重新显影，与 Windows 照片等查看器打开数秒后的最终画面一致——两种渲染开头都会先短暂显示内嵌预览。切换后对新打开的图片生效。</span>
+                        <span>相机内嵌预览或完整解码渲染</span>
                       </div>
                       <div className="desktop-settings-mode-control" role="radiogroup" aria-label="RAW 观感">
                         {([['developed', '完整解码'], ['camera', '相机直出']] as const).map(([value, label]) => (
