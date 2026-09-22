@@ -2532,6 +2532,9 @@ body .desktop-library .desktop-settings-action.is-quiet:hover:not(:disabled) {
   border: 1px solid var(--desktop-line);
   border-radius: var(--desktop-radius-control);
   background: var(--desktop-surface-2);
+  /* 行右侧控件不随左侧长描述文案挤压:压窄会让按钮文字换行错位。 */
+  flex: none;
+  white-space: nowrap;
 }
 
 .desktop-settings-mode-control button {
@@ -2807,6 +2810,49 @@ body .desktop-library .desktop-settings-action.is-quiet:hover:not(:disabled) {
   height: 18px;
   margin: 0 4px;
   background: var(--viewer-line);
+}
+
+/* RAW 观感切换(仅 RAW 文件):两段小字号分段控件,视觉对齐 viewer-button。 */
+.viewer-mode-toggle {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  margin-left: 4px;
+  border: 1px solid var(--viewer-line);
+  border-radius: var(--desktop-radius-control);
+  background: rgb(255 255 255 / 4%);
+}
+
+.viewer-mode-toggle button {
+  min-width: 40px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: var(--desktop-radius-tight);
+  background: transparent;
+  color: var(--viewer-muted);
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.viewer-mode-toggle button:hover,
+.viewer-mode-toggle button.is-active {
+  background: var(--viewer-raised);
+  color: var(--viewer-text);
+}
+
+/* 完整解码后台进行中的加载指示(工具栏内小 spinner)。 */
+.viewer-raw-spin {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  margin-left: 8px;
+  border: 2px solid rgb(255 255 255 / 14%);
+  border-top-color: var(--desktop-accent-fill);
+  border-radius: 50%;
+  animation: viewer-spin 760ms linear infinite;
 }
 
 .viewer-stage {

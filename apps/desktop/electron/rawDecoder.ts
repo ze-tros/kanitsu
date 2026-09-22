@@ -22,6 +22,19 @@ export const RAW_IMAGE_EXT = new Set([
  * 解码走 heifDecoder.ts 的 libheif wasm,与 libraw 管线分开)。 */
 export const HEIF_IMAGE_EXT = new Set(['heic', 'heif', 'hif']);
 
+/** RAW 查看模式(与 fs-adapter/electron.ts 的 DesktopRawViewMode 手工同步,
+ * 原因同上):camera = 相机内嵌预览直出(机内渲染,保留机身创意外观的观感);
+ * developed = LibRaw 完整解码(通用 RAW 显影)。Windows 照片等系统查看器
+ * 同样先短暂显示内嵌预览、最终停留各自(同为 LibRaw 系)的显影结果——
+ * 与它们稳定画面一致的是 developed。 */
+export type RawViewMode = 'camera' | 'developed';
+
+/** IPC/设置文件传入值归一化:未设置或非法值回退 developed(与系统照片
+ * 查看器的稳定渲染一致)。 */
+export function parseRawViewMode(value: unknown): RawViewMode {
+  return value === 'camera' ? 'camera' : 'developed';
+}
+
 export function extOf(name: string): string {
   const idx = name.lastIndexOf('.');
   return idx < 0 ? '' : name.slice(idx + 1).toLowerCase();

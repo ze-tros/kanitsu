@@ -20,6 +20,26 @@ export interface DesktopFsEntry {
   height?: number;
 }
 
+/** RAW 查看模式(与 apps/desktop/electron/rawDecoder.ts 的 RawViewMode 手工同步):
+ * camera = 相机内嵌预览直出(机内渲染,保留机身创意外观的观感);
+ * developed = LibRaw 完整解码(通用 RAW 显影)。Windows 照片等系统查看器的
+ * 稳定画面同为 LibRaw 系显影,与 developed 一致;developed 亦是默认值。 */
+export type DesktopRawViewMode = 'camera' | 'developed';
+
+/** LibraryBrowser 维护的 localStorage 镜像键(与 UI 包共享字符串)。 */
+const RAW_VIEW_MODE_STORAGE_KEY = 'kanitsu-raw-view-mode';
+
+/** 渲染端当前 RAW 查看模式:同步读 localStorage 镜像即可,不必等 IPC
+ * (主进程 settings.json 是持久事实源,渲染端只在设置变更时写它)。
+ * 未设置回退 developed,与主进程默认一致。 */
+function currentRawViewMode(): DesktopRawViewMode {
+  try {
+    return localStorage.getItem(RAW_VIEW_MODE_STORAGE_KEY) === 'camera' ? 'camera' : 'developed';
+  } catch {
+    return 'developed';
+  }
+}
+
 /** 缩略图调试统计（主进程侧，供设置页“调试”面板展示）。 */
 export interface ThumbnailDebugStats {
   queuedByPriority: number[];
@@ -92,8 +112,18 @@ export interface KanitsuDesktopBridge {
   listLibraryChildren(folder: DesktopFsEntry): Promise<DesktopFsEntry[]>;
   readLibraryBlob(file: DesktopFsEntry): Promise<Uint8Array>;
   readLibraryThumbnail(file: DesktopFsEntry, maxSize: number, priority?: number): Promise<Uint8Array>;
-  /** RAW 专用:确保解码派生图存在,返回其查看 URL(非 RAW 不应调用)。 */
-  ensureRawDerivative(file: DesktopFsEntry): Promise<string>;
+  /** RAW 专用:确保解码派生图存在,返回其查看 URL(非 RAW 不应调用)。
+   *  渲染端随调用传入当前查看模式(localStorage 镜像,同步可读,切换模式后
+   *  立即生效,无 IPC 时序竞态);缺省时主进程用其持久值。 */
+  ensureRawDerivative(file: DesktopFsEntry, viewMode?: DesktopRawViewMode): Promise<string>;
+  /** 派生文件的完整解码是否已完成(developed 模式查看器的加载指示依据)。 */
+  isRawDerivativeFullDone(derivPath: string): Promise<boolean>;
+  /** RAW 查看模式:设置页变更时推送主进程持久化(settings.json)。 */
+  setRawViewMode(mode: DesktopRawViewMode): Promise<void>;
+  /** 回读主进程持久化的 RAW 查看模式(渲染端 localStorage 镜像的校准源)。 */
+  getRawViewMode(): Promise<DesktopRawViewMode>;
+  /** 派生文件所属查看模式的缓存;非 rawcache 下的文件返回 null。 */
+  getRawDerivativeViewMode(derivPath: string): Promise<DesktopRawViewMode | null>;
   /** RAW 完整解码在后台覆盖预览级派生后推送(渲染端热替换当前图)。 */
   onRawDerivativeUpdated(callback: (info: { derivPath: string }) => void): () => void;
   moveLibraryEntry(entry: DesktopFsEntry, toFolder: DesktopFsEntry, newName?: string): Promise<DesktopFsEntry>;
@@ -231,12 +261,13 @@ export class ElectronLibraryStore implements LibraryStore {
 
   async getViewerUrl(file: FileRef): Promise<string> {
     // RAW/HEIF 无法被 Chromium <img> 解码:改用主进程解码的派生 JPEG
-    // (userData/rawcache,kanitsu-file 协议同样流式服务)。RAW 首访立即返回
-    // 预览级派生(内嵌预览提取,毫秒级);完整解码后台进行,完成后经
-    // onRawDerivativeUpdated 推送,渲染端热替换。HEIF 无独立内嵌预览,
-    // 直接等待完整解码(秒级,落盘后二次打开即时返回)。
+    // (userData/rawcache,kanitsu-file 协议同样流式服务)。查看模式随调用
+    // 传入:camera=内嵌预览直出(毫秒级,即机内渲染);developed=先预览级、
+    // 完整解码后台升级(经 onRawDerivativeUpdated 推送,渲染端热替换)。
+    // 完整解码两种模式下都在后台执行,模式只决定显示哪份。HEIF 无独立
+    // 内嵌预览,直接等待完整解码(秒级)。
     if (isRawImage(file.name) || isHeifImage(file.name)) {
-      return requireBridge().ensureRawDerivative(toEntry(file));
+      return requireBridge().ensureRawDerivative(toEntry(file), currentRawViewMode());
     }
     // 查看器始终显示原始分辨率原图（保留全部像素，便于 100% 查看）。
     // 主进程通过 kanitsu-file 协议直接服务原始文件，渲染进程用解码缓存池
@@ -245,7 +276,18 @@ export class ElectronLibraryStore implements LibraryStore {
   }
 
   onRawDerivativeUpdated(callback: (info: { derivPath: string }) => void): () => void {
-    return requireBridge().onRawDerivativeUpdated(callback);
+    const bridge = requireBridge();
+    return bridge.onRawDerivativeUpdated(({ derivPath }) => {
+      // 只透传与当前查看模式匹配的升级:切换模式前的后台任务仍会完成并以
+      // 同一路径推送事件,误热替换会让两种观感互相窜。查询属 IPC 异步,
+      // 推送本身不频繁,开销可忽略。
+      void bridge
+        .getRawDerivativeViewMode(derivPath)
+        .then((mode) => {
+          if (mode !== null && mode === currentRawViewMode()) callback({ derivPath });
+        })
+        .catch(() => undefined);
+    });
   }
 
   releaseViewerUrl(_url: string): void {

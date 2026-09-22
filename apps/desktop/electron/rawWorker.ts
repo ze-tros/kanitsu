@@ -17,8 +17,9 @@ import { decodeHeifToRgba } from './heifDecoder';
 // 派生图最长边上限:覆盖 8K 显示的 100% 查看,同时给超大中画幅
 // (1 亿像素级)的解码/编码内存设界。
 const MAX_DERIVATIVE_DIM = 8192;
-// 预览级派生的上限:相机内嵌预览通常 ≤ 全尺寸,4096 覆盖查看所需。
-const MAX_PREVIEW_DIM = 4096;
+// 预览级派生的上限:与 MAX_DERIVATIVE_DIM 一致,让多数机内全尺寸内嵌预览
+// 不被降采样(相机直出模式的最终画面就是它)。
+const MAX_PREVIEW_DIM = 8192;
 
 export interface RawDerivativeJob {
   requestId: number;
@@ -37,7 +38,12 @@ async function generatePreviewDerivative(filePath: string): Promise<Uint8Array> 
     const thumb = await session.thumbnail();
     if (!thumb) throw new Error('NO_EMBEDDED_PREVIEW');
     if (thumb.kind === 'jpeg') {
-      // 内嵌 JPEG 自带 EXIF 方向,.rotate() 定向后再限幅缩放。
+      // 尺寸达标时字节直通(零重编码、零降采样):显示的就是相机写入的那段
+      // JPEG;EXIF 方向标记保留,由渲染端 <img> 按标记自动定向。
+      if (Math.max(thumb.width, thumb.height) <= MAX_PREVIEW_DIM) {
+        return thumb.data;
+      }
+      // 超限才重编码:.rotate() 按 EXIF 定向后再限幅缩放。
       const out = await sharp(Buffer.from(thumb.data), { failOn: 'none' })
         .rotate()
         .resize({ width: MAX_PREVIEW_DIM, height: MAX_PREVIEW_DIM, fit: 'inside' })

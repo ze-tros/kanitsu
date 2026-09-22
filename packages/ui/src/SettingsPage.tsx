@@ -6,7 +6,7 @@ import {
 } from 'react';
 import { ArrowLeft, Bug, Database, MagicWand, MagnifyingGlass, Palette } from '@phosphor-icons/react';
 import type { CustomOrganizeRule } from '../../organizer/src/index';
-import type { ThumbnailDebugStats, ClearCacheResult } from '../../fs-adapter/src/electron';
+import type { ThumbnailDebugStats, ClearCacheResult, DesktopRawViewMode } from '../../fs-adapter/src/electron';
 import { OrganizeRulesManager } from './OrganizeRulesModal';
 import { SidebarResizeHandle } from './SidebarResizeHandle';
 import {
@@ -94,6 +94,9 @@ type SettingsPageProps = {
   accent: AccentOption;
   onThemeChange: (theme: ThemeOption) => void;
   onAccentChange: (accent: AccentOption) => void;
+  /** RAW 查看模式(仅 Electron 有可切换项;Web/Android 平台固定不渲染)。 */
+  rawViewMode: DesktopRawViewMode;
+  onRawViewModeChange: (mode: DesktopRawViewMode) => void;
   /** 图包保存位置变更后回调：调用方需重扫图库（仅桌面端会触发）。 */
   onLibraryLocationChange?: () => void;
 };
@@ -112,6 +115,8 @@ export function SettingsPage({
   accent,
   onThemeChange,
   onAccentChange,
+  rawViewMode,
+  onRawViewModeChange,
   onLibraryLocationChange,
 }: SettingsPageProps) {
   const [activeTab, setActiveTab] = useState<SettingsTabId>('general');
@@ -230,6 +235,40 @@ export function SettingsPage({
                     })}
                   </div>
                 </section>
+
+                {/* RAW 查看模式:仅 Electron 桥存在时可切换(Web/Android 平台固定)。 */}
+                {typeof window !== 'undefined' && window.kanitsuDesktop && (
+                  <section className="desktop-settings-section">
+                    <header className="desktop-settings-section-heading"><h2>RAW 显示</h2></header>
+                    <div className="desktop-settings-row">
+                      <div>
+                        <strong>RAW 观感</strong>
+                        <span>相机直出显示相机内嵌预览，即机身创意外观的效果；完整解码（默认）由应用重新显影，与 Windows 照片等查看器打开数秒后的最终画面一致——两种渲染开头都会先短暂显示内嵌预览。切换后对新打开的图片生效。</span>
+                      </div>
+                      <div className="desktop-settings-mode-control" role="radiogroup" aria-label="RAW 观感">
+                        {([['developed', '完整解码'], ['camera', '相机直出']] as const).map(([value, label]) => (
+                          <button
+                            key={value}
+                            type="button"
+                            role="radio"
+                            aria-checked={rawViewMode === value}
+                            tabIndex={rawViewMode === value ? 0 : -1}
+                            className={rawViewMode === value ? 'is-active' : ''}
+                            onClick={() => onRawViewModeChange(value)}
+                            onKeyDown={(event) => handleRadioNavigation(
+                              event,
+                              ['camera', 'developed'],
+                              rawViewMode,
+                              onRawViewModeChange,
+                            )}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </section>
+                )}
 
                 <section className="desktop-settings-section">
                   <header className="desktop-settings-section-heading"><h2>应用</h2></header>

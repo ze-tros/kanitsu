@@ -28,6 +28,7 @@ export const SETTINGS_TABS: ReadonlyArray<SettingsTab> = [
       '界面与主题', '外观', '界面模式', '深色', '浅色', '跟随系统', '主题色',
       // 主题色的显示名直接取自共享清单，避免改名后搜索失效。
       ...ACCENT_OPTIONS.map((option) => option.label),
+      'RAW 显示', 'RAW 观感', '相机直出', '完整解码', '内嵌预览', 'raw', 'arw', 'cr3', 'nef', 'windows 照片', '创意外观',
       '应用', '运行环境', '图库占用', '自定义整理规则',
       '图包保存位置', '保存位置', '保存路径', '复制一份', '默认位置',
     ],

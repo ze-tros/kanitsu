@@ -110,8 +110,19 @@ const bridge = {
   readLibraryBlob: (file: DesktopEntry): Promise<Uint8Array> => ipcRenderer.invoke('library:readBlob', file),
   readLibraryThumbnail: (file: DesktopEntry, maxSize: number, priority?: number): Promise<Uint8Array> =>
     ipcRenderer.invoke('library:readThumbnail', file, maxSize, priority ?? 0),
-  // RAW 查看派生图:主进程解码后返回派生 JPEG 的 kanitsu-file URL。
-  ensureRawDerivative: (file: DesktopEntry): Promise<string> => ipcRenderer.invoke('raw:ensureDerivative', file),
+  // RAW 查看派生图:主进程按渲染端传入的查看模式(缺省用持久值)解码后返回
+  // 派生 JPEG 的 kanitsu-file URL。
+  ensureRawDerivative: (file: DesktopEntry, viewMode?: 'camera' | 'developed'): Promise<string> =>
+    ipcRenderer.invoke('raw:ensureDerivative', file, viewMode),
+  // 派生文件的完整解码是否已完成(developed 模式查看器的加载指示依据)。
+  isRawDerivativeFullDone: (derivPath: string): Promise<boolean> =>
+    ipcRenderer.invoke('raw:isFullDone', derivPath),
+  // RAW 查看模式:设置页变更时推送主进程(持久化),及启动时回读。
+  setRawViewMode: (mode: 'camera' | 'developed'): Promise<void> => ipcRenderer.invoke('raw:setViewMode', mode),
+  getRawViewMode: (): Promise<'camera' | 'developed'> => ipcRenderer.invoke('raw:getViewMode'),
+  // 查询派生文件属于哪个查看模式的缓存(渲染端过滤热替换事件用)。
+  getRawDerivativeViewMode: (derivPath: string): Promise<'camera' | 'developed' | null> =>
+    ipcRenderer.invoke('raw:getDerivativeViewMode', derivPath),
   // RAW 完整解码在后台覆盖预览级派生后推送(渲染端热替换当前图)。
   onRawDerivativeUpdated: (callback: (info: { derivPath: string }) => void): (() => void) => {
     const listener = (_event: unknown, info: { derivPath: string }) => callback(info);

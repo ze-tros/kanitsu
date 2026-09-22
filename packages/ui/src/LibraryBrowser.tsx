@@ -59,6 +59,7 @@ import {
   directImagesOf,
   imagesOf,
   importFolder,
+  isRawImage,
   joinRelPath,
   loadOrScan,
   mergeIntoNewPack,
@@ -80,6 +81,7 @@ import {
 } from '../../core/src/index';
 import type { ImportSourcePicker, LibraryStore } from '../../fs-adapter/src/types';
 import type { FileRef } from '../../fs-adapter/src/types';
+import type { DesktopRawViewMode } from '../../fs-adapter/src/electron';
 import { organizeByFolder, type CustomOrganizeRule } from '../../organizer/src/index';
 import { pickCover } from '../../cover-picker/src/index';
 import { BlobImage } from './BlobImage';
@@ -345,6 +347,9 @@ export function LibraryBrowser({
   const [inspectorOpen, setInspectorOpen] = useState(() =>
     localStorage.getItem('kanitsu-inspector-open') === '1',
   );
+  const [rawViewMode, setRawViewMode] = useState<DesktopRawViewMode>(() =>
+    localStorage.getItem('kanitsu-raw-view-mode') === 'camera' ? 'camera' : 'developed',
+  );
   const [sortMode, setSortMode] = useState<SortMode>('name');
   const [showNames, setShowNames] = useState(true);
   const [selectedImageIds, setSelectedImageIds] = useState<ReadonlySet<string>>(new Set());
@@ -439,6 +444,45 @@ export function LibraryBrowser({
       // Ignore storage errors.
     }
   }, [inspectorOpen, viewMode]);
+
+  // RAW 查看模式:localStorage 镜像供 fs-adapter 同步读取(getViewerUrl /
+  // 热替换事件过滤);主进程 settings.json 是持久事实源,仅 Electron 桥存在时推送。
+  useEffect(() => {
+    try {
+      localStorage.setItem('kanitsu-raw-view-mode', rawViewMode);
+    } catch {
+      // Ignore storage errors.
+    }
+    void window.kanitsuDesktop?.setRawViewMode?.(rawViewMode)?.catch?.(() => undefined);
+  }, [rawViewMode]);
+
+  // 用主进程持久值校准一次:localStorage 被清理而 settings.json 仍在时,
+  // 避免渲染端与解码侧模式脱节(否则界面显示的选项与实际观感不一致)。
+  useEffect(() => {
+    let cancelled = false;
+    void window.kanitsuDesktop
+      ?.getRawViewMode?.()
+      .then((mode) => {
+        if (!cancelled && (mode === 'camera' || mode === 'developed')) setRawViewMode(mode);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // RAW 观感切换(设置页与查看器工具栏共用):同步写 localStorage 镜像并推送
+  // 主进程。不能只靠上面的持久化 effect——React 子组件(Viewer 取 URL)的
+  // effect 先于父组件运行,同步落盘才能让切换后的首次 getViewerUrl 读到新模式。
+  const handleRawViewModeChange = useCallback((mode: DesktopRawViewMode) => {
+    setRawViewMode(mode);
+    try {
+      localStorage.setItem('kanitsu-raw-view-mode', mode);
+    } catch {
+      // Ignore storage errors.
+    }
+    void window.kanitsuDesktop?.setRawViewMode?.(mode)?.catch?.(() => undefined);
+  }, []);
 
   useEffect(() => {
     const media = window.matchMedia('(prefers-color-scheme: light)');
@@ -1810,6 +1854,8 @@ export function LibraryBrowser({
             accent={accent}
             onThemeChange={setTheme}
             onAccentChange={setAccent}
+            rawViewMode={rawViewMode}
+            onRawViewModeChange={handleRawViewModeChange}
             onLibraryLocationChange={() => void refresh()}
           />
         </div>
@@ -2412,6 +2458,8 @@ export function LibraryBrowser({
             onSwitchSibling={handleViewerSwitchSibling}
             onImageContextMenu={(event, image) => openContextMenu(event, buildImageMenu(image))}
             showFilmstrip={false}
+            rawViewMode={rawViewMode}
+            onRawViewModeChange={handleRawViewModeChange}
           />
           <div className="viewer-filmstrip-overlay">
             <ViewerFilmstrip images={viewerImages} activeIndex={viewerIndex} store={store} onNavigate={setViewerImageId} />
@@ -3044,7 +3092,17 @@ export function prefetchOriginal(url: string, estWidth?: number, estHeight?: num
   }
   const img = new Image();
   img.decoding = 'async';
-  img.onload = () => originalPoolPut(url, img);
+  // onload 只代表字节就绪；必须 decode() 出完整位图再入池，否则池里放的是
+  // 未解码的图，首次显示/缩放仍会现场解码大图，预取就失去意义。
+  img.onload = () => {
+    void img
+      .decode()
+      .then(() => originalPoolPut(url, img))
+      .catch(() => {
+        ORIGINAL_POOL.delete(url);
+        releasePooledUrl(url);
+      });
+  };
   img.onerror = () => {
     ORIGINAL_POOL.delete(url);
     releasePooledUrl(url);
@@ -3239,6 +3297,8 @@ function Viewer({
   onSwitchSibling,
   onImageContextMenu,
   showFilmstrip = true,
+  rawViewMode,
+  onRawViewModeChange,
 }: {
   images: ImageEntry[];
   index: number;
@@ -3248,6 +3308,9 @@ function Viewer({
   onSwitchSibling: (dir: number) => void;
   onImageContextMenu: (event: ReactMouseEvent, image: ImageEntry) => void;
   showFilmstrip?: boolean;
+  /** RAW 观感:工具栏切换按钮与完整解码加载指示仅 RAW 文件渲染。 */
+  rawViewMode: DesktopRawViewMode;
+  onRawViewModeChange: (mode: DesktopRawViewMode) => void;
 }) {
   const image = images[index];
   // displayUrl：当前正在显示的图（只在确已解码完成后换入）；pendingUrl：当前图正在
@@ -3338,8 +3401,45 @@ function Viewer({
     });
   }, [store]);
 
+  const isRaw = isRawImage(image.name);
+
+  // developed 模式下完整解码是否仍在后台进行:显示工具栏加载指示。
+  // 升级事件(rawUpgradeTick 自增)与取到新 URL 都会触发重查,完成后撤下;
+  // camera 模式与 HEIF 恒为 false(无完整解码升级阶段)。
+  const [rawFullPending, setRawFullPending] = useState(false);
+  useEffect(() => {
+    if (!isRaw || rawViewMode !== 'developed') {
+      setRawFullPending(false);
+      return;
+    }
+    let derivPath: string | null = null;
+    try {
+      derivPath = new URL(displayUrl ?? '').searchParams.get('p');
+    } catch {
+      derivPath = null;
+    }
+    const bridge = window.kanitsuDesktop;
+    if (!derivPath || !bridge?.isRawDerivativeFullDone) {
+      setRawFullPending(false);
+      return;
+    }
+    let cancelled = false;
+    void bridge
+      .isRawDerivativeFullDone(derivPath)
+      .then((done) => {
+        if (!cancelled) setRawFullPending(!done);
+      })
+      .catch(() => {
+        if (!cancelled) setRawFullPending(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [displayUrl, isRaw, rawViewMode, rawUpgradeTick]);
+
   // 下一张图：取原始文件 URL，放入后台隐式解码的加载器（不立即换入显示）。
   // rawUpgradeTick:RAW 完整解码后台覆盖预览级派生后自增,重新取 URL 热替换。
+  // rawViewMode:工具栏切换观感后立即按新模式重取当前图。
   useEffect(() => {
     if (!image) return;
     let cancelled = false;
@@ -3367,7 +3467,7 @@ function Viewer({
       }
       setPendingUrl(null);
     };
-  }, [image, store, swapIn, rawUpgradeTick]);
+  }, [image, store, swapIn, rawUpgradeTick, rawViewMode]);
 
   useEffect(() => {
     return () => {
@@ -3420,8 +3520,11 @@ function Viewer({
 
   // 预解码相邻原图（先 ±1、再 ±2，错峰执行）：位图保留在 ORIGINAL_POOL 里，
   // ←/→ 切换时直接复用已解码像素，不再等 Chromium 现场解码大图。
+  // 等当前图换入显示（或确认加载失败）后再启动：打开大图的头几秒正是用户
+  // 开始滚轮缩放的时候，4 张相邻大图的后台解码会和当前图的解码/缩放抢资源。
+  const currentSettled = originalFailed || (!!image && displayImageId === image.id);
   useEffect(() => {
-    if (!images.length) return;
+    if (!images.length || !currentSettled) return;
     let cancelled = false;
     const jobs: (() => void)[] = [];
     for (const offset of [1, -1, 2, -2]) {
@@ -3590,6 +3693,38 @@ function Viewer({
           <button type="button" className="viewer-button viewer-tool-text" aria-label="原始大小" title="原始大小" onClick={percent}>1:1</button>
           <button type="button" className="viewer-button" aria-label="顺时针旋转" title="顺时针旋转" onClick={rotateCW}><ArrowClockwise size={17} /></button>
           <button type="button" className={`viewer-button ${showInfo ? 'is-active' : ''}`} aria-label="图片信息" aria-pressed={showInfo} title="图片信息" onClick={() => setShowInfo((value) => !value)}><Info size={17} /></button>
+          {/* RAW 观感切换:直出=相机内嵌预览(机内创意外观);显影=完整解码
+              (与 Windows 照片等查看器显影后的稳定画面一致)。 */}
+          {isRaw && (
+            <>
+              <span className="viewer-separator" />
+              {rawFullPending && (
+                <span className="viewer-raw-spin" role="status" aria-label="完整解码加载中" title="完整解码加载中…" />
+              )}
+              <div className="viewer-mode-toggle" role="radiogroup" aria-label="RAW 观感">
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={rawViewMode === 'camera'}
+                  className={rawViewMode === 'camera' ? 'is-active' : ''}
+                  title="相机直出：显示相机内嵌预览（机内创意外观）"
+                  onClick={() => onRawViewModeChange('camera')}
+                >
+                  直出
+                </button>
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={rawViewMode === 'developed'}
+                  className={rawViewMode === 'developed' ? 'is-active' : ''}
+                  title="完整解码：应用重新显影，与 Windows 照片等查看器的最终画面一致"
+                  onClick={() => onRawViewModeChange('developed')}
+                >
+                  显影
+                </button>
+              </div>
+            </>
+          )}
         </div>
       </header>
       <div
@@ -3644,7 +3779,16 @@ function Viewer({
             onLoad={(e) => {
               const el = e.currentTarget;
               if (pendingUrlRef.current !== pendingUrl) return;
-               swapIn(image.id, pendingUrl, el.naturalWidth, el.naturalHeight);
+              // 大图 onload 只代表字节到位；按 DESIGN.md 5.3 先 decode() 出完整
+              // 位图再换入覆盖，否则换入后的首次滚轮缩放要现场解码整张大图，
+              // 表现为“首次缩放很卡，之后恢复正常”。
+              void el
+                .decode()
+                .catch(() => undefined)
+                .then(() => {
+                  if (pendingUrlRef.current !== pendingUrl) return;
+                  swapIn(image.id, pendingUrl, el.naturalWidth, el.naturalHeight);
+                });
             }}
             onError={() => {
               if (pendingUrlRef.current !== pendingUrl) return;

@@ -9,7 +9,7 @@ import { pathToFileURL } from 'node:url';
 import archiver from 'archiver';
 import { imageSize } from 'image-size';
 import { logger, readLogTail, setLogLevel } from './logger';
-import { HEIF_IMAGE_EXT, RAW_IMAGE_EXT, isHeifImage, isRawImage, librawDistDir } from './rawDecoder';
+import { HEIF_IMAGE_EXT, RAW_IMAGE_EXT, isHeifImage, isRawImage, librawDistDir, parseRawViewMode, type RawViewMode } from './rawDecoder';
 
 // 应用 bundle 协议：生产构建渲染层以 kanitsu-app:// 加载。file:// 下绝对路径会
 // 404、且 type=module 脚本会被 CORS 拦截（白屏）；自定义 scheme 一步规避，
@@ -133,7 +133,10 @@ interface ClearCacheResult {
 // 位置存在 userData/settings.json（与图库内容分离），选定的目录里写一个标记文件
 // 用于识别「这个目录由 Kanitsu 管理」。之所以要标记：整理/删除只作用于图库内部，
 // 若允许把用户自己的照片目录整体选成图库，那些原片就会被纳入整理与删除范围。
-const SETTINGS_VERSION = 1;
+// v2:rawViewMode 字段加入。v1 文件里的 rawViewMode 只可能来自一个未发布
+// 的中间构建(它把当时的默认值 camera 自动持久化了),因此 v2 起仅在文件
+// 版本 ≥2 时读取该字段,老文件按新默认 developed 处理。
+const SETTINGS_VERSION = 2;
 const LIBRARY_MARKER_FILE = '.kanitsu-library.json';
 /** 图库根目录下由本应用独占的私有目录（缩略图缓存等）。 */
 const LIBRARY_CACHE_DIR = '.kanitsu-cache';
@@ -156,6 +159,8 @@ interface DesktopSettings {
   libraryRoot: string;
   /** 首次运行时的保存位置确认弹窗是否已完成。 */
   libraryLocationConfirmed: boolean;
+  /** RAW 查看模式:'camera'(内嵌预览直出)| 'developed'(完整解码)。 */
+  rawViewMode?: RawViewMode;
 }
 
 /** 图包保存位置信息（供渲染端展示与首次运行引导）。 */
@@ -192,6 +197,7 @@ function loadDesktopSettings(): DesktopSettings {
     const raw = JSON.parse(readFileSync(settingsFilePath(), 'utf8')) as Partial<DesktopSettings>;
     if (typeof raw.libraryRoot === 'string' && raw.libraryRoot) settingsCache.libraryRoot = raw.libraryRoot;
     settingsCache.libraryLocationConfirmed = raw.libraryLocationConfirmed === true;
+    if ((raw.version ?? 0) >= 2) settingsCache.rawViewMode = parseRawViewMode(raw.rawViewMode);
   } catch {
     // 文件不存在或损坏：按「未设置」处理，用默认位置。
   }
@@ -1009,22 +1015,44 @@ function generateThumbnailBytesNative(file: DesktopFsEntry, targetSize: number):
 // RAW 原文件无法被 Chromium <img> 解码，查看器改用 ensureRawDerivative 换取
 // 解码后的 JPEG 派生图；派生文件落在 userData/rawcache，由
 // kanitsu-file 协议同样以流式服务（见 registerViewerProtocol 的放行逻辑）。
-// 两段式消除首次查看的等待：无缓存时先做「预览级派生」（内嵌预览提取，
-// 毫秒级，插队）立即返回 URL 供查看器显示；随后排队「完整解码」（秒级）
-// 覆盖同一份文件——完成后 mtime 变化（即 URL 版本号）并推送
-// raw:derivativeUpdated 事件，渲染端热替换当前图。
+// 按查看模式（RawViewMode，设置页「RAW 显示」）决定「显示哪份派生」，两份
+// 缓存互不相通：
+// - camera：内嵌预览直出（机内渲染结果，机身创意外观烧录在画面里）。
+// - developed（默认）：先预览级派生消除黑屏，随后后台排队「完整解码」（秒级）
+//   覆盖同一份文件——完成后 mtime 变化（即 URL 版本号）并推送
+//   raw:derivativeUpdated 事件，渲染端热替换当前图。完整解码成功后写
+//   .full 标记文件：缓存命中时据此判断是否需要补跑被中断的完整解码。
+//   Windows 照片等系统查看器也是「先内嵌预览、后显影」的流程，其稳定
+//   画面同为 LibRaw 系显影，与 developed 一致。
+// 不论查看模式，完整解码始终在后台执行（另一模式的派生缓存同步补齐，
+// 切换观感即刻可看）；显示层只跟随模式选择。
+// HEIF 无机内渲染替代（内嵌即完整解码的产物），固定走 developed 路径。
+// 派生缓存键含模式，切换设置不会命中另一模式的旧派生。
 // 单 worker 串行：全解码秒级且内存大（45MP ≈ 135MB RGB），并发只会挤爆内存。
 const RAW_DERIVATIVE_TIMEOUT_MS = 60000;
 const RAW_PREVIEW_TIMEOUT_MS = 20000;
 const RAW_DISK_MAX_FILES = 4096;
 const RAW_DISK_MAX_BYTES = 2 * 1024 * 1024 * 1024; // 2GB
 const RAW_DERIVATIVE_VERSION = 1;
+/** 完整解码完成标记后缀（developed 模式缓存命中时校验）。 */
+const RAW_FULL_MARKER_SUFFIX = '.full';
+
+/** RAW 查看模式（设置页「RAW 显示」，渲染端经 raw:setViewMode 持久化到
+ * settings.json）。默认 developed：与 Windows 照片等查看器的稳定渲染一致
+ * （同为 LibRaw 系显影）。懒初始化:主进程早期模块加载时 settings.json 未必可读。 */
+let rawViewModeCached: RawViewMode | null = null;
+function currentRawViewMode(): RawViewMode {
+  if (rawViewModeCached === null) {
+    rawViewModeCached = parseRawViewMode(loadDesktopSettings().rawViewMode);
+  }
+  return rawViewModeCached;
+}
 
 function rawDerivativeDir(): string {
   return path.join(app.getPath('userData'), 'rawcache');
 }
 
-async function rawDerivativePathFor(filePath: string): Promise<string> {
+async function rawDerivativePathFor(filePath: string, mode: RawViewMode): Promise<string> {
   // 键取真实文件的 stat,不信任渲染进程传来的 mtime/size(可能过期)。
   let stamp = '0-0';
   try {
@@ -1033,8 +1061,23 @@ async function rawDerivativePathFor(filePath: string): Promise<string> {
   } catch {
     // stat 失败时仍生成一个键,后续生成会自然失败并报错给调用方。
   }
-  const raw = `${filePath}\u0000${stamp}\u0000v${RAW_DERIVATIVE_VERSION}`;
-  return path.join(rawDerivativeDir(), `${createHash('sha1').update(raw).digest('hex')}.jpg`);
+  const raw = `${filePath}\u0000${stamp}\u0000v${RAW_DERIVATIVE_VERSION}\u0000${mode}`;
+  // 模式编码进文件名后缀(哈希反推不出模式),raw:getDerivativeViewMode 据此
+  // 判定派生文件属于哪个查看模式的缓存。
+  return path.join(rawDerivativeDir(), `${createHash('sha1').update(raw).digest('hex')}.${mode}.jpg`);
+}
+
+/** 完整解码完成标记(developed 模式用于区分「预览级缓存」与「完整解码缓存」)。 */
+function rawFullMarkerPath(derivPath: string): string {
+  return derivPath + RAW_FULL_MARKER_SUFFIX;
+}
+
+async function rawFullDone(derivPath: string): Promise<boolean> {
+  try {
+    return (await fs.stat(rawFullMarkerPath(derivPath))).isFile();
+  } catch {
+    return false;
+  }
 }
 
 /** 命中返回缓存版本号(取 mtime 作 URL 版本,完整解码覆盖后自然变化)。 */
@@ -1111,6 +1154,9 @@ function ensureRawDerivativeWorker(): Worker {
         try {
           await fs.mkdir(rawDerivativeDir(), { recursive: true });
           await fs.writeFile(job.derivPath, msg.data!);
+          // 完整解码成功打标记:developed 模式缓存命中时据此免于重跑。
+          // 预览级派生不打(它只是 developed 模式的中间产物)。
+          if (job.mode === 'full') await fs.writeFile(rawFullMarkerPath(job.derivPath), '');
           job.resolve(true);
           if (job.mode === 'full') {
             // 完整解码覆盖预览级派生:通知渲染端热替换正在显示的同文件。
@@ -1178,13 +1224,69 @@ function enqueueRawDerivativeJob(request: Omit<RawDerivativeRequest, 'resolve' |
   });
 }
 
-/** 为 RAW/HEIF 文件确保查看派生图存在,返回其 kanitsu-file URL(两段式,见上)。 */
-function ensureRawDerivative(file: DesktopFsEntry): Promise<string> {
+/** 已排队/进行中的后台完整解码(按派生路径去重,避免同一文件重复解码)。 */
+const rawBackgroundFullInFlight = new Set<string>();
+
+/** developed 模式的后台完整解码:排入派生队列尾(不插队),完成后覆盖同一份
+ * 派生文件并推送 raw:derivativeUpdated 供渲染端热替换。失败不打扰查看
+ * (预览级派生仍可看),下次 ensure 缓存未打标记时会再补。 */
+function enqueueBackgroundFullDerivative(sourcePath: string, derivPath: string): void {
+  if (rawBackgroundFullInFlight.has(derivPath)) return;
+  rawBackgroundFullInFlight.add(derivPath);
+  void enqueueRawDerivativeJob({ sourcePath, derivPath, mode: 'full' })
+    .catch(() => undefined)
+    .finally(() => rawBackgroundFullInFlight.delete(derivPath));
+}
+
+/** 后台补齐「非当前查看模式」的派生缓存(按路径去重):camera→developed 补
+ * 完整解码(秒级,队列尾);developed→camera 补内嵌预览(毫秒级)。无论
+ * 查看模式是什么,完整解码始终执行,只是显不显示由模式决定。 */
+const rawAuxDerivativeInFlight = new Set<string>();
+function enqueueAuxDerivative(sourcePath: string, auxMode: RawViewMode, auxPath: string): void {
+  if (rawAuxDerivativeInFlight.has(auxPath)) return;
+  rawAuxDerivativeInFlight.add(auxPath);
+  void (async () => {
+    if (auxMode === 'developed') {
+      if (!(await rawFullDone(auxPath))) enqueueBackgroundFullDerivative(sourcePath, auxPath);
+      return;
+    }
+    if ((await rawDerivativeHit(auxPath)) !== null) return;
+    await enqueueRawDerivativeJob({ sourcePath, derivPath: auxPath, mode: 'preview' }).catch(() => undefined);
+  })().finally(() => rawAuxDerivativeInFlight.delete(auxPath));
+}
+
+/**
+ * 确保当前查看模式的派生图存在并返回其 kanitsu-file URL。
+ * - camera:直通相机内嵌预览(机内渲染)。
+ * - developed(默认):两段式,先预览级消除黑屏,完整解码后台覆盖升级。
+ * 完整解码在两种模式下都始终执行(camera 模式也在后台为 developed 缓存
+ * 解码,只是不显示、不热替换);模式只决定「显示哪份派生」。
+ * HEIF 无机内渲染替代(内嵌缩略图质量差),固定走 developed 管线。
+ * camera 模式预览失败抛错(无内嵌预览即无法查看);developed 模式自动回退
+ * 完整解码(旧行为)。
+ */
+function ensureRawDerivative(file: DesktopFsEntry, mode: RawViewMode): Promise<string> {
   assertInsideLibrary(file.id);
   return (async () => {
-    const derivPath = await rawDerivativePathFor(file.id);
+    const isHeif = isHeifImage(file.id);
+    const viewMode: RawViewMode = isHeif ? 'developed' : mode;
+    const derivPath = await rawDerivativePathFor(file.id, viewMode);
+    // 完整解码始终执行:后台补齐另一模式的派生缓存,切换观感即刻可看。
+    // (camera 模式补的正是完整解码;developed 模式的完整解码由主流程负责,
+    // 这里补的是直出预览。)排在缓存检查之前,cache 命中/未命中都调度。
+    if (!isHeif) {
+      const auxMode: RawViewMode = viewMode === 'camera' ? 'developed' : 'camera';
+      enqueueAuxDerivative(file.id, auxMode, await rawDerivativePathFor(file.id, auxMode));
+    }
     const cachedVersion = await rawDerivativeHit(derivPath);
-    if (cachedVersion !== null) return rawDerivativeUrl(derivPath, cachedVersion);
+    if (cachedVersion !== null) {
+      // developed 命中的缓存可能是上次完整解码被中断的半成品(仅预览级):
+      // 先返回缓存立即可看,同时补一个后台完整解码(有 .full 标记则免)。
+      if (viewMode === 'developed' && !(await rawFullDone(derivPath))) {
+        enqueueBackgroundFullDerivative(file.id, derivPath);
+      }
+      return rawDerivativeUrl(derivPath, cachedVersion);
+    }
     const pending = rawDerivativePending.get(derivPath);
     if (pending) {
       // 并发请求共享;等待完成后以最新文件状态生成 URL。
@@ -1192,7 +1294,6 @@ function ensureRawDerivative(file: DesktopFsEntry): Promise<string> {
       const version = await rawDerivativeHit(derivPath);
       return rawDerivativeUrl(derivPath, version ?? Date.now());
     }
-    const isHeif = isHeifImage(file.id);
     const promise = (async () => {
       // 1) 预览级派生(插队):多数相机内嵌全尺寸 JPEG,即现即显。
       //    HEIF 无独立内嵌预览可提取(libheif 完整解码本身即大头),跳过直接完整解码。
@@ -1208,6 +1309,11 @@ function ensureRawDerivative(file: DesktopFsEntry): Promise<string> {
     pumpRawDerivativeQueue();
     const ok = await promise;
     if (!ok) throw new Error('RAW 派生图生成失败');
+    // camera 到此即完成;developed 若上一步等待的已是完整解码(预览级失败
+    // 回退,worker 会打 .full 标记),否则补后台完整解码升级。
+    if (viewMode === 'developed' && !(await rawFullDone(derivPath))) {
+      enqueueBackgroundFullDerivative(file.id, derivPath);
+    }
     const version = await rawDerivativeHit(derivPath);
     return rawDerivativeUrl(derivPath, version ?? Date.now());
   })();
@@ -1364,9 +1470,9 @@ function registerIpc(): void {
     // HEIF/HEIC:nativeImage 解不了,复用查看派生管线换 libheif 解码的 JPEG
     // (≤8192,查看器 100% 查看同样走它)。调用方仅用于展示,尺寸上限无碍。
     if (isHeifImage(file.id)) {
-      const derivPath = await rawDerivativePathFor(file.id);
+      const derivPath = await rawDerivativePathFor(file.id, 'developed');
       if ((await rawDerivativeHit(derivPath)) === null) {
-        await ensureRawDerivative(file);
+        await ensureRawDerivative(file, 'developed');
       }
       return await fs.readFile(derivPath);
     }
@@ -1521,10 +1627,43 @@ function registerIpc(): void {
     };
   });
 
-  // RAW 查看派生图:确保完整解码 JPEG 存在并返回其 URL(RAW 无法被
-  // Chromium 直接解码,查看器对 RAW 文件改走此路径,见 ElectronLibraryStore)。
-  ipcMain.handle('raw:ensureDerivative', async (_event, file: DesktopFsEntry): Promise<string> => {
-    return ensureRawDerivative(file);
+  // RAW 查看派生图:按查看模式(camera/developed)确保派生 JPEG 存在并返回其
+  // URL(RAW 无法被 Chromium 直接解码,查看器对 RAW 文件改走此路径,见
+  // ElectronLibraryStore)。模式由渲染端随调用传入(localStorage 镜像,同步
+  // 可读):查看器切换模式后立即重取 URL,若这里读主进程持久值会有 IPC 时序
+  // 竞态;缺省时回退主进程持久值。
+  ipcMain.handle('raw:ensureDerivative', async (_event, file: DesktopFsEntry, mode?: unknown): Promise<string> => {
+    return ensureRawDerivative(file, mode == null ? currentRawViewMode() : parseRawViewMode(mode));
+  });
+
+  // 派生文件的完整解码是否已完成(developed 模式渲染端据此显示/撤下加载指示;
+  // camera 模式恒 false 但渲染端不会查询)。仅接受 rawcache 下的派生路径。
+  ipcMain.handle('raw:isFullDone', async (_event, derivPath: string): Promise<boolean> => {
+    if (path.dirname(derivPath) !== rawDerivativeDir()) return false;
+    return await rawFullDone(derivPath);
+  });
+
+  // RAW 查看模式:渲染端在设置变更时推送(主进程侧持久化到 settings.json,
+  // 重启后生效;LibraryBrowser 另有一份 localStorage 镜像做首帧前的取值)。
+  ipcMain.handle('raw:setViewMode', async (_event, mode: unknown): Promise<void> => {
+    rawViewModeCached = parseRawViewMode(mode);
+    saveDesktopSettings({ rawViewMode: rawViewModeCached });
+  });
+
+  ipcMain.handle('raw:getViewMode', async (): Promise<RawViewMode> => {
+    return currentRawViewMode();
+  });
+
+  // 查看器热替换前核对:派生文件按模式分缓存,只有与当前查看模式匹配的升级
+  // 才应触发 URL 重取(否则 camera 模式会被遗留的 developed 后台任务误触发,
+  // 反之亦然)。派生文件固定在 rawcache 根下,用目录+文件名校验而非图库守卫
+  // (rawcache 在图库外,assertInsideLibrary 不适用)。
+  ipcMain.handle('raw:getDerivativeViewMode', async (_event, derivPath: string): Promise<RawViewMode | null> => {
+    if (path.dirname(derivPath) !== rawDerivativeDir()) return null;
+    const name = path.basename(derivPath);
+    if (name.endsWith('.camera.jpg')) return 'camera';
+    if (name.endsWith('.developed.jpg')) return 'developed';
+    return null;
   });
 
   ipcMain.handle('library:move', async (_event, entry: DesktopFsEntry, toFolder: DesktopFsEntry, newName?: string): Promise<DesktopFsEntry> => {
