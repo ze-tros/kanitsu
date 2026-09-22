@@ -274,12 +274,15 @@ export function LibraryBrowser({
   store,
   index,
   enableRaw,
+  enableHeif,
 }: {
   picker: ImportSourcePicker;
   store: LibraryStore;
   index: PersistentIndex;
   /** 是否收录主流相机 RAW(桌面开启;需配套平台解码管线支持)。 */
   enableRaw?: boolean;
+  /** 是否收录 HEIF/HEIC 容器(桌面/Android 开启;需配套平台解码管线支持)。 */
+  enableHeif?: boolean;
 }) {
   // 首帧同步水合：localStorage 读取是同步的，能在首次渲染前拿到上次会话的
   // 图库结构，侧栏"全部图包"与图包列表不必等 IndexedDB + IPC 的异步加载
@@ -457,16 +460,16 @@ export function LibraryBrowser({
   // Startup: load the cached index (no full re-scan). Fallback scans + persists.
   useEffect(() => {
     void (async () => {
-      applySnapshot(await loadOrScan(store, index, { enableRaw: enableRaw ?? false }));
+      applySnapshot(await loadOrScan(store, index, { enableRaw: enableRaw ?? false, enableHeif: enableHeif ?? false }));
     })();
-  }, [store, index, applySnapshot, enableRaw]);
+  }, [store, index, applySnapshot, enableRaw, enableHeif]);
 
   // Mutation / explicit refresh: re-scan from disk and persist the fresh index.
   const refresh = useCallback(async () => {
-    const next = await rescanLibrary(store, index, { enableRaw: enableRaw ?? false });
+    const next = await rescanLibrary(store, index, { enableRaw: enableRaw ?? false, enableHeif: enableHeif ?? false });
     applySnapshot(next);
     return next;
-  }, [store, index, applySnapshot, enableRaw]);
+  }, [store, index, applySnapshot, enableRaw, enableHeif]);
 
   // 自动刷新：窗口重新获得焦点 / 从最小化恢复时重扫图库，取代侧栏里的手动
   // “刷新图库”按钮（导入、整理等变更操作仍各自触发刷新）。导入/整理进行中

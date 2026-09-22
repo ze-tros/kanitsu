@@ -22,11 +22,13 @@ import org.json.JSONArray;
 
 /** SAF (Storage Access Framework) source tree reader and native importer. */
 public final class SafSource {
-    // 普通图片 + 主流相机 RAW:RAW 原样拷贝入库,解码在 WebView 内完成
-    // (libraw-wasm),原生侧不做任何解码(ThumbnailService 无 RAW 分支)。
+    // 普通图片 + 主流相机 RAW + HEIF/HEIC:RAW 原样拷贝入库,解码在 WebView 内完成
+    // (libraw-wasm);HEIF 原生侧可直接解码(API 28+ ImageDecoder/BitmapFactory 原生
+    // 支持 HEIF,缩略图走 ThumbnailService,全图查看经原生派生服务转 JPEG)。
     private static final Set<String> IMAGE_EXT = new HashSet<>(Arrays.asList(
             "jpg", "jpe", "jpeg", "png", "webp", "avif", "bmp", "gif",
-            "cr2", "cr3", "nef", "nrw", "arw", "dng", "raf", "orf", "rw2", "pef", "srw"));
+            "cr2", "cr3", "nef", "nrw", "arw", "dng", "raf", "orf", "rw2", "pef", "srw",
+            "heic", "heif", "hif"));
 
     private final Context context;
     private Uri treeUri;

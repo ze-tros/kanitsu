@@ -14,7 +14,7 @@ Kanitsu是图包管理和看图应用，主要面向 Windows 与 Android。用�
 - **跨端共享领域逻辑**：扫描、整理、封面与索引放在共享包，平台差异通过适配器隔离。
 - **大库可用**：缩略图、虚拟化、预取和缓存是基础能力，不是后期补丁。
 
-主流相机 RAW(CR2/CR3/NEF/NRW/ARW/DNG/RAF/ORF/RW2/PEF/SRW)在桌面与 Android 端支持:缩略图取相机内嵌预览,查看器做完整解码(见 5.4)。HEIC、TIFF 和在线同步暂不支持。未来同步能力必须通过独立 provider 接入,不能侵入本地库核心流程。
+主流相机 RAW(CR2/CR3/NEF/NRW/ARW/DNG/RAF/ORF/RW2/PEF/SRW)在桌面与 Android 端支持:缩略图取相机内嵌预览,查看器做完整解码(见 5.4)。HEIF/HEIC(HEIC/HEIF/HIF)在桌面与 Android 端支持:桌面由 libheif wasm 完整解码,Android 缩略图原生解码、全图查看经原生派生 JPEG(见 5.5)。TIFF 和在线同步暂不支持。未来同步能力必须通过独立 provider 接入,不能侵入本地库核心流程。
 
 ## 2. 架构
 
@@ -104,7 +104,7 @@ ImportSourcePicker + LibraryStore
   → 展示导入报告
 ```
 
-支持格式：JPG、JPEG、PNG、WebP、AVIF、BMP、GIF；桌面与 Android 端额外收录主流相机 RAW（CR2/CR3/NEF/NRW/ARW/DNG/RAF/ORF/RW2/PEF/SRW，原样拷贝，Web 演示端不收录）。
+支持格式：JPG、JPEG、PNG、WebP、AVIF、BMP、GIF；桌面与 Android 端额外收录主流相机 RAW（CR2/CR3/NEF/NRW/ARW/DNG/RAF/ORF/RW2/PEF/SRW，原样拷贝，Web 演示端不收录）与 HEIF/HEIC 容器（HEIC/HEIF/HIF，原样拷贝，Web 演示端不收录）。
 
 要求：
 
@@ -170,11 +170,20 @@ ImportSourcePicker + LibraryStore
 
 ### 5.4 RAW 查看（桌面 / Android）
 
-- 解码库为 libraw-wasm（LibRaw 的 WebAssembly 编译），格式白名单维护在 `packages/core/src/path.ts`（桌面主进程持有一份受 tsc rootDir 限制的副本，两处需同步）。
+- 解码库为 libraw-wasm（LibRaw 的 WebAssembly 编译），格式白名单维护在 `packages/core/src/path.ts`（桌面主进程持有一份受 tsc rootDir 限制的副本，Android 侧 SafSource/ZipExportService 各持有一份 Java 副本，多处需同步）。
 - 混合解码策略：网格缩略图提取相机内嵌全尺寸 JPEG 预览（毫秒级，字节直通）；查看器完整解码（demosaic + 相机白平衡 + sRGB，秒级），先以预览层顶上、当前页后台升级替换。
 - 桌面：缩略图走既有 worker 池（RAW 任务超时放宽至 30s）；查看器派生图由单并发 worker 生成并落盘 `userData/rawcache`（LRU 上限 2GB / 4096 文件），经 `kanitsu-file://` 流式服务。
 - Android：原生侧仅做原样导入/导出，解码在 WebView Worker 内；原文件经本地 HTTP 服务流式 fetch，不通过 base64 桥；缩略图串行解码，查看器当前页完整解码使用 halfSize 控内存。
 - Web 演示端（memory store）不开启 RAW 收录，避免收录后无法显示。
+
+### 5.5 HEIF/HEIC 查看（桌面 / Android）
+
+- 扩展名白名单为 `packages/core/src/path.ts` 的 `HEIF_IMAGE_EXT`（heic/heif/hif），经 `enableHeif` 扫描开关收录（桌面/Android 开启，Web 演示端关闭，开关变化触发索引重扫），与 RAW 的 `enableRaw` 相互独立。
+- 解码库为 libheif（wasm，自带 HEVC 解码器 libde265；sharp 预编译的 libvips 不含 HEVC 解码器，不能用于 HEIC）。解码经内存缓冲区读取，对个别声明长度略超文件尾的相机 HIF（Windows 看图可开）比文件源更宽容。
+- 桌面：缩略图走既有 worker 池内 libheif 完整解码（25MP 约 2~3s，超时放宽至 30s）；查看器与 `readBlob` 复用 RAW 派生管线（`userData/rawcache`，长边 ≤8192，JPEG 90），无独立预览级派生、直接完整解码。
+- Android：缩略图原生可解（ImageDecoder/BitmapFactory 自带 HEIF 支持，ThumbnailService 零改动）；全图查看由 `DerivativeService` 原生解码转 JPEG 落盘（`getExternalFilesDir/cache/derivatives`，长边 ≤6000，LRU 上限 1GB，单路串行），经 `_capacitor_file_` 流式服务，位于图库外不进扫描。
+- 一期限制：HDR（10-bit HLG/BT2020）按 8-bit sRGB 呈现（观感偏灰）；动图/多图 HEIF 取首帧；libheif-js 的高级 API 只解主图，相机内嵌缩略图 item 的加速为后续优化项。
+- Web 演示端（memory store）不开启 HEIF 收录，理由同 RAW。
 
 ## 6. 性能约束
 

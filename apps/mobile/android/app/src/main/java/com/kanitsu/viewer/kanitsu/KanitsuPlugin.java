@@ -42,6 +42,7 @@ public class KanitsuPlugin extends Plugin {
     private SafSource safSource;
     private AlbumLibrary albums;
     private ThumbnailService thumbnails;
+    private DerivativeService derivatives;
     private ZipExportService zipExport;
 
     /** 进行中的可取消任务（导入/导出）：token -> 取消标志。 */
@@ -68,6 +69,7 @@ public class KanitsuPlugin extends Plugin {
         safSource = new SafSource(getContext());
         albums = new AlbumLibrary(getContext());
         thumbnails = new ThumbnailService(getContext());
+        derivatives = new DerivativeService(getContext());
         zipExport = new ZipExportService(getContext());
     }
 
@@ -331,20 +333,26 @@ public class KanitsuPlugin extends Plugin {
     public void getViewerUrl(PluginCall call) {
         AndroidEntry file = AndroidEntry.fromJS(call.getObject("file"));
         JSObject out = new JSObject();
-        // 用 getLocalUrl()（实际服务 origin，如 https://localhost/）而不是 getServerUrl()
-        //（读 config.server.url，默认 null——会导致拼出 "null/_capacitor_file_/..." 的
-        // 非法 URL，全图加载失败、查看器只显示缩略图）。
-        String base = getBridge().getLocalUrl();
-        if (base == null) {
-            base = getBridge().getServerUrl();
-        }
-        if (base == null) {
-            base = "";
-        }
-        // 文件路径含空格 / 方括号 / 括号等特殊字符，需转义（Uri.encode 保留 '/'）。
-        String url = base.replaceAll("/+$", "") + Bridge.CAPACITOR_FILE_START + Uri.encode(file.id, "/");
-        out.put("url", url);
+        out.put("url", servedUrlFor(file.id));
         call.resolve(out);
+    }
+
+    /** HEIF/HEIC 全图查看:WebView 解不了 HEVC,原生解码为 JPEG 落盘缓存
+     *  (userData 外的 derivatives 目录,不进图库扫描),返回派生图 URL。
+     *  二次打开命中磁盘缓存即时返回;首访等待原生解码(秒级)。 */
+    @PluginMethod
+    public void ensureViewerDerivative(PluginCall call) {
+        AndroidEntry file = AndroidEntry.fromJS(call.getObject("file"));
+        executor.execute(() -> {
+            try {
+                File deriv = derivatives.getOrCreate(albums.fileForId(file.id));
+                JSObject out = new JSObject();
+                out.put("url", servedUrlFor(deriv.getAbsolutePath()));
+                call.resolve(out);
+            } catch (Exception e) {
+                call.reject(e.getMessage(), e);
+            }
+        });
     }
 
     // ------------------------------------------------------------------
@@ -421,6 +429,7 @@ public class KanitsuPlugin extends Plugin {
     @PluginMethod
     public void clearCaches(PluginCall call) {
         thumbnails.clear();
+        derivatives.clear();
         call.resolve();
     }
 
@@ -459,6 +468,22 @@ public class KanitsuPlugin extends Plugin {
     // ------------------------------------------------------------------
     // Helpers
     // ------------------------------------------------------------------
+
+    /** 把库内(或派生缓存)绝对路径拼成 _capacitor_file_ 流式 URL。
+     *  用 getLocalUrl()（实际服务 origin，如 https://localhost/）而不是 getServerUrl()
+     *（读 config.server.url，默认 null——会导致拼出 "null/_capacitor_file_/..." 的
+     * 非法 URL，全图加载失败、查看器只显示缩略图）。 */
+    private String servedUrlFor(String absPath) {
+        String base = getBridge().getLocalUrl();
+        if (base == null) {
+            base = getBridge().getServerUrl();
+        }
+        if (base == null) {
+            base = "";
+        }
+        // 文件路径含空格 / 方括号 / 括号等特殊字符，需转义（Uri.encode 保留 '/'）。
+        return base.replaceAll("/+$", "") + Bridge.CAPACITOR_FILE_START + Uri.encode(absPath, "/");
+    }
 
     private ProgressEmitter importEmitter() {
         final long[] lastEmitAt = { 0L };

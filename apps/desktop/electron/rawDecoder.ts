@@ -18,6 +18,10 @@ export const RAW_IMAGE_EXT = new Set([
   'cr2', 'cr3', 'nef', 'nrw', 'arw', 'dng', 'raf', 'orf', 'rw2', 'pef', 'srw',
 ]);
 
+/** HEIF/HEIC 容器扩展名(与 core/path.ts 的 HEIF_IMAGE_EXT 手工同步,原因同上;
+ * 解码走 heifDecoder.ts 的 libheif wasm,与 libraw 管线分开)。 */
+export const HEIF_IMAGE_EXT = new Set(['heic', 'heif', 'hif']);
+
 export function extOf(name: string): string {
   const idx = name.lastIndexOf('.');
   return idx < 0 ? '' : name.slice(idx + 1).toLowerCase();
@@ -25,6 +29,10 @@ export function extOf(name: string): string {
 
 export function isRawImage(name: string): boolean {
   return RAW_IMAGE_EXT.has(extOf(name));
+}
+
+export function isHeifImage(name: string): boolean {
+  return HEIF_IMAGE_EXT.has(extOf(name));
 }
 
 export interface RawDecodeOptions {

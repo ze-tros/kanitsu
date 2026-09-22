@@ -94,10 +94,13 @@ ACTION_OPEN_DOCUMENT_TREE
 - 渲染端限制全局并发和预取规模；原生 `priority` 参数目前为后续优先队列预留。
 - 设置页可查看队列、磁盘文件数和容量，并清理缓存。
 - RAW 文件（CR2/CR3/NEF/NRW/ARW/DNG/RAF/ORF/RW2/PEF/SRW）不进 `ThumbnailService`（平台解码器不支持）：`AndroidLibraryStore.readThumbnail` 检出 RAW 后在 WebView Worker 内用 libraw-wasm 提取相机内嵌预览（无预览时 halfSize 完整解码兜底）。原文件通过 `getViewerUrl` 的本地 HTTP 服务流式 fetch，不占用 base64 字节桥；解码任务渲染端串行执行。
+- HEIF/HEIC（HEIC/HEIF/HIF）缩略图原生可解（API 28+ 的 ImageDecoder/BitmapFactory 自带 HEIF 支持），走 `ThumbnailService` 正常管线，零特殊分支。
 
 ## 7. 原图查看器
 
 `getViewerUrl` 使用 Capacitor 本地服务的实际 origin 与 `_capacitor_file_` 路径生成 URL，并对文件路径进行编码。原图由 WebView `<img>` 直接读取，不经 JS bridge 复制。
+
+HEIF/HEIC 原图 WebView 解不了（Chromium 无 HEVC 软解）：`getViewerUrl` 检出 HEIF 后改走 `ensureViewerDerivative`，由新增的 `DerivativeService` 原生解码（ImageDecoder 优先，自动应用容器/EXIF 方向；BitmapFactory 回退路径补 EXIF 旋转）转 JPEG 落盘缓存（`getExternalFilesDir/cache/derivatives`，长边 ≤6000，LRU 上限 1GB，单路串行防 OOM），再把派生 JPEG 的 `_capacitor_file_` URL 给渲染端。缓存目录在图库外，不进扫描；设置页「清理缓存」同时清空。
 
 移动查看器的加载约束：
 

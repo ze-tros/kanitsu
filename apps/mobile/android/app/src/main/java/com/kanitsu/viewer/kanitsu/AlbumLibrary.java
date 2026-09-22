@@ -134,6 +134,11 @@ public final class AlbumLibrary {
         if (raw != null) {
             return raw;
         }
+        // HEIF/HEIC:老设备的 MimeTypeMap 可能返回 null,显式映射兜底。
+        String heif = HEIF_MIME.get(extOf(f.getName()));
+        if (heif != null) {
+            return heif;
+        }
         String mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(extOf(f.getName()));
         return mime != null ? mime : "application/octet-stream";
     }
@@ -151,6 +156,13 @@ public final class AlbumLibrary {
         RAW_MIME.put("rw2", "image/x-panasonic-rw2");
         RAW_MIME.put("pef", "image/x-pentax-pef");
         RAW_MIME.put("srw", "image/x-samsung-srw");
+    }
+
+    private static final java.util.Map<String, String> HEIF_MIME = new java.util.HashMap<>();
+    static {
+        HEIF_MIME.put("heic", "image/heic");
+        HEIF_MIME.put("heif", "image/heif");
+        HEIF_MIME.put("hif", "image/heif");
     }
 
     public AndroidEntry move(File from, File toDir, String newName) throws IOException {

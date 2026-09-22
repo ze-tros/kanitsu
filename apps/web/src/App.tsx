@@ -92,13 +92,13 @@ export default function App() {
         </div>
       );
     }
-    return <MobileApp picker={adapters.picker} store={adapters.store} index={index} enableRaw />;
+    return <MobileApp picker={adapters.picker} store={adapters.store} index={index} enableRaw enableHeif />;
   }
 
   if (mobilePreview) {
     return <MobileApp picker={adapters.picker} store={adapters.store} index={index} />;
   }
 
-  // 桌面(Electron)开启 RAW 收录;纯 web 演示(memory store)无解码管线,保持关闭。
-  return <LibraryBrowser picker={adapters.picker} store={adapters.store} index={index} enableRaw={platform === 'electron'} />;
+  // 桌面(Electron)开启 RAW 与 HEIF 收录;纯 web 演示(memory store)无解码管线,保持关闭。
+  return <LibraryBrowser picker={adapters.picker} store={adapters.store} index={index} enableRaw={platform === 'electron'} enableHeif={platform === 'electron'} />;
 }

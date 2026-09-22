@@ -78,6 +78,8 @@ export interface LibrarySnapshot {
   fingerprint?: string;
   /** 本次扫描是否收录 RAW(见 scanLibrary 的 enableRaw 选项);缓存命中校验用。 */
   rawScan?: boolean;
+  /** 本次扫描是否收录 HEIF/HEIC(见 scanLibrary 的 enableHeif 选项);缓存命中校验用。 */
+  heifScan?: boolean;
 }
 
 export interface SyncProvider {

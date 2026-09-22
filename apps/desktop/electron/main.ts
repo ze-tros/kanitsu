@@ -768,13 +768,14 @@ async function dropLegacyThumbCache(): Promise<void> {
 //   0 可见 > 1 滚动方向预取 > 2 当前目录 > 3 子文件夹/封面 > 4 全库预热/无关，
 // 高优先级永远先取，保证“屏幕里看到的”永远优先于后台预热；滚动方向预取只
 // 落后可见请求一档，快速滚动时下一屏缩略图能抢在整目录预热洪峰前面生成。
-// sharp 直解格式 + RAW(libraw 内嵌预览提取,毫秒级;无预览时回退完整解码,
-// 用单独放宽的超时,见 pumpThumbnailQueue)。GIF 也走 worker 但走专属分支。
-const THUMB_WORKER_FORMATS = new Set(['jpg', 'jpe', 'jpeg', 'png', 'webp', 'avif', 'bmp', ...RAW_IMAGE_EXT]);
+// sharp 直解格式 + RAW(libraw 内嵌预览提取,毫秒级;无预览时回退完整解码)
+// + HEIF(libheif wasm 完整解码,秒级,同样放宽超时)。GIF 也走 worker 但走专属分支。
+const THUMB_WORKER_FORMATS = new Set(['jpg', 'jpe', 'jpeg', 'png', 'webp', 'avif', 'bmp', ...RAW_IMAGE_EXT, ...HEIF_IMAGE_EXT]);
 const THUMB_WORKER_COUNT = 4;
 const THUMB_JOB_TIMEOUT_MS = 8000;
-/** RAW 任务超时:内嵌预览提取远低于此值;无预览回退完整解码时,高像素机身
- *  可能需要数秒(45MP 约 2~5s),放宽到 30s,超时仍杀 worker 释放槽位。 */
+/** RAW/HEIF 任务超时:RAW 内嵌预览提取远低于此值,无预览回退完整解码时高像素
+ *  机身可能需要数秒(45MP 约 2~5s);HEIF 为 wasm 完整解码(25MP 约 2~3s,
+ *  48MP 更久)。放宽到 30s,超时仍杀 worker 释放槽位。 */
 const THUMB_RAW_JOB_TIMEOUT_MS = 30000;
 const THUMB_PRIORITIES = 5;
 
@@ -833,7 +834,7 @@ function pumpThumbnailQueue(): void {
     if (!request) return;
     const requestId = ++thumbnailRequestSeq;
     busyWorkers.add(worker);
-    const isRawJob = isRawImage(request.file.id);
+    const isRawJob = isRawImage(request.file.id) || isHeifImage(request.file.id);
     const timer = setTimeout(() => {
       const job = inFlightJobs.get(requestId);
       if (!job) return;
@@ -1142,7 +1143,7 @@ function enqueueRawDerivativeJob(request: Omit<RawDerivativeRequest, 'resolve' |
   });
 }
 
-/** 为 RAW 文件确保查看派生图存在,返回其 kanitsu-file URL(两段式,见上)。 */
+/** 为 RAW/HEIF 文件确保查看派生图存在,返回其 kanitsu-file URL(两段式,见上)。 */
 function ensureRawDerivative(file: DesktopFsEntry): Promise<string> {
   assertInsideLibrary(file.id);
   return (async () => {
@@ -1156,10 +1157,14 @@ function ensureRawDerivative(file: DesktopFsEntry): Promise<string> {
       const version = await rawDerivativeHit(derivPath);
       return rawDerivativeUrl(derivPath, version ?? Date.now());
     }
+    const isHeif = isHeifImage(file.id);
     const promise = (async () => {
       // 1) 预览级派生(插队):多数相机内嵌全尺寸 JPEG,即现即显。
-      const previewOk = await enqueueRawDerivativeJob({ sourcePath: file.id, derivPath, mode: 'preview' }).catch(() => false);
-      if (previewOk) return true;
+      //    HEIF 无独立内嵌预览可提取(libheif 完整解码本身即大头),跳过直接完整解码。
+      if (!isHeif) {
+        const previewOk = await enqueueRawDerivativeJob({ sourcePath: file.id, derivPath, mode: 'preview' }).catch(() => false);
+        if (previewOk) return true;
+      }
       // 2) 无内嵌预览:回退完整解码(原行为,等待完成)。
       return await enqueueRawDerivativeJob({ sourcePath: file.id, derivPath, mode: 'full' });
     })();
@@ -1320,6 +1325,15 @@ function registerIpc(): void {
     // Keep GIF animation by returning the original file; GIFs are usually small.
     if (ext === '.gif') {
       return await fs.readFile(file.id);
+    }
+    // HEIF/HEIC:nativeImage 解不了,复用查看派生管线换 libheif 解码的 JPEG
+    // (≤8192,查看器 100% 查看同样走它)。调用方仅用于展示,尺寸上限无碍。
+    if (isHeifImage(file.id)) {
+      const derivPath = await rawDerivativePathFor(file.id);
+      if ((await rawDerivativeHit(derivPath)) === null) {
+        await ensureRawDerivative(file);
+      }
+      return await fs.readFile(derivPath);
     }
     // For full-size viewing, decode natively and return a capped preview.
     // This avoids allocating a giant JS Buffer for very large photos.

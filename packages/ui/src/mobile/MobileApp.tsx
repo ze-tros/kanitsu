@@ -815,12 +815,15 @@ export function MobileApp({
   store,
   index,
   enableRaw,
+  enableHeif,
 }: {
   picker: ImportSourcePicker;
   store: LibraryStore;
   index: PersistentIndex;
   /** 是否收录主流相机 RAW(Android 开启;解码在 WebView 内完成)。 */
   enableRaw?: boolean;
+  /** 是否收录 HEIF/HEIC 容器(Android 开启;缩略图/查看由原生解码)。 */
+  enableHeif?: boolean;
 }) {
   useEffect(() => startThemeModeSync(), []);
 
@@ -934,21 +937,21 @@ export function MobileApp({
   const loadLibrary = useCallback(async () => {
     setLoadError(null);
     try {
-      applySnapshot(await loadOrScan(store, index, { enableRaw: enableRaw ?? false }));
+      applySnapshot(await loadOrScan(store, index, { enableRaw: enableRaw ?? false, enableHeif: enableHeif ?? false }));
     } catch (err) {
       setLoadError(String(err));
     }
-  }, [store, index, applySnapshot, enableRaw]);
+  }, [store, index, applySnapshot, enableRaw, enableHeif]);
 
   useEffect(() => {
     void loadLibrary();
   }, [loadLibrary]);
 
   const refresh = useCallback(async () => {
-    const next = await rescanLibrary(store, index, { enableRaw: enableRaw ?? false });
+    const next = await rescanLibrary(store, index, { enableRaw: enableRaw ?? false, enableHeif: enableHeif ?? false });
     applySnapshot(next);
     return next;
-  }, [store, index, applySnapshot, enableRaw]);
+  }, [store, index, applySnapshot, enableRaw, enableHeif]);
 
   // toast 自动消失
   useEffect(() => {

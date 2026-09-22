@@ -112,3 +112,65 @@ describe('RAW 扫描门控(enableRaw)', () => {
     assert.equal(cached?.rawScan, true);
   });
 });
+
+describe('HEIF 扫描门控(enableHeif)', () => {
+  test('默认不收录 HEIF;开启后收录 heic/heif/hif 且大小写不敏感', async () => {
+    const store = await seedStore();
+    const root = await store.ensureLibraryRoot();
+    await store.writeBlob(root, 'IMG_0001.heic', new Blob(['h'], { type: 'image/heic' }));
+    await store.writeBlob(root, 'IMG_0002.HIF', new Blob(['h'], { type: 'image/heif' }));
+    await store.writeBlob(root, 'IMG_0003.heif', new Blob(['h'], { type: 'image/heif' }));
+    await store.writeBlob(root, 'IMG_0004.txt', new Blob(['t'], { type: 'text/plain' }));
+    await store.writeBlob(root, 'noext', new Blob(['n'], { type: 'application/octet-stream' }));
+
+    const plain = await scanLibrary(store);
+    assert.equal(Object.keys(plain.images).length, 1, '未开启时 HEIF 不可见');
+    assert.notEqual(plain.heifScan, true);
+
+    const enabled = await scanLibrary(store, { enableHeif: true });
+    const exts = Object.values(enabled.images).map((img) => img.ext).sort();
+    assert.deepEqual(exts, ['heic', 'heif', 'hif', 'jpg']);
+    assert.equal(enabled.heifScan, true);
+  });
+
+  test('enableHeif 开关变化使缓存索引失效并触发重扫', async () => {
+    const store = await seedStore();
+    const root = await store.ensureLibraryRoot();
+    await store.writeBlob(root, 'IMG_0001.heic', new Blob(['h'], { type: 'image/heic' }));
+
+    const index = createMemoryPersistentIndex();
+    const withoutHeif = await loadOrScan(store, index);
+    assert.equal(Object.keys(withoutHeif.images).length, 1, '默认扫描只有 jpg');
+
+    const withHeif = await loadOrScan(store, index, { enableHeif: true });
+    assert.equal(Object.keys(withHeif.images).length, 2, '开关变化后必须重扫并收录 HEIF');
+
+    const again = await loadOrScan(store, index, { enableHeif: true });
+    assert.deepEqual(again.images, withHeif.images, '开关一致时缓存仍然命中');
+  });
+
+  test('enableHeif 与 enableRaw 相互独立', async () => {
+    const store = await seedStore();
+    const root = await store.ensureLibraryRoot();
+    await store.writeBlob(root, 'IMG_0001.heic', new Blob(['h'], { type: 'image/heic' }));
+    await store.writeBlob(root, 'IMG_0002.CR2', new Blob(['r'], { type: 'image/x-raw' }));
+
+    const rawOnly = await scanLibrary(store, { enableRaw: true });
+    const rawExts = Object.values(rawOnly.images).map((img) => img.ext).sort();
+    assert.deepEqual(rawExts, ['cr2', 'jpg'], '开 RAW 不应带入 HEIF');
+
+    const heifOnly = await scanLibrary(store, { enableHeif: true });
+    const heifExts = Object.values(heifOnly.images).map((img) => img.ext).sort();
+    assert.deepEqual(heifExts, ['heic', 'jpg'], '开 HEIF 不应带入 RAW');
+  });
+
+  test('rescanLibrary 透传 enableHeif', async () => {
+    const store = await seedStore();
+    await store.ensureLibraryRoot();
+    const index = createMemoryPersistentIndex();
+    const snapshot = await rescanLibrary(store, index, { enableHeif: true });
+    assert.equal(snapshot.heifScan, true);
+    const cached = await index.load();
+    assert.equal(cached?.heifScan, true);
+  });
+});

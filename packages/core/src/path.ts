@@ -76,3 +76,19 @@ export const RAW_IMAGE_EXT = new Set([
 export function isRawImage(name: string): boolean {
   return RAW_IMAGE_EXT.has(extOf(name));
 }
+
+/**
+ * HEIF/HEIC 容器扩展名(小写)。与 RAW 分开维护:解码库完全不同(libraw 解不了
+ * HEIF),且 Chromium/Electron 的 <img> 与 nativeImage 同样解不了 HEVC 编码的
+ * HEIF,因此只有具备专用解码管线的平台(桌面/Android)才会收录;web demo 不开启。
+ * 桌面经 libheif wasm 解码,Android 走原生 ImageDecoder。
+ */
+export const HEIF_IMAGE_EXT = new Set([
+  'heic', // Apple / 手机照片
+  'heif', // 通用 HEIF
+  'hif', // Canon / Sony / Panasonic 相机 HEIF
+]);
+
+export function isHeifImage(name: string): boolean {
+  return HEIF_IMAGE_EXT.has(extOf(name));
+}

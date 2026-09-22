@@ -21,10 +21,11 @@ import org.json.JSONObject;
 
 /** Streams a library folder into a user-chosen SAF zip document. */
 public final class ZipExportService {
-    // 与 SafSource.IMAGE_EXT 保持一致:普通图片 + 主流相机 RAW(原样打包)。
+    // 与 SafSource.IMAGE_EXT 保持一致:普通图片 + 主流相机 RAW + HEIF/HEIC(原样打包)。
     private static final Set<String> IMAGE_EXT = new HashSet<>(Arrays.asList(
             "jpg", "jpe", "jpeg", "png", "webp", "avif", "bmp", "gif",
-            "cr2", "cr3", "nef", "nrw", "arw", "dng", "raf", "orf", "rw2", "pef", "srw"));
+            "cr2", "cr3", "nef", "nrw", "arw", "dng", "raf", "orf", "rw2", "pef", "srw",
+            "heic", "heif", "hif"));
 
     private final Context context;
 

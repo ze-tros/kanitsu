@@ -8,7 +8,7 @@ import type {
   NativeImportProgress,
   ZipExportResult,
 } from './types';
-import { isRawImage } from '../../core/src/path';
+import { isHeifImage, isRawImage } from '../../core/src/path';
 import { decodeRawThumbnailJpeg } from '../../raw-decoder/src/index';
 
 /** Capacitor native payload for a SAF/document or app-file entry. */
@@ -74,6 +74,7 @@ interface KanitsuPluginNative {
   removeLibraryEntry(opts: { entry: AndroidFsEntry }): Promise<void>;
   getLibraryFingerprint(): Promise<{ fingerprint: string }>;
   getViewerUrl(opts: { file: AndroidFsEntry }): Promise<{ url: string }>;
+  ensureViewerDerivative(opts: { file: AndroidFsEntry }): Promise<{ url: string }>;
   exportZip(opts: { targetRelPath: string; cancelToken?: string }): Promise<AndroidExportResultPayload>;
   cancelTask(opts: { token: string }): Promise<void>;
   getThumbnailStats(): Promise<AndroidThumbnailStats>;
@@ -105,6 +106,7 @@ export interface KanitsuAndroidBridge {
   removeLibraryEntry(entry: AndroidFsEntry): Promise<void>;
   getLibraryFingerprint(): Promise<string>;
   getViewerUrl(file: AndroidFsEntry): Promise<string>;
+  ensureViewerDerivative(file: AndroidFsEntry): Promise<string>;
   exportZip(targetRelPath: string, cancelToken?: string): Promise<AndroidExportResultPayload>;
   cancelTask(token: string): Promise<void>;
   onExportProgress(callback: (p: { done: number; total: number }) => void): () => void;
@@ -238,6 +240,7 @@ function requireBridge(): Promise<KanitsuAndroidBridge> {
         removeLibraryEntry: (entry) => p.removeLibraryEntry({ entry }),
         getLibraryFingerprint: async () => (await p.getLibraryFingerprint()).fingerprint,
         getViewerUrl: async (file) => (await p.getViewerUrl({ file })).url,
+        ensureViewerDerivative: async (file) => (await p.ensureViewerDerivative({ file })).url,
         exportZip: (targetRelPath, cancelToken) => p.exportZip({ targetRelPath, cancelToken }),
         cancelTask: (token) => p.cancelTask({ token }),
         onExportProgress: (callback) => {
@@ -343,6 +346,11 @@ export class AndroidLibraryStore implements LibraryStore {
   }
 
   async getViewerUrl(file: FileRef): Promise<string> {
+    // HEIF/HEIC:WebView(Chromium)解不了 HEVC,让原生解码成 JPEG 派生图
+    // (落盘缓存)再流式给 <img>;缩略图不受影响,原生 ImageDecoder 直接可解。
+    if (isHeifImage(file.name)) {
+      return (await requireBridge()).ensureViewerDerivative(toEntry(file));
+    }
     return (await requireBridge()).getViewerUrl(toEntry(file));
   }
 

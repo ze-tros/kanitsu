@@ -8,7 +8,7 @@ import type {
   NativeImportResult,
   ZipExportResult,
 } from './types';
-import { isRawImage } from '../../core/src/path';
+import { isHeifImage, isRawImage } from '../../core/src/path';
 
 export interface DesktopFsEntry {
   id: string;
@@ -230,11 +230,12 @@ export class ElectronLibraryStore implements LibraryStore {
   }
 
   async getViewerUrl(file: FileRef): Promise<string> {
-    // RAW 无法被 Chromium <img> 解码:改用主进程解码的派生 JPEG
-    // (userData/rawcache,kanitsu-file 协议同样流式服务)。首访立即返回
+    // RAW/HEIF 无法被 Chromium <img> 解码:改用主进程解码的派生 JPEG
+    // (userData/rawcache,kanitsu-file 协议同样流式服务)。RAW 首访立即返回
     // 预览级派生(内嵌预览提取,毫秒级);完整解码后台进行,完成后经
-    // onRawDerivativeUpdated 推送,渲染端热替换。
-    if (isRawImage(file.name)) {
+    // onRawDerivativeUpdated 推送,渲染端热替换。HEIF 无独立内嵌预览,
+    // 直接等待完整解码(秒级,落盘后二次打开即时返回)。
+    if (isRawImage(file.name) || isHeifImage(file.name)) {
       return requireBridge().ensureRawDerivative(toEntry(file));
     }
     // 查看器始终显示原始分辨率原图（保留全部像素，便于 100% 查看）。

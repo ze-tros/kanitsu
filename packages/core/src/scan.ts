@@ -1,7 +1,7 @@
 import type { FolderRef, LibraryStore } from '../../fs-adapter/src/types';
 import type { FolderNode, ImageEntry, LibrarySnapshot } from './types';
 import { folderIdFor, imageIdFor } from './hash';
-import { extOf, isRawImage, isSupportedImage, joinRelPath } from './path';
+import { extOf, isHeifImage, isRawImage, isSupportedImage, joinRelPath } from './path';
 
 export interface ScanOptions {
   /**
@@ -9,10 +9,16 @@ export interface ScanOptions {
    * 只有具备 RAW 解码管线的平台(桌面/Android)应开启;web demo 不开启。
    */
   enableRaw?: boolean;
+  /**
+   * 是否把 HEIF/HEIC 容器(HEIC/HEIF/HIF)计入扫描结果。
+   * 同样只有具备专用解码管线的平台(桌面/Android)应开启;web demo 不开启。
+   */
+  enableHeif?: boolean;
 }
 
 export async function scanLibrary(store: LibraryStore, opts?: ScanOptions): Promise<LibrarySnapshot> {
   const enableRaw = opts?.enableRaw ?? false;
+  const enableHeif = opts?.enableHeif ?? false;
   const root = await store.getLibraryRoot();
   const fingerprint = await store.getLibraryFingerprint();
   const folders: Record<string, FolderNode> = {};
@@ -39,7 +45,7 @@ export async function scanLibrary(store: LibraryStore, opts?: ScanOptions): Prom
         childCount++;
         const childNode = await walk(child, joinRelPath(relPath, child.name), folderNode.id);
         descendantImageCount += childNode.imageCount;
-      } else if (isSupportedImage(child.name) || (enableRaw && isRawImage(child.name))) {
+      } else if (isSupportedImage(child.name) || (enableRaw && isRawImage(child.name)) || (enableHeif && isHeifImage(child.name))) {
         const childRel = joinRelPath(relPath, child.name);
         const image: ImageEntry = {
           id: imageIdFor(childRel),
@@ -66,7 +72,7 @@ export async function scanLibrary(store: LibraryStore, opts?: ScanOptions): Prom
 
   await walk(root, '', null);
   const rootId = folderIdFor('');
-  return { rootId, folders, images, fingerprint, rawScan: enableRaw };
+  return { rootId, folders, images, fingerprint, rawScan: enableRaw, heifScan: enableHeif };
 }
 
 interface SnapshotLookup {
