@@ -3334,6 +3334,10 @@ function Viewer({
   const displayUrlRef = useRef<string | null>(null);
   const pendingUrlRef = useRef<string | null>(null);
   const dragRef = useRef<{ startX: number; startY: number; startPan: { x: number; y: number } } | null>(null);
+  // 触控板一次滚动手势能发上百个 wheel 事件；按帧合并缩放增量，避免每个
+  // 事件都触发一轮 React 渲染 + 大图重绘。rAF 在窗口被遮挡等场景会被节流
+  // 甚至暂停，另挂一个短定时器兜底，保证缩放不会卡在排队状态。
+  const wheelZoomRef = useRef({ factor: 1, rafId: 0, timerId: 0 });
 
   const fileRefFor = (img: ImageEntry) => ({
     id: img.fileRefId ?? img.id,
@@ -3473,6 +3477,12 @@ function Viewer({
     return () => {
       if (pendingUrlRef.current) store.releaseViewerUrl(pendingUrlRef.current);
       if (displayUrlRef.current) store.releaseViewerUrl(displayUrlRef.current);
+      const wheel = wheelZoomRef.current;
+      window.cancelAnimationFrame(wheel.rafId);
+      window.clearTimeout(wheel.timerId);
+      wheel.rafId = 0;
+      wheel.timerId = 0;
+      wheel.factor = 1;
     };
   }, [store]);
 
@@ -3559,7 +3569,7 @@ function Viewer({
     return () => {
       cancelled = true;
     };
-  }, [image?.id, images, index, store]);
+  }, [currentSettled, image?.id, images, index, store]);
 
   const effectiveNatural = natural ?? (image.width && image.height ? { w: image.width, h: image.height } : null);
 
@@ -3593,6 +3603,17 @@ function Viewer({
   const zoomBy = useCallback((factor: number) => {
     setZoom((z) => Math.max(0.5, Math.min(8, z * factor)));
   }, []);
+  // 应用排队中的滚轮缩放增量；rAF 与兜底定时器都可能先到，幂等。
+  const applyWheelZoom = useCallback(() => {
+    const wheel = wheelZoomRef.current;
+    window.cancelAnimationFrame(wheel.rafId);
+    window.clearTimeout(wheel.timerId);
+    wheel.rafId = 0;
+    wheel.timerId = 0;
+    const factor = wheel.factor;
+    wheel.factor = 1;
+    if (factor !== 1) zoomBy(factor);
+  }, [zoomBy]);
   const fit = useCallback(() => setZoom(1), []);
   const percent = useCallback(() => {
     setZoom((z) => (baseFit > 0 ? 1 / baseFit : 1));
@@ -3733,7 +3754,11 @@ function Viewer({
         onContextMenu={(event) => onImageContextMenu(event, image)}
         onWheel={(e) => {
           e.preventDefault();
-          zoomBy(e.deltaY > 0 ? 0.8 : 1.25);
+          const wheel = wheelZoomRef.current;
+          wheel.factor *= e.deltaY > 0 ? 0.8 : 1.25;
+          if (wheel.rafId || wheel.timerId) return;
+          wheel.rafId = window.requestAnimationFrame(() => applyWheelZoom());
+          wheel.timerId = window.setTimeout(() => applyWheelZoom(), 60);
         }}
         onDoubleClick={toggleFit100}
         onMouseDown={(e) => {
