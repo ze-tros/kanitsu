@@ -342,7 +342,9 @@ body {
 }
 
 /* Blurred preview (per-album privacy setting). Scale up slightly so the
-   blur does not reveal a clear frame edge around the image. */
+   blur does not reveal a clear frame edge around the image.
+   兜底路径：正常路径已由 blurPreview.ts 降采样重采样糊化（输出已糊、无
+   filter 光栅化），此高斯模糊仅在降采样失败回落原图时保留。 */
 .blur-preview {
   filter: blur(18px);
   transform: scale(1.06);

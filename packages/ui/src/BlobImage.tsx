@@ -3,8 +3,9 @@ import type { FileRef, LibraryStore } from '../../fs-adapter/src/types';
 import { DEFAULT_THUMBNAIL_SIZE, getThumbnailBlob, peekThumbnailBlob } from './thumbnailCache';
 import { observeVisibility } from './visibleObserver';
 import { acquireObjectUrl, releaseObjectUrl } from './objectUrlPool';
+import { getBlurPreviewBlob, peekBlurPreviewBlob } from './blurPreview';
 
-type LoadedImage = { key: string; url: string; animate: boolean };
+type LoadedImage = { key: string; url: string; animate: boolean; degraded: boolean };
 
 // 虚拟列表会反复挂载同一张图片。记录已经出场过的资源，避免每次滚动回到
 // 同一行时重新触发淡入动画；key 包含 mtime/size，文件更新后会重新播放一次。
@@ -30,8 +31,8 @@ function takeAnimation(key: string): boolean {
   return true;
 }
 
-/** 隐私模糊预览专用极小缩略图：小图放大本身就是重模糊，CSS blur 只需少量
-    半径抹平放大颗粒。生成、解码与内存开销都比全尺寸缩略图低一个量级。 */
+/** 隐私模糊预览专用极小缩略图：展示前经 blurPreview.ts 降采样重采样糊化，
+    小尺寸让生成、解码与内存开销都比全尺寸缩略图低一个量级。 */
 export const BLUR_THUMBNAIL_SIZE = 48;
 
 export function BlobImage({
@@ -56,6 +57,19 @@ export function BlobImage({
   // 模糊预览走极小缩略图（见 BLUR_THUMBNAIL_SIZE）：显示效果由放大 + 少量
   // CSS blur 完成，隐私模式下批量滚动的解码/栅格化成本大幅下降。
   const thumbSize = blur && thumbnail ? Math.min(thumbnailSize, BLUR_THUMBNAIL_SIZE) : thumbnailSize;
+  // 极小图与普通尺寸是两个缓存键：启用隐私预览后若只按 48px 键查缓存，之前
+  // 按普通尺寸加载/预取过的图片会全部未命中、整屏重新生成（“隐私模式下大量
+  // 重新加载”）。模糊展示对分辨率不敏感，未命中极小图时回退复用普通尺寸的
+  // 缓存条目即可直接出图；冷条目仍生成 48px 保留解码/内存优化。
+  const fallbackThumbSize = thumbSize !== thumbnailSize ? thumbnailSize : null;
+  const peekCachedThumb = (): Blob | null =>
+    thumbnail
+      ? peekThumbnailBlob(fileRef, thumbSize) ??
+        (fallbackThumbSize !== null ? peekThumbnailBlob(fileRef, fallbackThumbSize) : null)
+      : null;
+  // 入场动画按文件身份（不含缩略图尺寸变体）记账：切换隐私预览会让同一文件
+  // 在 48px/普通键之间切换，若按尺寸变体记账会让整屏重播淡入。
+  const animationKey = `${fileRef.id}::${fileRef.mtime ?? ''}::${fileRef.size ?? ''}`;
   const resourceKey = `${fileRef.id}\u0000${fileRef.mtime ?? ''}\u0000${fileRef.size ?? ''}\u0000${thumbnail ? `thumb-${thumbSize}` : 'full'}`;
   const [loaded, setLoaded] = useState<LoadedImage | null>(null);
   const [failedKey, setFailedKey] = useState<string | null>(null);
@@ -63,7 +77,7 @@ export function BlobImage({
     if (!lazy) return true;
     // 懒加载只应延迟冷缓存请求；已经生成好的缩略图可以直接进入加载流程，
     // 避免虚拟列表滚回时还要等待 IntersectionObserver 再闪一遍占位。
-    return thumbnail && peekThumbnailBlob(fileRef, thumbSize) !== null;
+    return peekCachedThumb() !== null;
   });
   const containerRef = useRef<HTMLDivElement>(null);
   const url = loaded?.key === resourceKey ? loaded.url : null;
@@ -92,36 +106,55 @@ export function BlobImage({
     setFailedKey((current) => (current === resourceKey ? null : current));
     // 缩略图走内存缓存：同一文件切走再切回时直接复用已生成的 Blob，
     // 不再触发 IPC / 磁盘解码 / 重新编码（见 thumbnailCache.ts）。
-    const cached = thumbnail ? peekThumbnailBlob(fileRef, thumbSize) : null;
-    if (cached) {
-      const next = acquireObjectUrl(cached);
+    const commit = (blob: Blob, degraded: boolean) => {
+      if (cancelled) return;
+      const next = acquireObjectUrl(blob);
       ownedUrl = next;
-      setLoaded({ key: resourceKey, url: next, animate: takeAnimation(resourceKey) });
-      return () => releaseObjectUrl(next);
+      setLoaded({ key: resourceKey, url: next, degraded, animate: takeAnimation(animationKey) });
+    };
+    // 模糊隐私：源 Blob 先经降采样重采样模糊（见 blurPreview.ts），出图即已
+    // 糊、无 CSS filter 光栅化。降采样结果同步命中时零等待；失败时回落源
+    // Blob 并由 .blur-preview 的 CSS blur 兜底，隐私不降级。
+    const deliver = (source: Blob) => {
+      if (!blur || !thumbnail) {
+        commit(source, false);
+        return;
+      }
+      const preview = peekBlurPreviewBlob(source);
+      if (preview) {
+        commit(preview, preview !== source);
+        return;
+      }
+      getBlurPreviewBlob(source).then((out) => commit(out, out !== source));
+    };
+    const cached = peekCachedThumb();
+    if (cached) {
+      deliver(cached);
+    } else {
+      const load = thumbnail
+        ? getThumbnailBlob(store, fileRef, thumbSize, { shouldCancel: () => cancelled })
+        : Promise.resolve(store.readBlob(fileRef));
+      load
+        .then((blob) => {
+          if (cancelled) return;
+          deliver(blob);
+        })
+        .catch(() => {
+          if (!cancelled) setFailedKey(resourceKey);
+        });
     }
-    const load = thumbnail
-      ? getThumbnailBlob(store, fileRef, thumbSize, { shouldCancel: () => cancelled })
-      : Promise.resolve(store.readBlob(fileRef));
-    load
-      .then((blob) => {
-        if (cancelled) return;
-        const next = acquireObjectUrl(blob);
-        ownedUrl = next;
-        setLoaded({ key: resourceKey, url: next, animate: takeAnimation(resourceKey) });
-      })
-      .catch(() => {
-        if (!cancelled) setFailedKey(resourceKey);
-      });
     return () => {
       cancelled = true;
       if (ownedUrl) releaseObjectUrl(ownedUrl);
     };
-  }, [store, fileRef.id, fileRef.mtime, fileRef.size, resourceKey, shouldLoad, thumbnail, thumbSize]);
+  }, [store, fileRef.id, fileRef.mtime, fileRef.size, resourceKey, shouldLoad, thumbnail, thumbSize, fallbackThumbSize]);
 
   // 缩略图优先显示图像靠上的部分（object-cover 裁剪默认居中，会裁掉主体所在的
   // 上半部）；原图查看不受影响。
   const coverClass = thumbnail ? ' object-top' : '';
-  const imageClass = `${className ?? ''}${blur ? ' blur-preview' : ''}${coverClass}${loaded?.animate ? ' kanitsu-image-in' : ''}`;
+  // 降采样预览已自带糊化（degraded），去掉 CSS blur 及配套的 scale 补边；
+  // 仅降采样失败回落源 Blob 时保留 .blur-preview 的高斯模糊兜底。
+  const imageClass = `${className ?? ''}${blur && !loaded?.degraded ? ' blur-preview' : ''}${coverClass}${loaded?.animate ? ' kanitsu-image-in' : ''}`;
   return (
     <div
       className={`blob-image w-full h-full${url ? ' is-ready' : ''}${failed ? ' failed' : ''}`}
@@ -129,6 +162,9 @@ export function BlobImage({
       aria-label={!url && !failed ? '加载中' : undefined}
     >
       <img src={url ?? undefined} alt={alt ?? fileRef.name} className={imageClass} loading="eager" />
+      {/* 骨架底色层（仅移动端经 CSS 启用，见 styles.css .blob-image-skeleton）：
+          快速滑动时未加载项渲染为内容形状的骨架块，而不是透明底 + 冻结 spinner。 */}
+      <div className="blob-image-skeleton" aria-hidden="true" />
       <div className="blob-image-shimmer" aria-hidden="true" />
       <div className="blob-image-spinner" aria-hidden="true" />
       <span className="blob-image-error text-sm opacity-60">图片读取失败</span>
