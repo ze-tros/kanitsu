@@ -14,6 +14,8 @@
 
 `CI` 只监听 `master` 推送和 pull request，不监听其他分支的推送。需要让长期分支也常驻检查时，在 `ci.yml` 的 `push.branches` 中补上分支名即可。
 
+三个工作流引用的 action 都按 commit SHA 固定，并选用声明 `node24` 运行时的大版本（2026-09 由 v4 升级：checkout v7.0.1、setup-node v7.0.0、setup-java v6.0.1、cache v6.1.0、upload-artifact v7.0.1），避免 GitHub 的 Node 20 运行时弃用。升级大版本前先用 GitHub API 解析确认 SHA 是真实 commit，并核对用到的输入在新版本中仍然存在。`CI` 不产出 artifact —— 它是合并门禁；可下载产物由 `Android Debug APK` 和 `Windows Portable` 提供。
+
 ## 2. CI 门禁内容
 
 `CI` 工作流的步骤与本地命令一一对应：
@@ -45,7 +47,7 @@
 
 两个需要知道的细节：
 
-- Gradle wrapper 的发行源和 Maven 仓库配置在仓库内，指向国内镜像（`mirrors.cloud.tencent.com`、`maven.aliyun.com`），Maven 侧保留 `google()` 与 `mavenCentral()` 回退。Maven 依赖失败时，Gradle 会自动回退到官方源；wrapper 发行包没有回退，如果从 GitHub 网络下载镜像失败，需要把 `gradle/wrapper/gradle-wrapper.properties` 的 `distributionUrl` 改成官方 `services.gradle.org`。
+- Gradle wrapper 的发行源和 Maven 仓库配置在仓库内，指向国内镜像（`mirrors.cloud.tencent.com`、`maven.aliyun.com`），Maven 侧保留 `google()` 与 `mavenCentral()` 回退。Maven 依赖失败时，Gradle 会自动回退到官方源；wrapper 发行包没有回退，但 2026-09-22 实测从 GitHub runner 直接下载成功（gradle 8.5 发行包），无需改动。将来若镜像不可达，再把 `gradle/wrapper/gradle-wrapper.properties` 的 `distributionUrl` 改成官方 `services.gradle.org`。
 - `gradlew` 在 git 中必须是可执行文件（`100755`）。历史上曾以 `100644` 提交，会在 Linux runner 上报 `Permission denied`。工作流中保留了 `chmod +x` 兜底，但根本修法是用 `git update-index --chmod=+x apps/mobile/android/gradlew` 修正文件模式。
 
 Android 工作流当前不在 pull request 上运行，因此不参与合并门禁；需要在 PR 上验证移动端改动时，给 `android-debug.yml` 增加带路径过滤的 `pull_request` 触发即可。
@@ -59,7 +61,7 @@ Android 工作流当前不在 pull request 上运行，因此不参与合并门�
 - [ ] 把 `.github/workflows/` 下的工作流推送到 `master`（`workflow_dispatch` 手动触发要求工作流文件已存在于默认分支）。
 - [ ] 确认 `Settings` → `Actions` → `General` 允许运行工作流（仓库默认允许；若曾被禁用需在此开启）。
 - [ ] 打开 `Actions` 确认 `CI` 在推送后自动运行并通过。
-- [ ] 手动触发一次 `Android Debug APK`，确认镜像可达、APK 可下载。
+- [x] 手动触发一次 `Android Debug APK`（2026-09-22 实测通过：Gradle 镜像可达，APK 产物可下载）。
 - [ ] 可选：在 `Settings` → `Branches` 的分支保护规则中把 `Typecheck, Tests and Web Build` 设为必需检查项（名称来自 `ci.yml` 中 job 的 `name`）。
 - [ ] 可选：确认 `Settings` → `Actions` → `General` 的 `Workflow permissions` 为只读即可，工作流不需要写权限。
 
