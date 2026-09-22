@@ -64,6 +64,17 @@ export function loadThemeMode(): ThemeMode {
   }
 }
 
+/** 从移动设计令牌读取色值（系统栏/meta theme-color 的单一来源：mobile.css 的 --m-app/--m-surface-1）。 */
+function readShellToken(name: string, fallback: string): string {
+  try {
+    const el = document.querySelector('.mobile-studio') ?? document.documentElement;
+    const value = getComputedStyle(el).getPropertyValue(name).trim();
+    return value || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 /** 应用主题：data-theme 方案与桌面端一致；system 时跟随 prefers-color-scheme。 */
 export function applyThemeMode(mode: ThemeMode): void {
   const resolved =
@@ -73,8 +84,15 @@ export function applyThemeMode(mode: ThemeMode): void {
         : 'dark'
       : mode;
   document.documentElement.setAttribute('data-theme', resolved);
-  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', resolved === 'light' ? '#e7e9ed' : '#0e1014');
-  syncAndroidSystemBars(resolved === 'dark');
+  // 与桌面端（LibraryBrowser）同口径：UA 原生控件（滚动条/文本选择/表单）随主题换明暗。
+  document.documentElement.style.colorScheme = resolved;
+  // 状态栏对齐画布（--m-app）、导航栏对齐底部操作区（--m-surface-1）：meta theme-color
+  // 与系统栏色同源下发，消除状态栏与页面底色的色差（fallback 取 mobile.css 令牌值）。
+  const fallback = resolved === 'light' ? { app: '#e9ebee', surface: '#fbfcfd' } : { app: '#111112', surface: '#18181a' };
+  const statusColor = readShellToken('--m-app', fallback.app);
+  const navColor = readShellToken('--m-surface-1', fallback.surface);
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', statusColor);
+  syncAndroidSystemBars(resolved === 'dark', statusColor, navColor);
   try {
     localStorage.setItem(THEME_KEY, mode);
   } catch {
@@ -83,14 +101,15 @@ export function applyThemeMode(mode: ThemeMode): void {
 }
 
 /**
- * 把解析后的主题同步给 Android 系统栏（底色 + 图标明暗）。
- * 桥接未就绪（web/electron）时是空操作；调用失败静默忽略，不影响主题本身。
- * ui 包不依赖 fs-adapter 的全局 Window 声明，这里做类型化读取（同 MobileSettingsScreen）。
+ * 把解析后的主题同步给 Android 系统栏（底色 + 图标明暗）。色值由 JS 从设计令牌算出后
+ * 下发，原生侧不再各自硬编码调色板。桥接未就绪（web/electron）时是空操作；调用失败
+ * 静默忽略，不影响主题本身。ui 包不依赖 fs-adapter 的全局 Window 声明，
+ * 这里做类型化读取（同 MobileSettingsScreen）。
  */
-function syncAndroidSystemBars(dark: boolean): void {
+function syncAndroidSystemBars(dark: boolean, statusColor: string, navColor: string): void {
   try {
     const bridge = (window as unknown as { kanitsuAndroid?: KanitsuAndroidBridge }).kanitsuAndroid;
-    void bridge?.setSystemTheme?.(dark)?.catch(() => {
+    void bridge?.setSystemTheme?.(dark, statusColor, navColor)?.catch(() => {
       // ignore
     });
   } catch {

@@ -1,5 +1,5 @@
-import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
-import { MobileIcon } from './mobileIcons';
+import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { MobileIcon, type MobileIconName } from './mobileIcons';
 import { Z_DIALOG, Z_PROGRESS, Z_SHEET, Z_TOAST } from './zindex';
 
 const FOCUSABLE_SELECTOR = 'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])';
@@ -30,7 +30,7 @@ function trapFocus(event: ReactKeyboardEvent<HTMLElement>, container: HTMLElemen
  */
 export interface SheetAction {
   label: string;
-  icon?: ReactNode;
+  icon?: MobileIconName;
   danger?: boolean;
   disabled?: boolean;
   /** 选中态标记（单选选择器用），渲染为右侧勾选。 */
@@ -155,7 +155,7 @@ export function MobileActionSheet({
             >
               {action.icon && (
                 <span className="m-sheet-action-icon">
-                  {typeof action.icon === 'string' ? <MobileIcon name={action.icon} className="w-5 h-5" /> : action.icon}
+                  <MobileIcon name={action.icon} className="w-5 h-5" />
                 </span>
               )}
               <span className="flex-1 min-w-0 truncate">{action.label}</span>
@@ -309,7 +309,8 @@ export function MobilePromptDialog({
             value={value}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') submit();
+              // isComposing：中文输入法回车上屏候选词时不触发提交。
+              if (e.key === 'Enter' && !e.nativeEvent.isComposing) submit();
               if (e.key === 'Escape') onCancel();
             }}
           />

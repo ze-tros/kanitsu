@@ -3,6 +3,9 @@ import type { JSX, ReactNode } from 'react';
 /**
  * emoji → SVG 图标（替换散落的 emoji，统一 daisyUI 线性风格；各 Android 版本
  * emoji 渲染差异大，部分会显示方框）。未知 emoji 回退为字符本身。
+ *
+ * 语义场景（动作面板等）一律用受控图标名 MobileIconName；emoji 键只服务旧调用点，
+ * 两种变体写法（有/无 U+FE0F）都收录——差一个变体选择符曾让图标静默回退成 emoji 文本。
  */
 
 const EYE = <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" />;
@@ -37,21 +40,56 @@ const HOME = <path d="M3 10.5L12 3l9 7.5V21H3z" />;
 const UPLOAD = <g><path d="M12 15V3" /><path d="M7 8l5-5 5 5" /><path d="M4 21h16" /></g>;
 const USER = <g><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></g>;
 
-/** emoji → SVG 内容（未收录的返回 null，由调用方回退为字符）。 */
+/** 受控图标名：语义入口（动作面板等）一律用这些，杜绝 emoji 键回退问题。 */
+export type MobileIconName =
+  | 'image'
+  | 'eye'
+  | 'eye-off'
+  | 'pin'
+  | 'edit'
+  | 'link'
+  | 'trash'
+  | 'folder'
+  | 'folder-plus'
+  | 'organize'
+  | 'box'
+  | 'refresh';
+
+/** 图标名/旧 emoji 键 → SVG 内容（未收录的返回 undefined，由调用方回退为字符）。 */
 const ICON_PATHS: Record<string, ReactNode> = {
+  // —— 受控语义名 ——
+  image: IMAGE,
+  eye: EYE,
+  'eye-off': EYE_OFF,
+  pin: PIN,
+  edit: EDIT,
+  link: LINK,
+  trash: TRASH,
+  folder: FOLDER,
+  'folder-plus': FOLDER_PLUS,
+  organize: LIST,
+  box: BOX,
+  refresh: REFRESH,
+  // —— 旧调用点的 emoji 键（逐步迁移后删除）——
   '👁': EYE,
+  '👁️': EYE,
   '🕶': EYE_OFF,
+  '🙈': EYE_OFF,
   '📌': PIN,
   '✏️': EDIT,
+  '✏': EDIT,
   '🔗': LINK,
   '🗑': TRASH,
+  '🗑️': TRASH,
   '📂': FOLDER,
   '📁': FOLDER_PLUS,
   '🧹': LIST,
   '📦': BOX,
   '📋': CLIPBOARD,
   '⚙️': SETTINGS,
+  '⚙': SETTINGS,
   '⬇️': DOWNLOAD,
+  '⬇': DOWNLOAD,
   '✅': CHECK,
   '↩️': UNDO,
   '🕐': CLOCK,
@@ -61,16 +99,19 @@ const ICON_PATHS: Record<string, ReactNode> = {
   '🔳': GRID,
   '☰': LIST,
   '🏷️': TAG,
+  '🏷': TAG,
   '🔄': REFRESH,
   '🔍': SEARCH,
   '🖼️': IMAGE,
+  '🖼': IMAGE,
   '🏠': HOME,
   '⬆️': UPLOAD,
+  '⬆': UPLOAD,
   '👤': USER,
 };
 
-/** 渲染一个图标：emoji 命中映射时输出 SVG，否则回退为字符文本。 */
-export function MobileIcon({ name, className = 'w-5 h-5' }: { name: string; className?: string }): JSX.Element {
+/** 渲染一个图标：命中映射（语义名或旧 emoji 键）时输出 SVG，否则回退为字符文本。 */
+export function MobileIcon({ name, className = 'w-5 h-5' }: { name: MobileIconName | string; className?: string }): JSX.Element {
   const content = ICON_PATHS[name];
   if (!content) {
     return <span className={className + ' flex items-center justify-center'}>{name}</span>;

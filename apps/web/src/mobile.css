@@ -25,6 +25,7 @@
   --radius-field: var(--m-radius-control);
   --radius-selector: var(--m-radius-control);
   width: 100%;
+  height: 100vh;
   height: 100dvh;
   min-width: 280px;
   overflow: hidden;
@@ -150,7 +151,6 @@ html[data-theme='light'] .mobile-studio {
 
 .m-context-header {
   border-bottom: 1px solid var(--m-line);
-  backdrop-filter: blur(18px);
 }
 
 .m-context-bar {
@@ -260,6 +260,27 @@ html[data-theme='light'] .mobile-studio {
   background: transparent;
   color: var(--m-faint);
   font-size: 12px;
+}
+
+/* 触控目标补足（≥44px）：视觉尺寸不变，用伪元素把命中区扩到 44px，避免密集
+   工具栏整排放大破坏排版。仅用于不与相邻控件重叠命中的独立小控件；
+   成排控件（排序/视图切换/分段）靠行高 38~44px 兜底。 */
+.m-search-clear,
+.m-mini-icon-button,
+.m-index-state {
+  position: relative;
+}
+
+.m-search-clear::after,
+.m-mini-icon-button::after,
+.m-index-state::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 44px;
+  height: 44px;
+  transform: translate(-50%, -50%);
 }
 
 /* Root library */
@@ -414,6 +435,7 @@ html[data-theme='light'] .mobile-studio {
   gap: 6px;
   padding: 10px 10px 0;
   overflow-x: auto;
+  overscroll-behavior-x: contain;
   scrollbar-width: none;
 }
 
@@ -484,7 +506,7 @@ html[data-theme='light'] .mobile-studio {
 }
 
 .m-section-action {
-  min-height: 32px;
+  min-height: 38px;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -558,7 +580,7 @@ html[data-theme='light'] .mobile-studio {
 }
 
 .m-sort-direction {
-  height: 34px;
+  height: 38px;
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -600,7 +622,7 @@ html[data-theme='light'] .mobile-studio {
 
 .m-sort-picker,
 .m-tool-button {
-  height: 34px;
+  height: 38px;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -620,9 +642,9 @@ html[data-theme='light'] .mobile-studio {
 }
 
 .m-view-switch {
-  height: 34px;
+  height: 38px;
   display: grid;
-  grid-template-columns: 32px 32px;
+  grid-template-columns: 36px 36px;
   flex: none;
   border-left: 1px solid var(--m-line);
   padding-left: 5px;
@@ -751,10 +773,9 @@ html[data-theme='light'] .mobile-studio {
   place-items: center;
   border: 1px solid color-mix(in srgb, var(--m-accent-line) 76%, transparent);
   border-radius: 5px;
-  background: color-mix(in srgb, var(--m-accent-soft) 88%, transparent);
+  background: color-mix(in srgb, var(--m-accent) 22%, var(--m-surface-2));
   color: var(--m-accent-text);
   box-shadow: 0 6px 18px rgb(2 5 11 / 26%);
-  backdrop-filter: blur(10px);
 }
 
 .m-folder-caption {
@@ -904,11 +925,14 @@ html[data-theme='light'] .mobile-studio {
 }
 
 .m-image-card > div:first-child img {
-  transition: transform 420ms var(--m-ease-out), opacity 180ms var(--m-ease-standard);
+  transition: opacity 180ms var(--m-ease-standard);
 }
 
-.m-image-card:active > div:first-child img {
-  transform: scale(1.018);
+/* 按压反馈作用于容器而不是 img：隐私模糊图（.blur-preview）自带 scale(1.06)
+   遮模糊露边，直接改 img 的 transform 会把它覆盖、按下瞬间露出清晰边缘。 */
+.m-image-card > div:first-child,
+.m-folder-cover {
+  transition: transform 420ms var(--m-ease-out);
 }
 
 .m-image-name {
@@ -1600,7 +1624,7 @@ html[data-theme='light'] .mobile-studio {
 
 .m-theme-segment button {
   min-width: 0;
-  min-height: 36px;
+  min-height: 44px;
   border-radius: 4px;
   background: transparent;
   color: var(--m-faint);
@@ -1676,7 +1700,8 @@ html[data-theme='light'] .mobile-studio {
   transform: translateX(16px);
 }
 
-.m-switch:focus-visible {
+/* 特异度需压过 .mobile-studio input:focus-visible 的 outline: 0（(0,2,1)）。 */
+.mobile-studio input.m-switch:focus-visible {
   outline: 2px solid var(--m-accent-text);
   outline-offset: 2px;
 }
@@ -2122,17 +2147,44 @@ html[data-theme='light'] .m-log-panel {
 }
 
 /* 查看器自带深色调色板，但强调色仍继承应用主题：浅色主题下 --m-accent/--m-accent-text
-   会翻成深红，落在 #050608 的深底上几乎没有对比度（激活按钮、加载环都会看不清）。
-   这里把浅色主题下的强调色钉回深色取值。 */
+   会翻成浅色板的深色调，落在 #050608 的深底上几乎没有对比度（激活按钮、加载环都会看不清）。
+   这里按 data-accent 把浅色主题下的查看器强调色钉回深色板取值（与 html[data-accent] 深色
+   矩阵同值），焦点环/光晕随同一矩阵取值，不再无视用户选择钉死 coral。 */
 html[data-theme='light'] .m-viewer-root {
   --m-accent: #ff785e;
   --m-accent-ink: #241411;
   --m-accent-text: #ff9b89;
   --m-accent-soft: rgba(255,120,94,.14);
   --m-accent-line: rgba(255,120,94,.42);
-  /* 焦点环在声明处就已用 var(--m-accent-text) 求值，必须一并钉回深色取值。 */
   --m-focus-ring: #ff9b89;
   --m-focus-halo: rgba(255,120,94,.24);
+}
+html[data-theme='light'][data-accent='cobalt'] .m-viewer-root {
+  --m-accent: #8aa4e8;
+  --m-accent-ink: #10172a;
+  --m-accent-text: #b5c7f5;
+  --m-accent-soft: rgba(138,164,232,.15);
+  --m-accent-line: rgba(138,164,232,.45);
+  --m-focus-ring: #b5c7f5;
+  --m-focus-halo: rgba(138,164,232,.24);
+}
+html[data-theme='light'][data-accent='amber'] .m-viewer-root {
+  --m-accent: #e2ad55;
+  --m-accent-ink: #251803;
+  --m-accent-text: #f0c275;
+  --m-accent-soft: rgba(226,173,85,.15);
+  --m-accent-line: rgba(226,173,85,.45);
+  --m-focus-ring: #f0c275;
+  --m-focus-halo: rgba(226,173,85,.24);
+}
+html[data-theme='light'][data-accent='graphite'] .m-viewer-root {
+  --m-accent: #c2c9d0;
+  --m-accent-ink: #171a1e;
+  --m-accent-text: #d7dce1;
+  --m-accent-soft: rgba(194,201,208,.15);
+  --m-accent-line: rgba(194,201,208,.45);
+  --m-focus-ring: #d7dce1;
+  --m-focus-halo: rgba(194,201,208,.24);
 }
 
 .m-viewer-stage {
@@ -2232,11 +2284,10 @@ html[data-theme='light'] .m-viewer-root {
   overscroll-behavior: contain;
   border: 1px solid rgb(255 255 255 / 13%);
   border-radius: 9px;
-  background: rgb(17 20 25 / 92%);
+  background: #111419;
   color: var(--m-viewer-text);
   padding: 12px;
   box-shadow: 0 24px 70px rgb(0 0 0 / 52%);
-  backdrop-filter: blur(20px);
   animation: m-viewer-info-in 220ms var(--m-ease-out) both;
 }
 
@@ -2308,6 +2359,7 @@ html[data-theme='light'] .m-viewer-root {
   align-items: center;
   gap: 6px;
   overflow-y: hidden;
+  overscroll-behavior: contain;
   padding-top: 4px;
   padding-bottom: 4px;
   scroll-snap-type: x proximity;
@@ -2597,7 +2649,7 @@ html[data-theme='light'] .mobile-studio {
   --m-focus-halo: color-mix(in srgb, var(--m-accent) 18%, transparent);
 }
 .mobile-studio { background-image: radial-gradient(circle at 92% -8%, color-mix(in srgb, var(--m-accent) 8%, transparent), transparent 18rem); }
-.m-context-header { background: color-mix(in srgb, var(--m-app) 92%, transparent); box-shadow: 0 10px 30px rgba(0,0,0,.12); }
+.m-context-header { background: var(--m-app); box-shadow: 0 10px 30px rgba(0,0,0,.12); }
 .m-context-bar { min-height: 62px; padding-inline: 12px; }
 .m-icon-button, .m-viewer-button { border-radius: 10px; }
 .m-search-field { border-color: var(--m-line); border-radius: var(--m-radius-control); background: color-mix(in srgb, var(--m-text) 3.5%, transparent); }
@@ -2612,8 +2664,10 @@ html[data-theme='light'] .mobile-studio {
 /* 浅色画布上纯黑阴影过重（对齐桌面端 rgba(37,43,54,.11) 的观感）。 */
 html[data-theme='light'] .m-context-header { box-shadow: 0 10px 30px rgba(37,43,54,.1); }
 html[data-theme='light'] .m-folder-cover, html[data-theme='light'] .m-image-card > div:first-child { box-shadow: 0 12px 30px rgba(37,43,54,.14); }
-.m-folder-card:active .m-folder-cover img, .m-image-card:active > div:first-child img { transform: scale(.98); }
-.m-bottom-dock { border-top-color: var(--m-line); background: color-mix(in srgb, var(--m-surface-1) 92%, transparent); backdrop-filter: blur(22px); }
+.m-folder-card:active .m-folder-cover, .m-image-card:active > div:first-child { transform: scale(.98); }
+/* 静态底色替代 backdrop-filter（对齐 97fe771 的去全屏 blur 策略：Android WebView
+   弹层/切场动画不再因背景模糊逐帧重栅格化）。 */
+.m-bottom-dock { border-top-color: var(--m-line); background: var(--m-surface-1); }
 .m-dock-button { border-radius: 10px; }
 .m-dock-button.is-active { color: var(--m-accent-text); background: var(--m-accent-soft); }
 /* 底色与文字色由既有的包内视图规则（.m-bottom-dock.is-package .m-dock-button.is-primary）

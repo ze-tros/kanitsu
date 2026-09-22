@@ -90,9 +90,12 @@ const FOLDER_CAPTION_H = 50;
 // 露出空白，同时仍只保留有限的图片 DOM。
 const MOBILE_OVERSCAN_ROWS = Math.max(OVERSCAN_ROWS, 8);
 const MOBILE_SCROLL_PRELOAD_RESUME_MS = 180;
+// 列表视图虚拟化行距：m-image-list-row min-height 68px + gap-0.5（2px）。
+const LIST_ROW_H = 68;
+const LIST_ROW_GAP = 2;
+const LIST_ROW_STEP = LIST_ROW_H + LIST_ROW_GAP;
 
-type OverlayLayer = 'drawer' | 'sheet' | 'viewer' | 'settings' | 'organize' | 'cover' | 'dialog' | 'report' | 'search';
-type StackEntry = { type: 'folder'; folderId: string } | { type: 'overlay'; layer: OverlayLayer };
+import { closeOverlayEntries, reconcilePop, type OverlayLayer, type StackEntry } from './historyStack';
 
 interface SheetModel {
   title?: string;
@@ -100,7 +103,10 @@ interface SheetModel {
   actions: SheetAction[];
 }
 
-type DeleteTarget = { kind: 'image'; image: ImageEntry } | { kind: 'folder'; folder: FolderNode };
+type DeleteTarget =
+  | { kind: 'image'; image: ImageEntry }
+  | { kind: 'folder'; folder: FolderNode }
+  | { kind: 'batch'; count: number };
 
 type PromptState =
   | { kind: 'rename-image'; image: ImageEntry }
@@ -242,16 +248,18 @@ function VirtualGrid<T>({
   getKey: (item: T) => string;
 }) {
   const totalRows = Math.ceil(items.length / cols);
-  if (totalRows === 0 || rowHeight <= 0) return null;
+  // Hooks 必须先于任何 early-return 调用：rowHeight 从 0 翻正时 hook 数量不能变。
   const gs = Math.max(0, scrollTop - sectionTop);
-  const first = Math.max(0, Math.floor(gs / rowHeight) - MOBILE_OVERSCAN_ROWS);
-  const last = Math.min(totalRows, Math.ceil((gs + viewportH) / rowHeight) + MOBILE_OVERSCAN_ROWS);
+  const step = rowHeight > 0 ? rowHeight : 1;
+  const first = Math.max(0, Math.floor(gs / step) - MOBILE_OVERSCAN_ROWS);
+  const last = Math.min(totalRows, Math.ceil((gs + viewportH) / step) + MOBILE_OVERSCAN_ROWS);
   // 可视行号窗口：窗口未变时复用同一数组，避免每次滚动都重建（万级图时减少 GC）。
   const rowIndexes = useMemo(() => {
     const out: number[] = [];
     for (let r = first; r < last; r++) out.push(r);
     return out;
   }, [first, last]);
+  if (totalRows === 0 || rowHeight <= 0) return null;
   return (
     <div style={{ position: 'relative', height: Math.max(1, totalRows * rowHeight - gap) }}>
       {rowIndexes.map((r) => {
@@ -304,7 +312,11 @@ function ImageCard({
   selected?: boolean;
   onToggleSelect?: (id: string) => void;
 }) {
-  const lp = useLongPress(onActions);
+  const lp = useLongPress(() => {
+    // 多选模式下长按=切换选中：弹动作面板会与批量栏抢层级、误触批量删除。
+    if (selectMode) onToggleSelect?.(image.id);
+    else onActions();
+  });
   return (
     <div
       ref={lp.ref}
@@ -324,11 +336,11 @@ function ImageCard({
       onTouchEnd={lp.onTouchEnd}
       onTouchCancel={lp.onTouchCancel}
       onClick={() => {
+        if (lp.wasLongPress()) return;
         if (selectMode) {
           onToggleSelect?.(image.id);
           return;
         }
-        if (lp.wasLongPress()) return;
         onOpen();
       }}
       onContextMenu={(e) => e.preventDefault()}
@@ -388,7 +400,11 @@ function ImageListRow({
   selected?: boolean;
   onToggleSelect?: (id: string) => void;
 }) {
-  const lp = useLongPress(onActions);
+  const lp = useLongPress(() => {
+    // 多选模式下长按=切换选中：弹动作面板会与批量栏抢层级、误触批量删除。
+    if (selectMode) onToggleSelect?.(image.id);
+    else onActions();
+  });
   const meta = [image.width && image.height ? `${image.width}×${image.height}` : '', image.size ? formatBytes(image.size) : '']
     .filter(Boolean)
     .join(' · ');
@@ -411,11 +427,11 @@ function ImageListRow({
       onTouchEnd={lp.onTouchEnd}
       onTouchCancel={lp.onTouchCancel}
       onClick={() => {
+        if (lp.wasLongPress()) return;
         if (selectMode) {
           onToggleSelect?.(image.id);
           return;
         }
-        if (lp.wasLongPress()) return;
         onOpen();
       }}
       onContextMenu={(e) => e.preventDefault()}
@@ -455,6 +471,7 @@ function FolderCard({
   store,
   pinned,
   blurred,
+  selectMode = false,
   onOpen,
   onActions,
 }: {
@@ -463,10 +480,15 @@ function FolderCard({
   store: LibraryStore;
   pinned: boolean;
   blurred: boolean;
+  selectMode?: boolean;
   onOpen: () => void;
   onActions: () => void;
 }) {
-  const lp = useLongPress(onActions);
+  const lp = useLongPress(() => {
+    // 多选模式下文件夹不可操作（选择集只属于图片），长按也不弹动作面板。
+    if (selectMode) return;
+    onActions();
+  });
   return (
     <div
       ref={lp.ref}
@@ -477,7 +499,7 @@ function FolderCard({
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
-          onOpen();
+          if (!selectMode) onOpen();
         }
       }}
       onTouchStart={lp.onTouchStart}
@@ -485,7 +507,8 @@ function FolderCard({
       onTouchEnd={lp.onTouchEnd}
       onTouchCancel={lp.onTouchCancel}
       onClick={() => {
-        if (!lp.wasLongPress()) onOpen();
+        if (selectMode || lp.wasLongPress()) return;
+        onOpen();
       }}
       onContextMenu={(e) => e.preventDefault()}
     >
@@ -546,6 +569,7 @@ function FolderListRow({
   store,
   pinned,
   blurred,
+  selectMode = false,
   onOpen,
   onActions,
 }: {
@@ -554,10 +578,15 @@ function FolderListRow({
   store: LibraryStore;
   pinned: boolean;
   blurred: boolean;
+  selectMode?: boolean;
   onOpen: () => void;
   onActions: () => void;
 }) {
-  const lp = useLongPress(onActions);
+  const lp = useLongPress(() => {
+    // 多选模式下文件夹不可操作（选择集只属于图片），长按也不弹动作面板。
+    if (selectMode) return;
+    onActions();
+  });
   return (
     <div
       ref={lp.ref}
@@ -568,7 +597,7 @@ function FolderListRow({
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
-          onOpen();
+          if (!selectMode) onOpen();
         }
       }}
       onTouchStart={lp.onTouchStart}
@@ -576,7 +605,8 @@ function FolderListRow({
       onTouchEnd={lp.onTouchEnd}
       onTouchCancel={lp.onTouchCancel}
       onClick={() => {
-        if (!lp.wasLongPress()) onOpen();
+        if (selectMode || lp.wasLongPress()) return;
+        onOpen();
       }}
       onContextMenu={(e) => e.preventDefault()}
     >
@@ -836,6 +866,7 @@ export function MobileApp({
 
   // ===== 数据状态 =====
   const [snapshot, setSnapshot] = useState<LibrarySnapshot | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedFolderId, setSelectedFolderId] = useState('');
   const [viewerImageId, setViewerImageId] = useState<string | null>(null);
   const [viewerSessionId, setViewerSessionId] = useState(0);
@@ -888,6 +919,13 @@ export function MobileApp({
   organizePreviewRef.current = organizePreview ?? organizePreviewRef.current;
   const coverFolderRef = useRef(coverPickerFolder);
   coverFolderRef.current = coverPickerFolder ?? coverFolderRef.current;
+  // 对话框/整理结果退场同理：ref 保留最后一份内容（打开另一种对话框时清对方的 ref，避免串内容）。
+  const deleteTargetRef = useRef(deleteTarget);
+  deleteTargetRef.current = deleteTarget ?? deleteTargetRef.current;
+  const promptStateRef = useRef(promptState);
+  promptStateRef.current = promptState ?? promptStateRef.current;
+  const organizeResultRef = useRef(organizeResult);
+  organizeResultRef.current = organizeResult ?? organizeResultRef.current;
 
   // ===== 任务进度 =====
   const [importing, setImporting] = useState(false);
@@ -897,6 +935,10 @@ export function MobileApp({
   const [exporting, setExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState<{ done: number; total: number } | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  // 批量删除/移动的进度（失败计数在完成后随 toast 汇总）。
+  const [batchProgress, setBatchProgress] = useState<{ label: string; done: number; total: number } | null>(null);
+  // 键盘态：输入框聚焦时隐藏底部栏/批量栏，避免被键盘顶到半空悬浮。
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
   // 任务取消句柄：导入/导出用 token（原生 cancelTask），整理用 JS 侧标志。
   const importCancelTokenRef = useRef<string | null>(null);
   const exportCancelTokenRef = useRef<string | null>(null);
@@ -928,16 +970,19 @@ export function MobileApp({
     });
   }, []);
 
-  // ===== 启动加载 =====
-  useEffect(() => {
-    void (async () => {
-      try {
-        applySnapshot(await loadOrScan(store, index));
-      } catch (err) {
-        setToast({ text: `加载失败：${String(err)}`, kind: 'error' });
-      }
-    })();
+  // ===== 启动加载（失败进入错误态并可重试，不再只剩死转圈） =====
+  const loadLibrary = useCallback(async () => {
+    setLoadError(null);
+    try {
+      applySnapshot(await loadOrScan(store, index));
+    } catch (err) {
+      setLoadError(String(err));
+    }
   }, [store, index, applySnapshot]);
+
+  useEffect(() => {
+    void loadLibrary();
+  }, [loadLibrary]);
 
   const refresh = useCallback(async () => {
     const next = await rescanLibrary(store, index);
@@ -951,6 +996,41 @@ export function MobileApp({
     const t = window.setTimeout(() => setToast(null), 3200);
     return () => window.clearTimeout(t);
   }, [toast]);
+
+  // 键盘态检测：输入框聚焦 + 视口被键盘压缩（adjustResize 压布局视口、
+  // adjustPan/Nothing 压可视层）才置真。旋转屏幕时可能短暂误判，可接受。
+  useEffect(() => {
+    const vv = window.visualViewport;
+    let maxInnerHeight = window.innerHeight;
+    const inputFocusedRef = { current: false as boolean };
+    const recompute = (): void => {
+      const shrunkLayout = window.innerHeight < maxInnerHeight - 120;
+      const shrunkVisual = vv ? vv.height < window.innerHeight - 120 : false;
+      maxInnerHeight = Math.max(maxInnerHeight, window.innerHeight);
+      setKeyboardOpen(inputFocusedRef.current && (shrunkLayout || shrunkVisual));
+    };
+    const isTextField = (t: EventTarget | null): boolean =>
+      t instanceof HTMLElement && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+    const onFocusIn = (e: FocusEvent): void => {
+      if (!isTextField(e.target)) return;
+      inputFocusedRef.current = true;
+      recompute();
+      // 键盘弹出动画晚于 focus，稍后再判一次。
+      window.setTimeout(recompute, 120);
+    };
+    const onFocusOut = (): void => {
+      inputFocusedRef.current = false;
+      window.setTimeout(recompute, 120);
+    };
+    document.addEventListener('focusin', onFocusIn);
+    document.addEventListener('focusout', onFocusOut);
+    vv?.addEventListener('resize', recompute);
+    return () => {
+      document.removeEventListener('focusin', onFocusIn);
+      document.removeEventListener('focusout', onFocusOut);
+      vv?.removeEventListener('resize', recompute);
+    };
+  }, []);
 
   const notify = useCallback((text: string, kind?: 'info' | 'success' | 'error') => {
     const detected = kind ?? (/失败|错误/.test(text) ? 'error' : /完成|成功|^已/.test(text) ? 'success' : 'info');
@@ -1157,28 +1237,15 @@ export function MobileApp({
     }
   }, [animatePage]);
 
-  const entryEq = (a: StackEntry, b: StackEntry): boolean => {
-    if (a.type === 'folder' && b.type === 'folder') return a.folderId === b.folderId;
-    if (a.type === 'overlay' && b.type === 'overlay') return a.layer === b.layer;
-    return false;
-  };
-
   useEffect(() => {
     const onPop = () => {
       const target = readStackSnapshot();
-      const current = stackRef.current;
-      // 快照与当前一致：这是主动关闭触发的 back()，已同步处理过，直接忽略。
-      if (target.length === current.length && target.every((e, i) => entryEq(e, current[i]!))) return;
-      // 目标栈是当前栈去掉若干顶层后的前缀：逐层关闭差异 overlay，并回退文件夹。
-      let i = 0;
-      while (i < current.length && i < target.length && entryEq(current[i]!, target[i]!)) i++;
+      // 对账细节见 historyStack.reconcilePop：快照一致=主动关闭触发的 back()，忽略。
+      const res = reconcilePop(stackRef.current, target);
+      if (!res.changed) return;
       stackRef.current = target;
-      for (let k = i; k < current.length; k++) {
-        const e = current[k]!;
-        if (e.type === 'overlay') closeOverlayUI(e.layer);
-      }
-      const topFolder = [...target].reverse().find((e): e is { type: 'folder'; folderId: string } => e.type === 'folder');
-      const folderId = topFolder ? topFolder.folderId : snapshotRef.current?.rootId ?? '';
+      for (const layer of res.closed) closeOverlayUI(layer);
+      const folderId = res.folderId ?? snapshotRef.current?.rootId ?? '';
       // 只在目录真正回退时播返回动画；仅关闭浮层（抽屉/面板）不闪内容区。
       if (folderId !== selectedFolderIdRef.current) animatePage('back');
       selectedFolderIdRef.current = folderId;
@@ -1206,25 +1273,22 @@ export function MobileApp({
    */
   const closeOverlay = useCallback(
     (layer: OverlayLayer) => {
-      const stack = stackRef.current;
-      const idx = stack
-        .map((e, i) => (e.type === 'overlay' && e.layer === layer ? i : -1))
-        .filter((i) => i >= 0)
-        .pop();
-      if (idx == null) {
-        closeOverlayUI(layer);
-        return;
-      }
-      const next = stack.slice(0, idx);
+      const prev = stackRef.current;
+      const { stack: next, closed } = closeOverlayEntries(prev, layer);
       stackRef.current = next;
-      for (let k = idx; k < stack.length; k++) {
-        const e = stack[k]!;
-        if (e.type === 'overlay') closeOverlayUI(e.layer);
-      }
-      window.history.replaceState({ kanitsuStack: next }, '');
+      for (const l of closed) closeOverlayUI(l);
+      // 条目真实存在过才回写快照（关闭一个已关闭的层是幂等操作，不动 history）。
+      if (next !== prev) window.history.replaceState({ kanitsuStack: next }, '');
     },
     [closeOverlayUI],
   );
+
+  // 查看器可能不走 closeOverlay('viewer') 就消失（如删除当前图后 viewerIndex 变 -1），
+  // 此时栈里残留幽灵 viewer 条目、下一次硬件返回被吞。统一兜底裁掉。
+  useEffect(() => {
+    if (viewerOpen) return;
+    if (stackRef.current.some((e) => e.type === 'overlay' && e.layer === 'viewer')) closeOverlay('viewer');
+  }, [viewerOpen, closeOverlay]);
 
   // Android hardware back is routed here by MainActivity. Keeping the event
   // cancelable lets the native layer distinguish "close the current UI layer"
@@ -1273,6 +1337,13 @@ export function MobileApp({
       // 使用同步 ref 而不是 render 闭包，防止一次触摸被 WebView 合成为两次 click
       // 时连续 push 两个相同目录历史项。
       if (target === (selectedFolderIdRef.current || snap.rootId)) return;
+      // 搜索层不随目录导航滞留：同步裁掉 search 栈项并复位搜索 UI。否则它成为
+      // 幽灵条目，吞掉下一次硬件返回（返回键"死按"）。
+      closeOverlay('search');
+      // 选择集与目录绑定：换目录先退出多选，防止跨目录残留的选中数与批量删除
+      // 的目标集不一致。
+      setSelectMode(false);
+      setSelectedIds(new Set());
       const next: StackEntry[] = [...stackRef.current, { type: 'folder', folderId: target }];
       stackRef.current = next;
       window.history.pushState({ kanitsuStack: next }, '');
@@ -1283,11 +1354,8 @@ export function MobileApp({
       if (folder && folder.childCount > 0) {
         setExpandedFolders((prev) => (prev.has(target) ? prev : new Set(prev).add(target)));
       }
-      setSearchQuery('');
-      setSearchInput('');
-      setSearchActive(false);
     },
-    [animatePage],
+    [animatePage, closeOverlay],
   );
 
   const navigateFromDrawer = useCallback(
@@ -1755,22 +1823,44 @@ export function MobileApp({
     setSelectedIds(new Set(displayImages.map((img) => img.id)));
   }, [displayImages]);
 
-  const handleBatchDelete = useCallback(async () => {
+  /** 批量删除入口：走应用内确认对话框（不再用原生 window.confirm）。 */
+  const handleBatchDelete = useCallback(() => {
     const targets = displayImages.filter((img) => selectedIds.has(img.id));
     if (targets.length === 0) return;
-    if (!window.confirm(`删除选中的 ${targets.length} 张图片？`)) return;
+    setDeleteTarget({ kind: 'batch', count: targets.length });
+    openOverlay('dialog');
+  }, [displayImages, selectedIds, openOverlay]);
+
+  /** 批量删除执行体：逐项失败计数 + 进度反馈，refresh 失败也不让状态悬空。 */
+  const runBatchDelete = useCallback(async () => {
+    const targets = displayImages.filter((img) => selectedIds.has(img.id));
+    if (targets.length === 0) return;
     let ok = 0;
-    for (const img of targets) {
-      try {
-        await deleteImage(store, img);
-        ok++;
-      } catch {
-        // 单个失败继续
+    let failed = 0;
+    setBatchProgress({ label: '正在删除…', done: 0, total: targets.length });
+    try {
+      for (let i = 0; i < targets.length; i++) {
+        try {
+          await deleteImage(store, targets[i]!);
+          ok++;
+        } catch {
+          failed++;
+        }
+        setBatchProgress({ label: '正在删除…', done: i + 1, total: targets.length });
       }
+    } finally {
+      setBatchProgress(null);
+      exitSelectMode();
     }
-    await refresh();
-    exitSelectMode();
-    notify(`已删除 ${ok} 张图片`, 'success');
+    try {
+      await refresh();
+    } catch (err) {
+      notify(`刷新失败：${String(err)}`, 'error');
+    }
+    notify(
+      failed > 0 ? `已删除 ${ok} 张，失败 ${failed} 张` : `已删除 ${ok} 张图片`,
+      failed > 0 ? 'error' : 'success',
+    );
   }, [displayImages, selectedIds, store, refresh, exitSelectMode, notify]);
 
 
@@ -1784,17 +1874,19 @@ export function MobileApp({
         await deleteImage(store, target.image);
         await refresh();
         notify(`已删除图片「${target.image.name}」`, 'success');
-      } else {
+      } else if (target.kind === 'folder') {
         const parentId = target.folder.parentId;
         await deleteLibraryFolder(store, target.folder.relPath);
         await refresh();
         if (currentFolderId === target.folder.id && parentId) setSelectedFolderId(parentId);
         notify(`已删除相册「${target.folder.name}」`, 'success');
+      } else {
+        await runBatchDelete();
       }
     } catch (err) {
       notify(`删除失败：${String(err)}`, 'error');
     }
-  }, [deleteTarget, store, refresh, notify, closeOverlay, currentFolderId]);
+  }, [deleteTarget, store, refresh, notify, closeOverlay, currentFolderId, runBatchDelete]);
 
   const handlePromptSubmit = useCallback(
     async (value: string) => {
@@ -1818,17 +1910,28 @@ export function MobileApp({
           const created = await createSubfolder(store, selectedFolder?.relPath ?? '', value);
           const targets = displayImages.filter((img) => selectedIds.has(img.id));
           let moved = 0;
-          for (const img of targets) {
-            try {
-              await store.move({ id: img.fileRefId ?? img.id, name: img.name, kind: 'file' }, created, img.name);
-              moved++;
-            } catch {
-              // 单个移动失败继续
+          let failed = 0;
+          setBatchProgress({ label: '正在移动…', done: 0, total: targets.length });
+          try {
+            for (let i = 0; i < targets.length; i++) {
+              const img = targets[i]!;
+              try {
+                await store.move({ id: img.fileRefId ?? img.id, name: img.name, kind: 'file' }, created, img.name);
+                moved++;
+              } catch {
+                failed++;
+              }
+              setBatchProgress({ label: '正在移动…', done: i + 1, total: targets.length });
             }
+          } finally {
+            setBatchProgress(null);
+            exitSelectMode();
           }
           await refresh();
-          exitSelectMode();
-          notify(`已移动 ${moved} 张到「${value}」`, 'success');
+          notify(
+            failed > 0 ? `已移动 ${moved} 张到「${value}」，失败 ${failed} 张` : `已移动 ${moved} 张到「${value}」`,
+            failed > 0 ? 'error' : 'success',
+          );
         } else {
           await createSubfolder(store, prompt.folder.relPath, value);
           const next = await refresh();
@@ -1910,21 +2013,21 @@ export function MobileApp({
       const pinned = pinnedCovers[image.folderId] === image.id;
       const actions: SheetAction[] = [
         ...(!fromViewer
-          ? [{ label: '查看', icon: '👁', onSelect: () => openViewer(image) }]
+          ? [{ label: '查看', icon: 'image' as const, onSelect: () => openViewer(image) }]
           : []),
         {
           label: blurred ? '取消隐私预览' : '设为隐私预览',
-          icon: blurred ? '🙈' : '🕶',
+          icon: blurred ? 'eye' : 'eye-off',
           onSelect: () => toggleImageBlur(image),
         },
         {
           label: pinned ? '取消固定封面' : '设为相册封面',
-          icon: '📌',
+          icon: 'pin',
           onSelect: () => pinCover(image.folderId, pinned ? null : image.id, image.name),
         },
-        { label: '重命名', icon: '✏️', onSelect: () => openPrompt({ kind: 'rename-image', image }) },
-        { label: '复制路径', icon: '🔗', onSelect: () => void copyText(image.relPath) },
-        { label: '删除', icon: '🗑', danger: true, onSelect: () => openDelete({ kind: 'image', image }) },
+        { label: '重命名', icon: 'edit', onSelect: () => openPrompt({ kind: 'rename-image', image }) },
+        { label: '复制路径', icon: 'link', onSelect: () => void copyText(image.relPath) },
+        { label: '删除', icon: 'trash', danger: true, onSelect: () => openDelete({ kind: 'image', image }) },
       ];
       setSheet({ title: image.name, subtitle: image.relPath, actions });
       openOverlay('sheet');
@@ -1940,21 +2043,21 @@ export function MobileApp({
       const allBlurred = images.length > 0 && images.every((img) => blurredImages.has(img.relPath));
       const isRootFolder = !folder.relPath;
       const actions: SheetAction[] = [
-        { label: '打开', icon: '📂', onSelect: () => navigateToFolder(folder.id) },
-        { label: '新建子文件夹', icon: '📁', onSelect: () => openPrompt({ kind: 'create-folder', folder }) },
-        ...(!isRootFolder ? [{ label: '重命名', icon: '✏️', onSelect: () => openPrompt({ kind: 'rename-folder', folder }) }] : []),
+        { label: '打开', icon: 'folder', onSelect: () => navigateToFolder(folder.id) },
+        { label: '新建子文件夹', icon: 'folder-plus', onSelect: () => openPrompt({ kind: 'create-folder', folder }) },
+        ...(!isRootFolder ? [{ label: '重命名', icon: 'edit' as const, onSelect: () => openPrompt({ kind: 'rename-folder', folder }) }] : []),
         {
           label: allBlurred ? '取消隐私预览（含子文件夹）' : '设为隐私预览（含子文件夹）',
-          icon: allBlurred ? '🙈' : '🕶',
+          icon: allBlurred ? 'eye' : 'eye-off',
           disabled: images.length === 0,
           onSelect: () => toggleFolderBlur(folder),
         },
-        { label: '设置封面…', icon: '🖼', disabled: images.length === 0, onSelect: () => openCoverPicker(folder) },
-        { label: '整理（按规则分组）', icon: '🧹', disabled: images.length === 0, onSelect: () => openOrganizeFor(folder) },
-        { label: '导出 ZIP', icon: '📦', disabled: images.length === 0, onSelect: () => void handleExport(folder) },
-        { label: '复制路径', icon: '🔗', onSelect: () => void copyText(folder.relPath || '（根目录）') },
+        { label: '设置封面…', icon: 'image', disabled: images.length === 0, onSelect: () => openCoverPicker(folder) },
+        { label: '整理（按规则分组）', icon: 'organize', disabled: images.length === 0, onSelect: () => openOrganizeFor(folder) },
+        { label: '导出 ZIP', icon: 'box', disabled: images.length === 0, onSelect: () => void handleExport(folder) },
+        { label: '复制路径', icon: 'link', onSelect: () => void copyText(folder.relPath || '（根目录）') },
         ...(!isRootFolder
-          ? [{ label: '删除相册', icon: '🗑', danger: true, onSelect: () => openDelete({ kind: 'folder', folder }) }]
+          ? [{ label: '删除相册', icon: 'trash' as const, danger: true, onSelect: () => openDelete({ kind: 'folder', folder }) }]
           : []),
       ];
       setSheet({ title: folder.name || '全部相册', subtitle: folder.relPath || undefined, actions });
@@ -1998,6 +2101,9 @@ export function MobileApp({
 
   const openPrompt = useCallback(
     (prompt: PromptState) => {
+      // 互斥的对话框内容：打开输入框前清掉删除确认的残影（退场 ref）。
+      setDeleteTarget(null);
+      deleteTargetRef.current = null;
       setPromptState(prompt);
       openOverlay('dialog');
     },
@@ -2012,6 +2118,9 @@ export function MobileApp({
 
   const openDelete = useCallback(
     (target: DeleteTarget) => {
+      // 互斥的对话框内容：打开删除确认前清掉输入框的残影（退场 ref）。
+      setPromptState(null);
+      promptStateRef.current = null;
       setDeleteTarget(target);
       openOverlay('dialog');
     },
@@ -2229,9 +2338,24 @@ export function MobileApp({
         )}
 
         {!snapshot ? (
-          <div className="m-loading-state">
-            <span className="m-progress-spinner" aria-label="正在载入图库" />
-          </div>
+          loadError ? (
+            <div className="m-empty-state">
+              <div>
+                <span className="m-empty-icon"><MobileIcon name="refresh" className="w-6 h-6" /></span>
+                <div className="m-empty-title">图库加载失败</div>
+                <div className="m-empty-copy">{loadError}</div>
+                <div className="m-empty-actions">
+                  <button className="m-primary-button" onClick={() => void loadLibrary()}>
+                    重试
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="m-loading-state">
+              <span className="m-progress-spinner" aria-label="正在载入图库" />
+            </div>
+          )
         ) : searching ? (
           searchFolders.length === 0 && searchImages.length === 0 ? (
             <div className="m-empty-state">
@@ -2259,6 +2383,7 @@ export function MobileApp({
                           pinned={pinnedCovers[card.folder.id] != null}
                           blurred={card.coverImage ? isImageBlurred(card.coverImage.relPath, blurredImages) : false}
                           onOpen={() => navigateToFolder(card.folder.id)}
+                          selectMode={selectMode}
                           onActions={() => openFolderActions(card.folder)}
                         />
                       ))}
@@ -2281,6 +2406,7 @@ export function MobileApp({
                           pinned={pinnedCovers[card.folder.id] != null}
                           blurred={card.coverImage ? isImageBlurred(card.coverImage.relPath, blurredImages) : false}
                           onOpen={() => navigateToFolder(card.folder.id)}
+                          selectMode={selectMode}
                           onActions={() => openFolderActions(card.folder)}
                         />
                       )}
@@ -2294,20 +2420,29 @@ export function MobileApp({
                     匹配的图片 <span className="tabular-nums">{searchImages.length}</span>
                   </h3>
                   {viewMode === 'list' ? (
-                    <div className="flex flex-col gap-0.5 px-0.5 pb-2">
-                      {searchImages.map((img) => (
-                        <ImageListRow
-                          key={img.id}
-                          image={img}
-                          store={store}
-                          blurred={blurredImages.has(img.relPath)}
-                          selectMode={selectMode}
-                          selected={selectedIds.has(img.id)}
-                          onToggleSelect={toggleSelect}
-                          onOpen={() => openViewer(img)}
-                          onActions={() => openImageActions(img)}
-                        />
-                      ))}
+                    <div className="px-0.5 pb-2">
+                      <VirtualGrid
+                        items={searchImages}
+                        cols={1}
+                        rowHeight={LIST_ROW_STEP}
+                        gap={LIST_ROW_GAP}
+                        scrollTop={scrollTop}
+                        viewportH={viewportH}
+                        sectionTop={sectionTops.image}
+                        getKey={(img) => img.id}
+                        renderItem={(img) => (
+                          <ImageListRow
+                            image={img}
+                            store={store}
+                            blurred={blurredImages.has(img.relPath)}
+                            selectMode={selectMode}
+                            selected={selectedIds.has(img.id)}
+                            onToggleSelect={toggleSelect}
+                            onOpen={() => openViewer(img)}
+                            onActions={() => openImageActions(img)}
+                          />
+                        )}
+                      />
                     </div>
                   ) : (
                     <VirtualGrid
@@ -2454,7 +2589,8 @@ export function MobileApp({
                         pinned={pinnedCovers[card.folder.id] != null}
                         blurred={card.coverImage ? isImageBlurred(card.coverImage.relPath, blurredImages) : false}
                         onOpen={() => navigateToFolder(card.folder.id)}
-                        onActions={() => openFolderActions(card.folder)}
+                        selectMode={selectMode}
+                          onActions={() => openFolderActions(card.folder)}
                       />
                     ))}
                   </div>
@@ -2476,7 +2612,8 @@ export function MobileApp({
                         pinned={pinnedCovers[card.folder.id] != null}
                         blurred={card.coverImage ? isImageBlurred(card.coverImage.relPath, blurredImages) : false}
                         onOpen={() => navigateToFolder(card.folder.id)}
-                        onActions={() => openFolderActions(card.folder)}
+                        selectMode={selectMode}
+                          onActions={() => openFolderActions(card.folder)}
                       />
                     )}
                   />
@@ -2525,20 +2662,29 @@ export function MobileApp({
                 {displayImages.length === 0 ? (
                   <div className="m-inline-empty">当前目录没有图片，开启“子目录”可查看全部图片</div>
                 ) : viewMode === 'list' ? (
-                  <div className="flex flex-col gap-0.5 px-0.5 pb-2">
-                    {displayImages.map((img) => (
-                      <ImageListRow
-                        key={img.id}
-                        image={img}
-                        store={store}
-                        blurred={blurredImages.has(img.relPath)}
-                        selectMode={selectMode}
-                        selected={selectedIds.has(img.id)}
-                        onToggleSelect={toggleSelect}
-                        onOpen={() => openViewer(img)}
-                        onActions={() => openImageActions(img)}
-                      />
-                    ))}
+                  <div className="px-0.5 pb-2">
+                    <VirtualGrid
+                      items={displayImages}
+                      cols={1}
+                      rowHeight={LIST_ROW_STEP}
+                      gap={LIST_ROW_GAP}
+                      scrollTop={scrollTop}
+                      viewportH={viewportH}
+                      sectionTop={sectionTops.image}
+                      getKey={(img) => img.id}
+                      renderItem={(img) => (
+                        <ImageListRow
+                          image={img}
+                          store={store}
+                          blurred={blurredImages.has(img.relPath)}
+                          selectMode={selectMode}
+                          selected={selectedIds.has(img.id)}
+                          onToggleSelect={toggleSelect}
+                          onOpen={() => openViewer(img)}
+                          onActions={() => openImageActions(img)}
+                        />
+                      )}
+                    />
                   </div>
                 ) : (
                   <VirtualGrid
@@ -2572,8 +2718,8 @@ export function MobileApp({
       </main>
       )}
 
-      {/* 批量操作栏 */}
-      {selectMode && !viewerOpen && (
+      {/* 批量操作栏（键盘弹出时隐藏，避免被顶到键盘上沿悬浮） */}
+      {selectMode && !viewerOpen && !keyboardOpen && (
         <div
           className="m-batch-wrap"
           style={{ bottom: 'calc(env(safe-area-inset-bottom, 0px) + 16px)', zIndex: Z_BATCH_BAR }}
@@ -2601,7 +2747,7 @@ export function MobileApp({
 
       {/* 底部主导航 / 图包操作（工具 tab 下仍是 图库/工具 双 tab）。
           导入/整理/导出期间只禁用不隐藏，进度卡浮在底栏上方，布局不跳变。 */}
-      {!viewerOpen && !selectMode && (
+      {!viewerOpen && !selectMode && !keyboardOpen && (
         toolsTab ? (
           <MobileLibraryDock active="tools" disabled={importing} onLibrary={closeTools} onTools={() => {}} />
         ) : isRoot ? (
@@ -2745,49 +2891,55 @@ export function MobileApp({
       {/* 动作面板 */}
       {sheet && <MobileActionSheet title={sheet.title} subtitle={sheet.subtitle} actions={sheet.actions} onClose={() => closeOverlay('sheet')} />}
 
-      {/* 删除确认 + 输入对话框（共用退场动画） */}
-      {dialogPresence.present && (
-      <div className={dialogPresence.exiting ? 'm-fade-exit' : ''}>
-      {deleteTarget && (
-        <MobileConfirmDialog
-          title="确认删除"
-          body={
-            deleteTarget.kind === 'image'
-              ? `确定要删除图片「${deleteTarget.image.name}」吗？此操作不可撤销。`
-              : `确定要删除相册「${deleteTarget.folder.name}」及其全部子目录吗？此操作不可撤销。`
-          }
-          onConfirm={() => void handleDeleteConfirm()}
-          onCancel={() => closeOverlay('dialog')}
-        />
-      )}
+      {/* 删除确认 + 输入对话框（共用退场动画；退场期间数据已置空，用 ref 里的最后一份内容渲染，避免空壳瞬灭） */}
+      {dialogPresence.present && (() => {
+        const dialogDelete = deleteTarget ?? deleteTargetRef.current;
+        const dialogPrompt = promptState ?? promptStateRef.current;
+        return (
+          <div className={dialogPresence.exiting ? 'm-fade-exit' : ''}>
+            {dialogDelete && (
+              <MobileConfirmDialog
+                title="确认删除"
+                body={
+                  dialogDelete.kind === 'image'
+                    ? `确定要删除图片「${dialogDelete.image.name}」吗？此操作不可撤销。`
+                    : dialogDelete.kind === 'folder'
+                      ? `确定要删除相册「${dialogDelete.folder.name}」及其全部子目录吗？此操作不可撤销。`
+                      : `确定要删除选中的 ${dialogDelete.count} 张图片吗？此操作不可撤销。`
+                }
+                onConfirm={() => void handleDeleteConfirm()}
+                onCancel={() => closeOverlay('dialog')}
+              />
+            )}
 
-      {/* 输入对话框 */}
-      {promptState && (
-        <MobilePromptDialog
-          title={
-            promptState.kind === 'rename-image'
-              ? '重命名图片'
-              : promptState.kind === 'rename-folder'
-                ? '重命名相册'
-                : promptState.kind === 'batch-move'
-                  ? `移动 ${promptState.count} 张图片到新文件夹`
-                  : `在「${promptState.folder.name || '全部相册'}」中新建子文件夹`
-          }
-          label={promptState.kind === 'create-folder' || promptState.kind === 'batch-move' ? '文件夹名称' : '新名称'}
-          initialValue={
-            promptState.kind === 'rename-image'
-              ? promptState.image.name
-              : promptState.kind === 'rename-folder'
-                ? promptState.folder.name
-                : ''
-          }
-          confirmLabel={promptState.kind === 'create-folder' || promptState.kind === 'batch-move' ? '创建' : '保存'}
-          onSubmit={(v) => void handlePromptSubmit(v)}
-          onCancel={() => closeOverlay('dialog')}
-        />
-      )}
-      </div>
-      )}
+            {/* 输入对话框 */}
+            {dialogPrompt && (
+              <MobilePromptDialog
+                title={
+                  dialogPrompt.kind === 'rename-image'
+                    ? '重命名图片'
+                    : dialogPrompt.kind === 'rename-folder'
+                      ? '重命名相册'
+                      : dialogPrompt.kind === 'batch-move'
+                        ? `移动 ${dialogPrompt.count} 张图片到新文件夹`
+                        : `在「${dialogPrompt.folder.name || '全部相册'}」中新建子文件夹`
+                }
+                label={dialogPrompt.kind === 'create-folder' || dialogPrompt.kind === 'batch-move' ? '文件夹名称' : '新名称'}
+                initialValue={
+                  dialogPrompt.kind === 'rename-image'
+                    ? dialogPrompt.image.name
+                    : dialogPrompt.kind === 'rename-folder'
+                      ? dialogPrompt.folder.name
+                      : ''
+                }
+                confirmLabel={dialogPrompt.kind === 'create-folder' || dialogPrompt.kind === 'batch-move' ? '创建' : '保存'}
+                onSubmit={(v) => void handlePromptSubmit(v)}
+                onCancel={() => closeOverlay('dialog')}
+              />
+            )}
+          </div>
+        );
+      })()}
 
       {/* 导入报告 */}
       {reportPresence.present && importReport && (
@@ -2837,36 +2989,40 @@ export function MobileApp({
         </div>
       )}
 
-      {/* 整理结果 */}
-      {resultPresence.present && organizeResult && (
-        <div
-          className={`m-dialog-mask fixed inset-0 flex items-center justify-center p-8 ${resultPresence.exiting ? 'm-fade-exit' : ''}`}
-          style={{ zIndex: Z_DIALOG }}
-        >
-          <div className="m-overlay-scrim absolute inset-0" onClick={() => setOrganizeResult(null)} />
-          <div className="m-dialog relative w-full max-w-sm p-5 max-h-[70vh] flex flex-col">
-            <h3 className="m-dialog-title shrink-0">整理结果</h3>
-            <p className="m-dialog-copy shrink-0">
-              已应用 {organizeResult.appliedCount} · 跳过低置信度 {organizeResult.skippedLowConfidenceCount} · 冲突 {organizeResult.conflicts.length}
-            </p>
-            {organizeResult.conflicts.length > 0 && (
-              <div className="flex-1 overflow-y-auto mt-3 min-h-0">
-                {organizeResult.conflicts.map((c, i) => (
-                  <div key={i} className="m-conflict-row block">
-                    <div className="font-mono break-all">{c.name}</div>
-                    <div className="m-conflict-detail">
-                      → {c.targetRelPath}（{conflictReasonLabel(c.reason)}）
+      {/* 整理结果（退场期间用 ref 里的最后一份内容渲染） */}
+      {resultPresence.present && (() => {
+        const result = organizeResult ?? organizeResultRef.current;
+        if (!result) return null;
+        return (
+          <div
+            className={`m-dialog-mask fixed inset-0 flex items-center justify-center p-8 ${resultPresence.exiting ? 'm-fade-exit' : ''}`}
+            style={{ zIndex: Z_DIALOG }}
+          >
+            <div className="m-overlay-scrim absolute inset-0" onClick={() => setOrganizeResult(null)} />
+            <div className="m-dialog relative w-full max-w-sm p-5 max-h-[70vh] flex flex-col">
+              <h3 className="m-dialog-title shrink-0">整理结果</h3>
+              <p className="m-dialog-copy shrink-0">
+                已应用 {result.appliedCount} · 跳过低置信度 {result.skippedLowConfidenceCount} · 冲突 {result.conflicts.length}
+              </p>
+              {result.conflicts.length > 0 && (
+                <div className="flex-1 overflow-y-auto mt-3 min-h-0">
+                  {result.conflicts.map((c, i) => (
+                    <div key={i} className="m-conflict-row block">
+                      <div className="font-mono break-all">{c.name}</div>
+                      <div className="m-conflict-detail">
+                        → {c.targetRelPath}（{conflictReasonLabel(c.reason)}）
+                      </div>
                     </div>
-                  </div>
-                ))}
-              </div>
-            )}
-            <button className="m-button is-full mt-4 shrink-0" onClick={() => setOrganizeResult(null)}>
-              关闭
-            </button>
+                  ))}
+                </div>
+              )}
+              <button className="m-button is-full mt-4 shrink-0" onClick={() => setOrganizeResult(null)}>
+                关闭
+              </button>
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* 任务进度 */}
       {importing && (
@@ -2882,9 +3038,12 @@ export function MobileApp({
       {exporting && (
         <MobileProgressCard title="正在导出 ZIP…" done={exportProgress?.done} total={exportProgress?.total} onCancel={cancelExport} />
       )}
+      {batchProgress && (
+        <MobileProgressCard title={batchProgress.label} done={batchProgress.done} total={batchProgress.total} />
+      )}
 
-      {/* Toast */}
-      {toast && !viewerOpen && <MobileToast text={toast.text} kind={toast.kind} />}
+      {/* Toast（查看器打开时也显示：Z_TOAST 本就高于查看器层级） */}
+      {toast && <MobileToast text={toast.text} kind={toast.kind} />}
     </div>
   );
 }

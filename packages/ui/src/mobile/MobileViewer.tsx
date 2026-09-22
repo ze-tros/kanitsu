@@ -171,12 +171,15 @@ export function MobileViewer({
             objectUrlsRef.current.delete(v.thumbUrl);
             releaseObjectUrl(v.thumbUrl);
           }
+          // 淘汰页的原图 URL 必须归还：条目离开 Map 后卸载清理扫不到它，不释放
+          // 就是每个淘汰页泄漏一个受控句柄（翻阅 64 张以上逐张累积）。
+          if (v.fullUrl) store.releaseViewerUrl(v.fullUrl);
           map.delete(k);
         }
       }
       return map;
     });
-  }, []);
+  }, [store]);
 
   // 加载某张图：缩略图立即占位，原图随后。
   const ensurePage = useCallback(

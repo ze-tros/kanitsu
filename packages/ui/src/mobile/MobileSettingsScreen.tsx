@@ -24,6 +24,7 @@ import {
 } from './mobileShared';
 import { Z_SETTINGS } from './zindex';
 import { useExitPresence } from './useExitPresence';
+import { MobileConfirmDialog } from './MobileSheets';
 
 const LEVEL_LABELS: ReadonlyArray<[LogLevel, string]> = [
   ['debug', '调试'],
@@ -331,6 +332,7 @@ function CacheCard() {
   const [renderer, setRenderer] = useState<RendererThumbnailStats>(() => getRendererThumbnailStats());
   const [nativeStats, setNativeStats] = useState<{ diskFiles: number; diskBytes: number; inFlight: number } | null>(null);
   const [clearResult, setClearResult] = useState('');
+  const [confirmClear, setConfirmClear] = useState<'renderer' | 'native' | null>(null);
 
   useEffect(() => {
     const refresh = (): void => {
@@ -384,10 +386,27 @@ function CacheCard() {
         )}
       </div>
       <div className="m-settings-actions">
-        <button className="m-button" onClick={handleClearRenderer}>清除内存缓存</button>
-        <button className="m-button" onClick={() => void handleClearNative()}>清除磁盘缓存</button>
+        <button className="m-button" onClick={() => setConfirmClear('renderer')}>清除内存缓存</button>
+        <button className="m-button" onClick={() => setConfirmClear('native')}>清除磁盘缓存</button>
       </div>
       {clearResult && <p className="m-settings-result">{clearResult}</p>}
+      {confirmClear && (
+        <MobileConfirmDialog
+          title="确认清除"
+          body={
+            confirmClear === 'renderer'
+              ? '确定要清除内存中的缩略图缓存吗？下次浏览会重新解码生成。'
+              : '确定要清除磁盘缩略图缓存吗？重新浏览时将重新生成全部缩略图。'
+          }
+          confirmLabel="清除"
+          onConfirm={() => {
+            if (confirmClear === 'renderer') handleClearRenderer();
+            else void handleClearNative();
+            setConfirmClear(null);
+          }}
+          onCancel={() => setConfirmClear(null)}
+        />
+      )}
     </div>
   );
 }
@@ -428,6 +447,7 @@ function LogCard() {
   const [logs, setLogs] = useState<readonly LogEntry[]>(() => getDebugLogs());
   const [nativeLogs, setNativeLogs] = useState<string[]>([]);
   const [showLogs, setShowLogs] = useState(false);
+  const [confirmClearLogs, setConfirmClearLogs] = useState(false);
 
   useEffect(() => {
     setLogLevelPref(level);
@@ -476,14 +496,24 @@ function LogCard() {
         <button className="m-button" onClick={() => void refreshNativeLogs()}>读取原生</button>
         <button
           className="m-button is-ghost"
-          onClick={() => {
-            clearDebugLogs();
-            setLogs([]);
-          }}
+          onClick={() => setConfirmClearLogs(true)}
         >
           清空
         </button>
       </div>
+      {confirmClearLogs && (
+        <MobileConfirmDialog
+          title="确认清空"
+          body="确定要清空本机调试日志吗？此操作不可撤销。"
+          confirmLabel="清空"
+          onConfirm={() => {
+            clearDebugLogs();
+            setLogs([]);
+            setConfirmClearLogs(false);
+          }}
+          onCancel={() => setConfirmClearLogs(false)}
+        />
+      )}
       {showLogs && (
         <div className="m-log-panel">
           {nativeLogs.length > 0 && <pre>{nativeLogs.join('\n')}</pre>}
