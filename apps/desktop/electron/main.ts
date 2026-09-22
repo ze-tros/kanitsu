@@ -901,11 +901,15 @@ function generateThumbnailBytesNative(file: DesktopFsEntry, targetSize: number):
 
 // —— RAW 查看派生服务 ——
 // RAW 原文件无法被 Chromium <img> 解码，查看器改用 ensureRawDerivative 换取
-// 「完整解码后」的 JPEG 派生图；派生文件落在 userData/rawcache，由
+// 解码后的 JPEG 派生图；派生文件落在 userData/rawcache，由
 // kanitsu-file 协议同样以流式服务（见 registerViewerProtocol 的放行逻辑）。
-// 单 worker 串行：全解码秒级且内存大（45MP ≈ 135MB RGB），并发只会挤爆内存；
-// 请求由查看器当前页 + ±2 预取驱动，FIFO 即可。
+// 两段式消除首次查看的等待：无缓存时先做「预览级派生」（内嵌预览提取，
+// 毫秒级，插队）立即返回 URL 供查看器显示；随后排队「完整解码」（秒级）
+// 覆盖同一份文件——完成后 mtime 变化（即 URL 版本号）并推送
+// raw:derivativeUpdated 事件，渲染端热替换当前图。
+// 单 worker 串行：全解码秒级且内存大（45MP ≈ 135MB RGB），并发只会挤爆内存。
 const RAW_DERIVATIVE_TIMEOUT_MS = 60000;
+const RAW_PREVIEW_TIMEOUT_MS = 20000;
 const RAW_DISK_MAX_FILES = 4096;
 const RAW_DISK_MAX_BYTES = 2 * 1024 * 1024 * 1024; // 2GB
 const RAW_DERIVATIVE_VERSION = 1;
@@ -927,19 +931,19 @@ async function rawDerivativePathFor(filePath: string): Promise<string> {
   return path.join(rawDerivativeDir(), `${createHash('sha1').update(raw).digest('hex')}.jpg`);
 }
 
-async function rawDerivativeHit(derivPath: string): Promise<boolean> {
+/** 命中返回缓存版本号(取 mtime 作 URL 版本,完整解码覆盖后自然变化)。 */
+async function rawDerivativeHit(derivPath: string): Promise<number | null> {
   try {
     const st = await fs.stat(derivPath);
-    if (st.isFile() && st.size > 0) {
-      // 触碰 mtime,让 LRU 清理按“最近使用”而非“最近生成”淘汰。
-      const now = new Date();
-      await fs.utimes(derivPath, now, now);
-      return true;
-    }
+    if (st.isFile() && st.size > 0) return Math.floor(st.mtimeMs);
   } catch {
     // 未命中
   }
-  return false;
+  return null;
+}
+
+function rawDerivativeUrl(derivPath: string, version: number): string {
+  return `kanitsu-file://file/?p=${encodeURIComponent(derivPath)}&v=${version}`;
 }
 
 async function pruneRawDerivativeCache(): Promise<void> {
@@ -970,7 +974,9 @@ interface RawDerivativeRequest {
   sourcePath: string;
   /** 派生 JPEG 目标路径(磁盘缓存键)。 */
   derivPath: string;
-  resolve: (url: string) => void;
+  /** preview 插队(毫秒级);full 后台升级(秒级,完成后推送更新事件)。 */
+  mode: 'preview' | 'full';
+  resolve: (ok: boolean) => void;
   reject: (err: Error) => void;
 }
 
@@ -980,7 +986,7 @@ let rawDerivativeSeq = 0;
 const rawDerivativeQueue: RawDerivativeRequest[] = [];
 const rawDerivativeInFlight = new Map<number, RawDerivativeRequest & { timer: NodeJS.Timeout }>();
 /** 同一派生文件的并发请求共享同一个 Promise。 */
-const rawDerivativePending = new Map<string, Promise<string>>();
+const rawDerivativePending = new Map<string, Promise<boolean>>();
 
 function ensureRawDerivativeWorker(): Worker {
   if (rawDerivativeWorker) return rawDerivativeWorker;
@@ -999,7 +1005,11 @@ function ensureRawDerivativeWorker(): Worker {
         try {
           await fs.mkdir(rawDerivativeDir(), { recursive: true });
           await fs.writeFile(job.derivPath, msg.data!);
-          job.resolve(`kanitsu-file://file/?p=${encodeURIComponent(job.derivPath)}`);
+          job.resolve(true);
+          if (job.mode === 'full') {
+            // 完整解码覆盖预览级派生:通知渲染端热替换正在显示的同文件。
+            mainWindow?.webContents.send('raw:derivativeUpdated', { derivPath: job.derivPath });
+          }
           void pruneRawDerivativeCache();
         } catch (err) {
           job.reject(err instanceof Error ? err : new Error(String(err)));
@@ -1048,28 +1058,48 @@ function pumpRawDerivativeQueue(): void {
     rawDerivativeWorker = null;
     job.reject(new Error('RAW 派生图生成超时'));
     pumpRawDerivativeQueue();
-  }, RAW_DERIVATIVE_TIMEOUT_MS);
+  }, request.mode === 'preview' ? RAW_PREVIEW_TIMEOUT_MS : RAW_DERIVATIVE_TIMEOUT_MS);
   rawDerivativeInFlight.set(requestId, { ...request, timer });
-  worker.postMessage({ requestId, filePath: request.sourcePath });
+  worker.postMessage({ requestId, filePath: request.sourcePath, mode: request.mode });
 }
 
-/** 为 RAW 文件确保查看派生图存在,返回其 kanitsu-file URL。 */
+function enqueueRawDerivativeJob(request: Omit<RawDerivativeRequest, 'resolve' | 'reject'>): Promise<boolean> {
+  return new Promise<boolean>((resolve, reject) => {
+    // 预览任务插队:正在查看的图不能排在批量完整解码后面。
+    if (request.mode === 'preview') rawDerivativeQueue.unshift({ ...request, resolve, reject });
+    else rawDerivativeQueue.push({ ...request, resolve, reject });
+    pumpRawDerivativeQueue();
+  });
+}
+
+/** 为 RAW 文件确保查看派生图存在,返回其 kanitsu-file URL(两段式,见上)。 */
 function ensureRawDerivative(file: DesktopFsEntry): Promise<string> {
   assertInsideLibrary(file.id);
   return (async () => {
     const derivPath = await rawDerivativePathFor(file.id);
-    if (await rawDerivativeHit(derivPath)) {
-      return `kanitsu-file://file/?p=${encodeURIComponent(derivPath)}`;
-    }
+    const cachedVersion = await rawDerivativeHit(derivPath);
+    if (cachedVersion !== null) return rawDerivativeUrl(derivPath, cachedVersion);
     const pending = rawDerivativePending.get(derivPath);
-    if (pending) return pending;
-    const promise = new Promise<string>((resolve, reject) => {
-      rawDerivativeQueue.push({ sourcePath: file.id, derivPath, resolve, reject });
-    });
+    if (pending) {
+      // 并发请求共享;等待完成后以最新文件状态生成 URL。
+      await pending.catch(() => undefined);
+      const version = await rawDerivativeHit(derivPath);
+      return rawDerivativeUrl(derivPath, version ?? Date.now());
+    }
+    const promise = (async () => {
+      // 1) 预览级派生(插队):多数相机内嵌全尺寸 JPEG,即现即显。
+      const previewOk = await enqueueRawDerivativeJob({ sourcePath: file.id, derivPath, mode: 'preview' }).catch(() => false);
+      if (previewOk) return true;
+      // 2) 无内嵌预览:回退完整解码(原行为,等待完成)。
+      return await enqueueRawDerivativeJob({ sourcePath: file.id, derivPath, mode: 'full' });
+    })();
     rawDerivativePending.set(derivPath, promise);
     promise.finally(() => rawDerivativePending.delete(derivPath)).catch(() => undefined);
     pumpRawDerivativeQueue();
-    return promise;
+    const ok = await promise;
+    if (!ok) throw new Error('RAW 派生图生成失败');
+    const version = await rawDerivativeHit(derivPath);
+    return rawDerivativeUrl(derivPath, version ?? Date.now());
   })();
 }
 

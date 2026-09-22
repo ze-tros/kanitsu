@@ -3247,7 +3247,29 @@ function Viewer({
     [store],
   );
 
+  // RAW 派生图后台升级:首次查看先显示预览级派生(毫秒级),主进程完成完整
+  // 解码覆盖同一文件后推送事件;若正是当前显示/等待中的文件,则重新取
+  // URL(版本号变化)触发热替换。其他图片在下次 getViewerUrl 时自然拿到新版。
+  const [rawUpgradeTick, setRawUpgradeTick] = useState(0);
+  useEffect(() => {
+    if (!store.onRawDerivativeUpdated) return;
+    const matchDerivPath = (u: string | null, derivPath: string): boolean => {
+      if (!u) return false;
+      try {
+        return new URL(u).searchParams.get('p') === derivPath;
+      } catch {
+        return false;
+      }
+    };
+    return store.onRawDerivativeUpdated(({ derivPath }) => {
+      if (matchDerivPath(displayUrlRef.current, derivPath) || matchDerivPath(pendingUrlRef.current, derivPath)) {
+        setRawUpgradeTick((t) => t + 1);
+      }
+    });
+  }, [store]);
+
   // 下一张图：取原始文件 URL，放入后台隐式解码的加载器（不立即换入显示）。
+  // rawUpgradeTick:RAW 完整解码后台覆盖预览级派生后自增,重新取 URL 热替换。
   useEffect(() => {
     if (!image) return;
     let cancelled = false;
@@ -3256,11 +3278,14 @@ function Viewer({
         store.releaseViewerUrl(url);
         return;
       }
+      // 已解码完成的同文件(缓存命中同版本号)无需换入。
+      if (displayUrlRef.current === url) return;
       const prefetched = peekPrefetchedOriginal(url);
       if (prefetched) {
         swapIn(image.id, url, prefetched.w, prefetched.h);
         return;
       }
+      if (pendingUrlRef.current === url) return;
       pendingUrlRef.current = url;
       setPendingUrl(url);
     });
@@ -3272,7 +3297,7 @@ function Viewer({
       }
       setPendingUrl(null);
     };
-  }, [image, store]);
+  }, [image, store, swapIn, rawUpgradeTick]);
 
   useEffect(() => {
     return () => {

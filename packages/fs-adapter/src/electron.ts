@@ -92,8 +92,10 @@ export interface KanitsuDesktopBridge {
   listLibraryChildren(folder: DesktopFsEntry): Promise<DesktopFsEntry[]>;
   readLibraryBlob(file: DesktopFsEntry): Promise<Uint8Array>;
   readLibraryThumbnail(file: DesktopFsEntry, maxSize: number, priority?: number): Promise<Uint8Array>;
-  /** RAW 专用:确保完整解码派生图存在,返回其查看 URL(非 RAW 不应调用)。 */
+  /** RAW 专用:确保解码派生图存在,返回其查看 URL(非 RAW 不应调用)。 */
   ensureRawDerivative(file: DesktopFsEntry): Promise<string>;
+  /** RAW 完整解码在后台覆盖预览级派生后推送(渲染端热替换当前图)。 */
+  onRawDerivativeUpdated(callback: (info: { derivPath: string }) => void): () => void;
   moveLibraryEntry(entry: DesktopFsEntry, toFolder: DesktopFsEntry, newName?: string): Promise<DesktopFsEntry>;
   removeLibraryEntry(entry: DesktopFsEntry): Promise<void>;
   exportZip(targetRelPath: string): Promise<{
@@ -228,9 +230,10 @@ export class ElectronLibraryStore implements LibraryStore {
   }
 
   async getViewerUrl(file: FileRef): Promise<string> {
-    // RAW 无法被 Chromium <img> 解码:改用主进程完整解码的派生 JPEG
-    // (userData/rawcache,kanitsu-file 协议同样流式服务)。首次打开需等待
-    // 解码(秒级),生成结果落盘,后续打开即时返回。
+    // RAW 无法被 Chromium <img> 解码:改用主进程解码的派生 JPEG
+    // (userData/rawcache,kanitsu-file 协议同样流式服务)。首访立即返回
+    // 预览级派生(内嵌预览提取,毫秒级);完整解码后台进行,完成后经
+    // onRawDerivativeUpdated 推送,渲染端热替换。
     if (isRawImage(file.name)) {
       return requireBridge().ensureRawDerivative(toEntry(file));
     }
@@ -238,6 +241,10 @@ export class ElectronLibraryStore implements LibraryStore {
     // 主进程通过 kanitsu-file 协议直接服务原始文件，渲染进程用解码缓存池
     // 预解码相邻原图来缓解大图切换卡顿（见 LibraryBrowser 的 Viewer）。
     return `kanitsu-file://file/?p=${encodeURIComponent(file.id)}`;
+  }
+
+  onRawDerivativeUpdated(callback: (info: { derivPath: string }) => void): () => void {
+    return requireBridge().onRawDerivativeUpdated(callback);
   }
 
   releaseViewerUrl(_url: string): void {

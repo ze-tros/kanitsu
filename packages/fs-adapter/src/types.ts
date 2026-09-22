@@ -78,6 +78,12 @@ export interface LibraryStore {
   getViewerUrl(file: FileRef): Promise<string>;
   /** Releases resources held by a viewer URL (no-op for protocol-backed URLs). */
   releaseViewerUrl(url: string): void;
+  /**
+   * RAW 派生图后台升级推送(桌面端实现):首次查看先返回预览级派生,
+   * 完整解码覆盖后触发回调,渲染端应重新调用 getViewerUrl 热替换当前图。
+   * 未实现的平台(Memory;Android 的升级在 WebView 内完成)可省略。
+   */
+  onRawDerivativeUpdated?(callback: (info: { derivPath: string }) => void): () => void;
   move(entry: FsEntry, toFolder: FolderRef, newName?: string): Promise<FsEntry>;
   remove(entry: FsEntry): Promise<void>;
   /** Zips targetRelPath (empty = whole library) preserving directory structure. */
