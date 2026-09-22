@@ -57,8 +57,27 @@ export async function openBrowserRawSession(bytes: Uint8Array, opts?: RawDecodeO
       );
       if (!thumb || !thumb.data || thumb.data.byteLength === 0 || !thumb.width || !thumb.height) return null;
       const fmt = typeof thumb.format === 'string' ? thumb.format : THUMB_FORMATS[Number(thumb.format)] ?? 'unknown';
-      if (fmt === 'jpeg') return { kind: 'jpeg', data: thumb.data, width: thumb.width, height: thumb.height };
-      if (fmt === 'bitmap') return { kind: 'rgb', data: thumb.data, width: thumb.width, height: thumb.height };
+      if (fmt === 'jpeg') {
+        // jpeg 预览自带 EXIF 方向标记,直通/按 EXIF 定向即可,rotateDeg 恒 0。
+        return { kind: 'jpeg', data: thumb.data, width: thumb.width, height: thumb.height, rotateDeg: 0 };
+      }
+      if (fmt === 'bitmap') {
+        // 位图预览不带方向:从元数据取 flip 换算顺时针旋转角。
+        let flip = 0;
+        try {
+          const meta = await call<Record<string, unknown> | null>('metadata', [false]);
+          flip = Number(meta?.flip ?? 0);
+        } catch {
+          // 元数据失败按不旋转处理。
+        }
+        return {
+          kind: 'rgb',
+          data: thumb.data,
+          width: thumb.width,
+          height: thumb.height,
+          rotateDeg: ({ 3: 180, 5: 270, 6: 90 } as Record<number, number>)[flip] ?? 0,
+        };
+      }
       return null;
     },
     async pixels() {

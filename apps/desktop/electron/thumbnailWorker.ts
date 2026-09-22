@@ -347,17 +347,39 @@ export async function generateAnimatedGifThumb(filePath: string, targetSize: num
 // —— RAW 缩略图（libraw 内嵌预览优先）——
 // 相机 RAW 普遍内嵌机内全尺寸 JPEG 预览，提取是毫秒级；仅在无内嵌预览时
 // （部分 DNG/老机型）回退完整解码，并用 halfSize 控制耗时。
-async function sharpResizeToJpeg(input: Buffer, targetSize: number, raw?: { width: number; height: number; channels: 3 }): Promise<Uint8Array> {
+// 方向：竖拍 RAW 的预览多为「横置像素 + EXIF 方向标记」，重编码会丢标记，
+// 因此 jpeg 预览必须 .rotate() 按 EXIF 自动定向；rgb 位图预览无 EXIF，
+// 由会话给出 flip 换算的旋转角。
+async function sharpResizeToJpeg(
+  input: Buffer,
+  targetSize: number,
+  opts?: { raw?: { width: number; height: number; channels: 3 }; rotateDeg?: number },
+): Promise<Uint8Array> {
+  const raw = opts?.raw;
   const image = sharp(input, { raw, failOn: 'none' });
   const meta = raw ? undefined : await image.metadata();
   const width = raw?.width ?? meta?.width ?? 0;
   const height = raw?.height ?? meta?.height ?? 0;
   if (!width || !height) throw new Error('无法读取图像尺寸');
-  const finalScale = Math.min(1, targetSize / Math.max(width, height));
-  const out = await sharp(input, { raw, failOn: 'none' })
+  // 旋转后才是显示宽高:显式 rotateDeg(90/270)或 EXIF orientation 5-8 都会交换宽高,
+  // 缩放目标框必须按旋转后的尺寸计算,否则竖图被塞进横框、长边缩水。
+  const exifOrientation = meta?.orientation ?? 1;
+  const swapped = opts?.rotateDeg === 90 || opts?.rotateDeg === 270 || (!raw && exifOrientation >= 5 && exifOrientation <= 8);
+  const displayW = swapped ? height : width;
+  const displayH = swapped ? width : height;
+  const finalScale = Math.min(1, targetSize / Math.max(displayW, displayH));
+  const pipeline = sharp(input, { raw, failOn: 'none' });
+  if (raw) {
+    // 位图预览：无 EXIF，按会话给出的 flip 旋转角定向。
+    if (opts?.rotateDeg) pipeline.rotate(opts.rotateDeg);
+  } else {
+    // jpeg 预览：按 EXIF 方向自动定向（无标记时无操作），随后标记被剥离。
+    pipeline.rotate();
+  }
+  const out = await pipeline
     .resize({
-      width: Math.max(1, Math.round(width * finalScale)),
-      height: Math.max(1, Math.round(height * finalScale)),
+      width: Math.max(1, Math.round(displayW * finalScale)),
+      height: Math.max(1, Math.round(displayH * finalScale)),
       fit: 'inside',
     })
     .jpeg({ quality: 80 })
@@ -376,9 +398,12 @@ async function generateRawThumbnail(filePath: string, targetSize: number): Promi
     }
     if (thumb?.kind === 'rgb') {
       return await sharpResizeToJpeg(Buffer.from(thumb.data), targetSize, {
-        width: thumb.width,
-        height: thumb.height,
-        channels: 3,
+        raw: {
+          width: thumb.width,
+          height: thumb.height,
+          channels: 3,
+        },
+        rotateDeg: thumb.rotateDeg,
       });
     }
     // 无内嵌预览：重新以 halfSize 打开，完整解码后缩放（会话的解码设置在
@@ -387,9 +412,11 @@ async function generateRawThumbnail(filePath: string, targetSize: number): Promi
     session = await openNodeRawSession(bytes, { halfSize: true });
     const pixels = await session.pixels();
     return await sharpResizeToJpeg(Buffer.from(pixels.data), targetSize, {
-      width: pixels.width,
-      height: pixels.height,
-      channels: 3,
+      raw: {
+        width: pixels.width,
+        height: pixels.height,
+        channels: 3,
+      },
     });
   } finally {
     session.close();

@@ -38,6 +38,11 @@ export interface RawThumbnail {
   data: Uint8Array;
   width: number;
   height: number;
+  /**
+   * rgb 位图预览无 EXIF 方向标记:按 LibRaw flip 换算的顺时针旋转角
+   * (0/90/180/270),消费方编码前需旋转。jpeg 预览自带 EXIF,恒为 0。
+   */
+  rotateDeg: number;
 }
 
 export interface RawPixels {
@@ -125,12 +130,32 @@ export async function openNodeRawSession(bytes: Uint8Array, opts?: RawDecodeOpti
     throw err;
   }
   let closed = false;
+  /** LibRaw flip → 显示所需顺时针旋转角(完整解码已在像素内应用 flip)。 */
+  const flipToDeg: Record<number, number> = { 3: 180, 5: 270, 6: 90 };
   return {
     async thumbnail() {
       const thumb = await instance.thumbnailData();
       if (!thumb || thumb.data.byteLength === 0 || !thumb.width || !thumb.height) return null;
-      if (thumb.format === 'jpeg') return { kind: 'jpeg', data: thumb.data, width: thumb.width, height: thumb.height };
-      if (thumb.format === 'bitmap') return { kind: 'rgb', data: thumb.data, width: thumb.width, height: thumb.height };
+      if (thumb.format === 'jpeg') {
+        return { kind: 'jpeg', data: thumb.data, width: thumb.width, height: thumb.height, rotateDeg: 0 };
+      }
+      if (thumb.format === 'bitmap') {
+        // 位图预览不带方向:从元数据取 flip 换算旋转角。
+        let flip = 0;
+        try {
+          const meta = await instance.metadata(false);
+          flip = Number(meta?.flip ?? 0);
+        } catch {
+          // 元数据失败按不旋转处理。
+        }
+        return {
+          kind: 'rgb',
+          data: thumb.data,
+          width: thumb.width,
+          height: thumb.height,
+          rotateDeg: flipToDeg[flip] ?? 0,
+        };
+      }
       return null;
     },
     async pixels() {

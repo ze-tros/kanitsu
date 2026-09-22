@@ -19,9 +19,13 @@ export async function extractRawPreviewJpeg(
     const thumb = await session.thumbnail();
     if (!thumb) return null;
     if (thumb.kind === 'jpeg') {
+      // 直通保留 EXIF 方向标记,<img> 渲染时浏览器自动定向。
       return new Blob([thumb.data as BlobPart], { type: 'image/jpeg' });
     }
-    return await encodeRgbJpeg(thumb.data, thumb.width, thumb.height, { quality: opts?.quality ?? 0.9 });
+    return await encodeRgbJpeg(thumb.data, thumb.width, thumb.height, {
+      quality: opts?.quality ?? 0.9,
+      rotateDeg: thumb.rotateDeg,
+    });
   } finally {
     session.close();
   }
@@ -48,9 +52,10 @@ export async function decodeRawToJpeg(
   }
 }
 
-/** 内嵌 JPEG 预览超过网格缩略图需求时降采样,控制 Blob 体积(内存 LRU 按字节计)。 */
+/** 内嵌 JPEG 预览超过网格缩略图需求时降采样,控制 Blob 体积(内存 LRU 按字节计)。
+ *  必须显式 from-image:重编码会剥离 EXIF 方向,不定向则方向丢失。 */
 async function downscaleJpegBlob(blob: Blob, maxDim: number, quality: number): Promise<Blob> {
-  const bitmap = await createImageBitmap(blob);
+  const bitmap = await createImageBitmap(blob, { imageOrientation: 'from-image' });
   try {
     const scale = Math.min(1, maxDim / Math.max(bitmap.width, bitmap.height));
     if (scale >= 1) return blob;

@@ -11,6 +11,12 @@ export interface RawPreview {
   data: Uint8Array;
   width: number;
   height: number;
+  /**
+   * rgb 位图预览无 EXIF 方向标记:按 LibRaw flip 换算的顺时针旋转角
+   * (0/90/180/270),编码为 JPEG 前需旋转。jpeg 预览自带 EXIF,恒为 0
+   * (消费方需保留 EXIF 直通,或重编码时按 EXIF 自动定向)。
+   */
+  rotateDeg: number;
 }
 
 /** 完整解码结果:RGB8(已含白平衡/色域/旋转处理)。 */
