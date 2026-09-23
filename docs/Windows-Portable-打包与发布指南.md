@@ -98,6 +98,14 @@ git diff -- package.json apps/desktop/package.json package-lock.json
 
 版本变更应先提交并合并到计划发布的分支，再创建 tag。不要在未合并的临时工作区上制作正式发布。
 
+### 4.1 预发布版本（alpha / beta / rc）
+
+SemVer 允许在补丁号后用连字符携带预发布段，例如 `0.3.0-alpha.1`、`0.3.0-beta.2`、`0.3.0-rc.1`。发布步骤与正式版完全一致：同步修改两个 `package.json` 的 `version`，提交后打 `v0.3.0-alpha.1` 形式的 tag 并推送。
+
+tag 或版本号含预发布段时，`Windows Portable` 工作流创建的 draft Release 会自动附加 Pre-release 标记，发布后在 Releases 页面明确显示为预发布，不与稳定版混淆。SemVer 排序保证 `0.3.0-alpha.1 < 0.3.0-beta.1 < 0.3.0-rc.1 < 0.3.0`。`Android Release APK` 工作流同样由 `v*` tag 触发，预发布 tag 会产出对应的签名 APK artifact。
+
+预发布版本的验收流程与正式版一致（第 9 节），差异仅在发布定位：适合先行体验与内部测试，不作为稳定渠道分发。
+
 ## 5. 本地发布预检
 
 首次检查或 lockfile 变更后，使用干净安装：

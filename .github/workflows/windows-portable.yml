@@ -104,6 +104,11 @@ jobs:
             echo "已存在 $TAG 的 Release，跳过创建；如需重做，请先删除该 draft。"
             exit 0
           fi
+          # semver 预发布段（如 0.3.0-alpha.1）自动附加 Pre-release 标记
+          prerelease_flags=()
+          case "$VERSION" in
+            *-*) prerelease_flags+=(--prerelease) ;;
+          esac
           gh release create "$TAG" \
             "release-assets/Kanitsu-Portable-${VERSION}-x64.exe" \
             "release-assets/SHA256SUMS.txt" \
@@ -111,4 +116,5 @@ jobs:
             --notes "$RELEASE_NOTES" \
             --generate-notes \
             --draft \
+            "${prerelease_flags[@]}" \
             --verify-tag
