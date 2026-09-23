@@ -10,13 +10,9 @@ import type { ThumbnailDebugStats, ClearCacheResult, DesktopRawViewMode } from '
 import { OrganizeRulesManager } from './OrganizeRulesModal';
 import { SidebarResizeHandle } from './SidebarResizeHandle';
 import {
-  chooseLibraryLocation,
-  describeLocationChange,
-  fetchLibraryLocation,
-  resetLibraryLocation,
-  supportsLibraryLocation,
-  type LibraryLocationInfo,
-} from './libraryLocation';
+  fetchDataDir,
+  supportsDataDir,
+} from './dataDir';
 import {
   ACCENT_OPTIONS,
   DEFAULT_ACCENT,
@@ -97,8 +93,6 @@ type SettingsPageProps = {
   /** RAW 查看模式(仅 Electron 有可切换项;Web/Android 平台固定不渲染)。 */
   rawViewMode: DesktopRawViewMode;
   onRawViewModeChange: (mode: DesktopRawViewMode) => void;
-  /** 图包保存位置变更后回调：调用方需重扫图库（仅桌面端会触发）。 */
-  onLibraryLocationChange?: () => void;
 };
 
 export function SettingsPage({
@@ -117,7 +111,6 @@ export function SettingsPage({
   onAccentChange,
   rawViewMode,
   onRawViewModeChange,
-  onLibraryLocationChange,
 }: SettingsPageProps) {
   const [activeTab, setActiveTab] = useState<SettingsTabId>('general');
   const [searchQuery, setSearchQuery] = useState('');
@@ -272,7 +265,7 @@ export function SettingsPage({
 
                 <section className="desktop-settings-section">
                   <header className="desktop-settings-section-heading"><h2>应用</h2></header>
-                  <LibraryLocationRow onApplied={onLibraryLocationChange} />
+                  <DataDirRow />
                   <div className="desktop-settings-row"><div><strong>运行环境</strong></div><strong>{runtimeLabel ?? '—'}</strong></div>
                   <div className="desktop-settings-row"><div><strong>图库占用</strong><span>已索引的本地文件总量</span></div><strong>{fmtBytes(libraryBytes)} · {libraryFileCount.toLocaleString('zh-CN')} 个文件</strong></div>
                   <div className="desktop-settings-row"><div><strong>自定义整理规则</strong></div><strong>{rules.length} 条</strong></div>
@@ -300,65 +293,36 @@ function fmtBytes(n: number): string {
 }
 
 /**
- * 图包保存位置（仅桌面端）：展示当前路径，并提供切换/恢复默认。
- * 路径选择与「是否搬移现有图包」的询问都在主进程完成（含目录安全校验），
- * 这里只负责展示与重扫。
+ * 数据目录（仅桌面端）：只读展示。数据目录在首次启动引导里确定；更改需要
+ * 整体搬移图库与缓存，本期不提供入口。
  */
-function LibraryLocationRow({ onApplied }: { onApplied?: () => void }) {
-  const supported = supportsLibraryLocation();
-  const [info, setInfo] = useState<LibraryLocationInfo | null>(null);
-  const [status, setStatus] = useState('');
-  const [busy, setBusy] = useState(false);
+function DataDirRow() {
+  const supported = supportsDataDir();
+  const [dir, setDir] = useState<string | null>(null);
 
   useEffect(() => {
     if (!supported) return;
     let cancelled = false;
-    void fetchLibraryLocation().then((next) => {
-      if (!cancelled) setInfo(next);
+    void fetchDataDir().then((next) => {
+      if (!cancelled) setDir(next);
     });
     return () => {
       cancelled = true;
     };
   }, [supported]);
 
-  // Web 演示 / Android 的位置由平台固定，没有可切换的项，整行不渲染。
+  // Web 演示 / Android 的数据目录由平台固定，整行不渲染。
   if (!supported) return null;
-
-  const apply = async (action: 'choose' | 'reset'): Promise<void> => {
-    setBusy(true);
-    const result = action === 'choose' ? await chooseLibraryLocation() : await resetLibraryLocation();
-    setBusy(false);
-    setStatus(describeLocationChange(result));
-    if (result && !result.canceled && !result.error) {
-      setInfo(await fetchLibraryLocation());
-      onApplied?.();
-    }
-  };
 
   return (
     <div className="desktop-settings-row">
       <div>
-        <strong>图包保存位置</strong>
-        <span>导入的图片会复制一份到这里；整理、重命名、删除只作用于这份副本，原始文件夹不受影响。缩略图缓存也在该目录的 .kanitsu-cache 下。</span>
+        <strong>数据目录</strong>
       </div>
       <div className="desktop-settings-location">
         <div className="desktop-settings-location-main">
-          <code className="desktop-settings-path">{info?.path ?? '读取中…'}</code>
-          <button type="button" className="desktop-settings-action" disabled={busy} onClick={() => void apply('choose')}>
-            更改
-          </button>
-          {info && !info.isDefault && (
-            <button
-              type="button"
-              className="desktop-settings-action is-quiet"
-              disabled={busy}
-              onClick={() => void apply('reset')}
-            >
-              恢复默认
-            </button>
-          )}
+          <code className="desktop-settings-path">{dir ?? '读取中…'}</code>
         </div>
-        {status && <span className="desktop-settings-hint" role="status">{status}</span>}
       </div>
     </div>
   );

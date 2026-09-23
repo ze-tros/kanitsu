@@ -81,15 +81,26 @@ ImportSourcePicker + LibraryStore
 
 | 平台 | 图包库 | 索引 | 缩略图 |
 |---|---|---|---|
-| Electron | 默认 `userData/albums`，可改到自选目录 | IndexedDB | 图库内 `.kanitsu-cache/thumbcache` + 内存缓存 |
+| Electron | `<数据目录>/albums` | 主会话 IndexedDB（`<数据目录>/profile`） | 图库内 `.kanitsu-cache/thumbcache` + 内存缓存 |
 | Android | 应用外部文件目录 `albums/` | WebView IndexedDB | 原生磁盘缓存 + 渲染端缓存 |
 | Web demo | 内存 | 内存 | 内存 object URL |
 
 图包库和缓存属于应用数据。导出文件由用户选择保存位置，不随应用数据管理。
 
-桌面端图包库位置记录在 `userData/settings.json`：首次运行弹窗确认，之后可在「设置 → 通用 → 图包保存位置」更改。导入只把源文件复制一份进图库，图库内的整理与删除不触及源目录；为避免把用户自己的照片目录整体当成图库，新位置必须是空目录，或带 Kanitsu 标记文件（`.kanitsu-library.json`）的既有图库。
+桌面端除 `settings.json`（固定在 `%APPDATA%\Kanitsu`，仅保存数据目录指针与偏好）外，一切数据都放进**数据目录**——用户首次启动时在引导窗口里指定：
 
-图库根目录下有两个应用私有项：标记文件 `.kanitsu-library.json` 与缓存目录 `.kanitsu-cache/thumbcache`（缩略图磁盘缓存，上限 1.5GB）。缓存跟着图库走，是因为它描述的就是这批文件；两者必须被扫描、导出 ZIP、文件统计与位置搬移跳过，否则缓存里的 JPEG 会被当作图库图片。旧版本留在 `userData/thumbcache` 的缓存启动时清理一次。
+```text
+<数据目录>/
+  albums/            图库（含 .kanitsu-library.json 标记、.kanitsu-cache/thumbcache 缩略图缓存）
+  rawcache/          RAW/HEIF 查看派生图（LRU 上限 2GB）
+  logs/              主进程日志（保留最近 14 个文件）
+  profile/           主会话存储（IndexedDB 索引、localStorage、Cache）
+  profile/browser/   Chromium 进程级文件（Local State/GPUCache 等，与主会话存储隔离）
+```
+
+首次启动时数据目录未设置，主进程只开一个跑在内存会话上的引导窗口（`?setup=1`）；选定目录并确认后才创建主窗口，因此不存在需要搬移的旧状态，全程不重启。数据目录必须是空目录或带标记文件（`.kanitsu-data.json`）的既有数据目录，且不能在系统应用数据目录内。导入只把源文件复制一份进图库，图库内的整理与删除不触及源目录。
+
+图库根目录下有两个应用私有项：标记文件 `.kanitsu-library.json` 与缓存目录 `.kanitsu-cache/thumbcache`（缩略图磁盘缓存，上限 1.5GB）。缓存跟着图库走，是因为它描述的就是这批文件；两者必须被扫描、导出 ZIP 与文件统计跳过，否则缓存里的 JPEG 会被当作图库图片。
 
 ## 4. 核心流程
 
@@ -172,7 +183,7 @@ ImportSourcePicker + LibraryStore
 
 - 解码库为 libraw-wasm（LibRaw 的 WebAssembly 编译），格式白名单维护在 `packages/core/src/path.ts`（桌面主进程持有一份受 tsc rootDir 限制的副本，Android 侧 SafSource/ZipExportService 各持有一份 Java 副本，多处需同步）。
 - 混合解码策略：网格缩略图提取相机内嵌全尺寸 JPEG 预览（毫秒级，字节直通）；查看器完整解码（demosaic + 相机白平衡 + sRGB，秒级），先以预览层顶上、当前页后台升级替换。
-- 桌面：缩略图走既有 worker 池（RAW 任务超时放宽至 30s）；查看器派生图由单并发 worker 生成并落盘 `userData/rawcache`（LRU 上限 2GB / 4096 文件），经 `kanitsu-file://` 流式服务。
+- 桌面：缩略图走既有 worker 池（RAW 任务超时放宽至 30s）；查看器派生图由单并发 worker 生成并落盘 `<数据目录>/rawcache`（LRU 上限 2GB / 4096 文件），经 `kanitsu-file://` 流式服务。
 - Android：原生侧仅做原样导入/导出，解码在 WebView Worker 内；原文件经本地 HTTP 服务流式 fetch，不通过 base64 桥；缩略图串行解码，查看器当前页完整解码使用 halfSize 控内存。
 - Web 演示端（memory store）不开启 RAW 收录，避免收录后无法显示。
 
@@ -180,7 +191,7 @@ ImportSourcePicker + LibraryStore
 
 - 扩展名白名单为 `packages/core/src/path.ts` 的 `HEIF_IMAGE_EXT`（heic/heif/hif），经 `enableHeif` 扫描开关收录（桌面/Android 开启，Web 演示端关闭，开关变化触发索引重扫），与 RAW 的 `enableRaw` 相互独立。
 - 解码库为 libheif（wasm，自带 HEVC 解码器 libde265；sharp 预编译的 libvips 不含 HEVC 解码器，不能用于 HEIC）。解码经内存缓冲区读取，对个别声明长度略超文件尾的相机 HIF（Windows 看图可开）比文件源更宽容。
-- 桌面：缩略图优先解容器内嵌的缩略图/预览 item（毫秒级；只考虑非隐藏的独立图像 item，主图常由隐藏网格分块拼成、单独解一块只会得到局部画面；清晰度下限取 targetSize/3，允许网格卡片上适度放大）。无合格 item 或 item 解码失败（如部分 Sony HIF 的内嵌 item 实际编码尺寸与 ispe 声明不符，被 libheif 的安全校验拒绝）时回退主图完整解码（25MP 约 2~3s，超时放宽至 30s）。查看器与 `readBlob` 复用 RAW 派生管线（`userData/rawcache`，长边 ≤8192，JPEG 90），始终主图完整解码，无独立预览级派生。
+- 桌面：缩略图优先解容器内嵌的缩略图/预览 item（毫秒级；只考虑非隐藏的独立图像 item，主图常由隐藏网格分块拼成、单独解一块只会得到局部画面；清晰度下限取 targetSize/3，允许网格卡片上适度放大）。无合格 item 或 item 解码失败（如部分 Sony HIF 的内嵌 item 实际编码尺寸与 ispe 声明不符，被 libheif 的安全校验拒绝）时回退主图完整解码（25MP 约 2~3s，超时放宽至 30s）。查看器与 `readBlob` 复用 RAW 派生管线（`<数据目录>/rawcache`，长边 ≤8192，JPEG 90），始终主图完整解码，无独立预览级派生。
 - Android：缩略图原生可解（ImageDecoder/BitmapFactory 自带 HEIF 支持，ThumbnailService 零改动）；全图查看由 `DerivativeService` 原生解码转 JPEG 落盘（`getExternalFilesDir/cache/derivatives`，长边 ≤6000，LRU 上限 1GB，单路串行），经 `_capacitor_file_` 流式服务，位于图库外不进扫描。
 - 一期限制：HDR（10-bit HLG/BT2020）按 8-bit sRGB 呈现（观感偏灰）；动图/多图 HEIF 取首帧；查看器全图始终解主图（内嵌 item 只用于网格缩略图加速）。
 - Web 演示端（memory store）不开启 HEIF 收录，理由同 RAW。

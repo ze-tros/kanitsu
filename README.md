@@ -80,7 +80,7 @@ GitHub Actions 中的 `Windows Portable` 工作流支持手动运行，也会在
 
 正式 CI 固定使用 Electron 和 electron-builder 的官方 GitHub 发布源。本地网络需要镜像时，可在当前 shell 显式设置 `ELECTRON_MIRROR` 和 `ELECTRON_BUILDER_BINARIES_MIRROR`；镜像配置不应用于生成正式发布产物。
 
-此处的 Portable 指“单 EXE、免安装”。图包库、缓存和日志仍保存在应用数据目录，不会随 EXE 移动。图包库默认在 `userData/albums`（缩略图缓存放在其 `.kanitsu-cache` 子目录），首次启动会弹窗确认保存位置，之后可在「设置 → 通用 → 图包保存位置」改到自选目录；日志始终留在 `userData/logs`。
+此处的 Portable 指“单 EXE、免安装”，不表示“数据随 EXE 携带”。数据保存在用户首次启动时选定的**数据目录**（图库在其 `albums` 子目录，缩略图缓存放在图库的 `.kanitsu-cache` 子目录，另有 RAW 预览缓存、日志与索引数据），不会随 EXE 移动；系统应用数据目录（`%APPDATA%\Kanitsu`）只保留一个小的 `settings.json` 配置文件。
 
 Android debug APK（一键构建 Web、同步 Capacitor 并生成 APK）：
 

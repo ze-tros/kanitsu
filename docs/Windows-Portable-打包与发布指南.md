@@ -11,7 +11,7 @@ Kanitsu-Portable-<version>-x64.exe
 SHA256SUMS.txt
 ```
 
-Portable 在这里表示“单 EXE、免安装”，不表示“数据随 EXE 携带”。图包库、缓存和日志仍写入应用数据目录。图包库默认是 `userData/albums`（缩略图缓存放在其 `.kanitsu-cache` 子目录），可在首次启动的弹窗或「设置 → 通用 → 图包保存位置」改到自选目录；日志始终留在 `userData/logs`。
+Portable 在这里表示“单 EXE、免安装”，不表示“数据随 EXE 携带”。数据写入用户首次启动时选定的**数据目录**（图库在其 `albums` 子目录，缩略图缓存放在图库的 `.kanitsu-cache` 子目录，另有 RAW 预览缓存、日志与索引数据）；系统应用数据目录（`%APPDATA%\Kanitsu`）只保留一个小的 `settings.json` 配置文件。
 
 当前还没有 Windows 代码签名证书和自定义 `.ico` 图标，因此：
 

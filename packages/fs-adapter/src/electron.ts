@@ -59,25 +59,16 @@ export interface ClearCacheResult {
   diskBytes: number;
 }
 
-/** 图包保存位置（桌面端专有设置）。 */
-export interface LibraryLocationInfo {
-  path: string;
-  isDefault: boolean;
-  /** 首次运行引导是否已确认；false 时渲染端弹窗确认保存位置。 */
-  confirmed: boolean;
-  exists: boolean;
-}
-
-/** 更改图包保存位置的结果；error 为面向用户的中文说明。 */
-export interface LibraryLocationChangeResult {
+/** 数据目录候选结果（首次启动引导回显用；error 为面向用户的中文说明）。 */
+export interface DataDirChoice {
   canceled: boolean;
   path?: string;
-  isDefault?: boolean;
-  /** 是否把原位置的图库内容一并搬到了新位置。 */
-  moved?: boolean;
-  movedCount?: number;
-  /** 搬移时因目标已有同名项而跳过的项数（这些文件仍留在原位置）。 */
-  skippedCount?: number;
+  error?: string;
+}
+
+/** 确认数据目录的结果。 */
+export interface DataDirConfirmResult {
+  ok: boolean;
   error?: string;
 }
 
@@ -96,14 +87,12 @@ export interface KanitsuDesktopBridge {
   onImportProgress(callback: (progress: NativeImportProgress) => void): () => void;
   cancelTask(token: string): Promise<void>;
   releaseSource(): Promise<void>;
-  /** 图包保存位置：首次运行引导与「设置 → 通用」共用。 */
-  getLibraryLocation(): Promise<LibraryLocationInfo>;
-  /** 确认当前保存位置（首次运行引导的「使用此位置」）。 */
-  acknowledgeLibraryLocation(): Promise<LibraryLocationInfo>;
-  /** 打开系统文件夹选择框并切换保存位置；取消时 canceled 为 true。 */
-  chooseLibraryLocation(): Promise<LibraryLocationChangeResult>;
-  /** 切回默认保存位置。 */
-  resetLibraryLocation(): Promise<LibraryLocationChangeResult>;
+  /** 当前数据目录（空串=尚未设置，首次启动引导未完成）。 */
+  getDataDir(): Promise<string>;
+  /** 打开系统文件夹选择框挑选数据目录（只回显候选、不落盘）。 */
+  chooseDataDir(): Promise<DataDirChoice>;
+  /** 确认候选路径为数据目录：主进程校验落盘后直接打开主界面。 */
+  confirmDataDir(path: string): Promise<DataDirConfirmResult>;
   getLibraryRoot(): Promise<DesktopFsEntry>;
   ensureLibraryRoot(): Promise<DesktopFsEntry>;
   createLibraryFolder(parent: DesktopFsEntry, name: string): Promise<DesktopFsEntry>;
@@ -267,7 +256,7 @@ export class ElectronLibraryStore implements LibraryStore {
 
   async getViewerUrl(file: FileRef): Promise<string> {
     // RAW/HEIF 无法被 Chromium <img> 解码:改用主进程解码的派生 JPEG
-    // (userData/rawcache,kanitsu-file 协议同样流式服务)。查看模式随调用
+    // (<数据目录>/rawcache,kanitsu-file 协议同样流式服务)。查看模式随调用
     // 传入:camera=内嵌预览直出(毫秒级,即机内渲染);developed=先预览级、
     // 完整解码后台升级(经 onRawDerivativeUpdated 推送,渲染端热替换)。
     // 完整解码两种模式下都在后台执行,模式只决定显示哪份。HEIF 无独立

@@ -112,8 +112,6 @@ import {
 } from './navHistory';
 import { ContextMenu, type ContextMenuItem, type ContextMenuModel } from './ContextMenu';
 import { CoverPickerModal } from './CoverPickerModal';
-import { LibraryLocationModal } from './LibraryLocationModal';
-import { fetchLibraryLocation, shouldPromptLibraryLocation, type LibraryLocationInfo } from './libraryLocation';
 import { loadCustomRules, saveCustomRules } from './OrganizeRulesModal';
 import { OrganizePreview } from './OrganizePreview';
 import { SidebarResizeHandle } from './SidebarResizeHandle';
@@ -372,8 +370,6 @@ export function LibraryBrowser({
   });
   const [customRules, setCustomRules] = useState<CustomOrganizeRule[]>(() => loadCustomRules());
   const [showSettings, setShowSettings] = useState(false);
-  // 首次运行（桌面端）的保存位置确认弹窗：未确认过才弹，见下方启动 effect。
-  const [locationPrompt, setLocationPrompt] = useState<LibraryLocationInfo | null>(null);
   const libraryRootRef = useRef<HTMLDivElement>(null);
   const settingsButtonRef = useRef<HTMLButtonElement>(null);
   const sidebarScrollRef = useRef<HTMLDivElement>(null);
@@ -551,19 +547,6 @@ export function LibraryBrowser({
     const t = setTimeout(() => notify(''), 3500);
     return () => clearTimeout(t);
   }, [message]);
-
-  // 首次运行（仅桌面端）：确认图包的保存位置。主进程已按默认目录就绪，用户可以
-  // 直接确认，也可以先改到自选目录——所以确认后重扫一次，别让界面停在旧图库上。
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      const info = await fetchLibraryLocation();
-      if (!cancelled && shouldPromptLibraryLocation(info)) setLocationPrompt(info);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   const searchTerm = searchQuery.trim().toLowerCase();
   const folderImages = useMemo(() => {
@@ -1860,7 +1843,6 @@ export function LibraryBrowser({
             onAccentChange={setAccent}
             rawViewMode={rawViewMode}
             onRawViewModeChange={handleRawViewModeChange}
-            onLibraryLocationChange={() => void refresh()}
           />
         </div>
       </div>
@@ -2298,16 +2280,6 @@ export function LibraryBrowser({
             setCoverPickerFolder(null);
           }}
           onCancel={() => setCoverPickerFolder(null)}
-        />
-      )}
-
-      {locationPrompt && (
-        <LibraryLocationModal
-          info={locationPrompt}
-          onConfirm={() => {
-            setLocationPrompt(null);
-            void refresh();
-          }}
         />
       )}
 

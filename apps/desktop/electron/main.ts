@@ -1,14 +1,15 @@
 // Electron main process: native file system for import and album library.
-import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, net, protocol } from 'electron';
-import { promises as fs, createWriteStream, readFileSync, writeFileSync } from 'node:fs';
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, net, protocol, session, type Protocol, type Session } from 'electron';
+import { promises as fs, createWriteStream, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { Worker } from 'node:worker_threads';
 import { pathToFileURL } from 'node:url';
 import archiver from 'archiver';
 import { imageSize } from 'image-size';
-import { logger, readLogTail, setLogLevel } from './logger';
+import { logger, readLogTail, rotateLogFiles, setLogDir, setLogLevel } from './logger';
 import { HEIF_IMAGE_EXT, RAW_IMAGE_EXT, isHeifImage, isRawImage, librawDistDir, parseRawViewMode, type RawViewMode } from './rawDecoder';
 
 // 应用 bundle 协议：生产构建渲染层以 kanitsu-app:// 加载。file:// 下绝对路径会
@@ -33,6 +34,8 @@ protocol.registerSchemesAsPrivileged([
 const IMAGE_EXT = new Set(['jpg', 'jpe', 'jpeg', 'png', 'webp', 'avif', 'bmp', 'gif', ...RAW_IMAGE_EXT, ...HEIF_IMAGE_EXT]);
 
 let mainWindow: BrowserWindow | null = null;
+/** 首次启动引导窗口（数据目录未设置时的唯一窗口，内存会话，不落盘）。 */
+let setupWindow: BrowserWindow | null = null;
 
 interface FsFileMeta {
   relPath: string;
@@ -95,7 +98,6 @@ function buildIndexJson(root: string, files: FsFileMeta[], exportedAt = Date.now
   return JSON.stringify({ version: 1, exportedAt, root, folders, images });
 }
 
-let libraryRoot = '';
 let allowedSourceRoot: string | null = null;
 const importCancelStates = new Map<string, { cancelled: boolean }>();
 
@@ -128,18 +130,27 @@ interface ClearCacheResult {
   diskBytes: number;
 }
 
-// —— 图包保存位置（桌面端可配置） ——
-// 默认仍是 userData/albums，用户可在首次启动引导或「设置 → 通用」改到自选目录。
-// 位置存在 userData/settings.json（与图库内容分离），选定的目录里写一个标记文件
-// 用于识别「这个目录由 Kanitsu 管理」。之所以要标记：整理/删除只作用于图库内部，
-// 若允许把用户自己的照片目录整体选成图库，那些原片就会被纳入整理与删除范围。
+// —— 数据目录（桌面端首次启动时指定） ——
+// %APPDATA%\Kanitsu 下只保留 settings.json 一个配置文件；图库、缩略图/RAW 缓存、
+// 日志、Chromium 配置（IndexedDB 索引等）全部放进用户首次启动时选定的数据目录。
+// settings.json 保存数据目录指针（与内容分离），数据目录里写标记文件
+// 用于识别「这个目录由 Kanitsu 管理」。之所以要标记：目录里会被建出 albums 等
+// 应用子目录，若允许把用户自己的文件夹选成数据目录，会把无关文件卷进应用管理。
 // v2:rawViewMode 字段加入。v1 文件里的 rawViewMode 只可能来自一个未发布
 // 的中间构建(它把当时的默认值 camera 自动持久化了),因此 v2 起仅在文件
 // 版本 ≥2 时读取该字段,老文件按新默认 developed 处理。
-const SETTINGS_VERSION = 2;
+// v3:dataDir 字段加入；旧版 libraryRoot/libraryLocationConfirmed 字段不再读取
+// （不提供旧版升级迁移：旧数据留在原处，不再使用）。
+const SETTINGS_VERSION = 3;
+/** 数据目录的管理标记文件（识别「这个目录由 Kanitsu 管理」）。 */
+const DATA_MARKER_FILE = '.kanitsu-data.json';
 const LIBRARY_MARKER_FILE = '.kanitsu-library.json';
 /** 图库根目录下由本应用独占的私有目录（缩略图缓存等）。 */
 const LIBRARY_CACHE_DIR = '.kanitsu-cache';
+
+/** %APPDATA%\Kanitsu：settings.json 的固定所在，也是唯一写进系统应用数据目录的东西。
+ *  必须在任何 app.setPath 之前取值。 */
+const CONFIG_DIR = app.getPath('userData');
 
 /** 目录项是否属于应用私有目录：图库扫描/导出/统计/搬移都必须跳过，
  *  否则缓存里的 JPEG 会被当成图库图片。 */
@@ -155,51 +166,40 @@ function assertNotLibraryInternalName(name: string): void {
 
 interface DesktopSettings {
   version: number;
-  /** 用户选定的图包保存目录；空串表示使用默认位置。 */
-  libraryRoot: string;
-  /** 首次运行时的保存位置确认弹窗是否已完成。 */
-  libraryLocationConfirmed: boolean;
+  /** 用户选定的数据目录；空串表示尚未设置（首次启动引导未完成）。 */
+  dataDir: string;
   /** RAW 查看模式:'camera'(内嵌预览直出)| 'developed'(完整解码)。 */
   rawViewMode?: RawViewMode;
 }
 
-/** 图包保存位置信息（供渲染端展示与首次运行引导）。 */
-interface LibraryLocationInfo {
-  path: string;
-  isDefault: boolean;
-  confirmed: boolean;
-  exists: boolean;
-}
-
-/** 更改图包保存位置的结果；错误文案由主进程给出，渲染端只负责讲给用户听。 */
-interface LibraryLocationChangeResult {
+/** 数据目录候选结果（供首次启动引导回显与校验反馈）。 */
+interface DataDirChoice {
   canceled: boolean;
   path?: string;
-  isDefault?: boolean;
-  /** 是否把原位置的图库内容一并搬到了新位置。 */
-  moved?: boolean;
-  movedCount?: number;
-  /** 搬移时因目标已有同名项而跳过的项数。 */
-  skippedCount?: number;
+  error?: string;
+}
+
+/** 确认数据目录的结果；error 为面向用户的中文说明。 */
+interface DataDirConfirmResult {
+  ok: boolean;
   error?: string;
 }
 
 let settingsCache: DesktopSettings | null = null;
 
 function settingsFilePath(): string {
-  return path.join(app.getPath('userData'), 'settings.json');
+  return path.join(CONFIG_DIR, 'settings.json');
 }
 
 function loadDesktopSettings(): DesktopSettings {
   if (settingsCache) return settingsCache;
-  settingsCache = { version: SETTINGS_VERSION, libraryRoot: '', libraryLocationConfirmed: false };
+  settingsCache = { version: SETTINGS_VERSION, dataDir: '' };
   try {
     const raw = JSON.parse(readFileSync(settingsFilePath(), 'utf8')) as Partial<DesktopSettings>;
-    if (typeof raw.libraryRoot === 'string' && raw.libraryRoot) settingsCache.libraryRoot = raw.libraryRoot;
-    settingsCache.libraryLocationConfirmed = raw.libraryLocationConfirmed === true;
+    if (typeof raw.dataDir === 'string' && raw.dataDir) settingsCache.dataDir = path.resolve(raw.dataDir);
     if ((raw.version ?? 0) >= 2) settingsCache.rawViewMode = parseRawViewMode(raw.rawViewMode);
   } catch {
-    // 文件不存在或损坏：按「未设置」处理，用默认位置。
+    // 文件不存在或损坏：按「未设置」处理，走首次启动引导。
   }
   return settingsCache;
 }
@@ -210,21 +210,62 @@ function saveDesktopSettings(patch: Partial<DesktopSettings>): void {
   try {
     writeFileSync(settingsFilePath(), `${JSON.stringify(next, null, 2)}\n`, 'utf8');
   } catch (error) {
-    // 写盘失败不影响本次会话（内存值已生效），下次启动退回默认位置。
-    logger.warn('library', `写入设置失败：${String(error)}`);
+    // 写盘失败不影响本次会话（内存值已生效），下次启动重新走首次引导。
+    logger.warn('data', `写入设置失败：${String(error)}`);
   }
 }
 
-function defaultLibraryRoot(): string {
-  return path.join(app.getPath('userData'), 'albums');
+function isDataDirConfigured(): boolean {
+  return loadDesktopSettings().dataDir !== '';
 }
+
+/** 当前数据目录（绝对路径）；未设置时抛错——主窗口只在引导完成后创建，不会误调。 */
+function getDataDir(): string {
+  const dir = loadDesktopSettings().dataDir;
+  if (!dir) throw new Error('数据目录尚未设置');
+  return dir;
+}
+
+/** 把 Chromium 落盘重定向到目标目录（目录必须先存在，否则 setPath 抛错）。 */
+function redirectUserData(target: string): void {
+  mkdirSync(target, { recursive: true });
+  app.setPath('userData', target);
+}
+
+/** 应用主会话的存储目录（IndexedDB 索引、localStorage、Cache 等都在这下面）。 */
+function appProfileDir(): string {
+  return path.join(getDataDir(), 'profile');
+}
+
+/**
+ * 应用主会话：固定从 <数据目录>/profile 取存储，不依赖默认会话的惰性创建时机。
+ * 浏览器进程级文件（Local State/GPUCache，以及万一被内部触碰的默认会话存储）
+ * 经 redirectUserData 落到 profile/browser 子目录，与本会话的存储目录隔离，
+ * 杜绝两个会话写同一目录。
+ */
+function appSession(): Session {
+  return session.fromPath(appProfileDir());
+}
+
+/**
+ * 模块加载期把 Chromium 的一切落盘（含 Local State/GPUCache 等进程级文件）引出
+ * 系统应用数据目录：已配置 → <数据目录>/profile/browser；未配置（首次启动引导
+ * 期间）→ 系统临时目录下的弃用目录，OS 自行回收。settings.json 固定留在 CONFIG_DIR。
+ */
+function bootstrapStoragePaths(): void {
+  const dataDir = loadDesktopSettings().dataDir;
+  redirectUserData(
+    dataDir ? path.join(dataDir, 'profile', 'browser') : path.join(tmpdir(), `kanitsu-setup-junk-${process.pid}`),
+  );
+  if (dataDir) {
+    setLogDir(path.join(dataDir, 'logs'));
+    void rotateLogFiles();
+  }
+}
+bootstrapStoragePaths();
 
 function getLibraryRoot(): string {
-  if (!libraryRoot) {
-    const configured = loadDesktopSettings().libraryRoot;
-    libraryRoot = configured ? path.resolve(configured) : defaultLibraryRoot();
-  }
-  return libraryRoot;
+  return path.join(getDataDir(), 'albums');
 }
 
 async function ensureDir(p: string): Promise<void> {
@@ -309,36 +350,35 @@ async function buildLibraryScaffold(root: string): Promise<void> {
   }
 }
 
-async function hasLibraryMarker(root: string): Promise<boolean> {
+type DataDirKind = 'missing' | 'empty' | 'managed' | 'foreign';
+
+async function hasDataMarker(target: string): Promise<boolean> {
   try {
-    const text = (await fs.readFile(path.join(root, LIBRARY_MARKER_FILE))).toString('utf8');
+    const text = (await fs.readFile(path.join(target, DATA_MARKER_FILE))).toString('utf8');
     return (JSON.parse(text) as { app?: string }).app === 'kanitsu';
   } catch {
     return false;
   }
 }
 
-type LibraryDirKind = 'missing' | 'empty' | 'library' | 'foreign';
-
-/** 判定候选目录能否直接作为图库：缺省/空目录可以，带标记的既有图库可以，
- *  其余非空目录拒绝（见上方标记文件的说明）。 */
-async function inspectLibraryDir(target: string): Promise<{ kind: LibraryDirKind; entryCount: number }> {
-  if (await hasLibraryMarker(target)) return { kind: 'library', entryCount: 0 };
+/** 判定候选目录能否作为数据目录：缺省/空目录可以，带标记的既有数据目录可以，
+ *  其余非空目录拒绝——目录里会被建出 albums 等应用子目录，不能把用户已有文件夹卷进来。 */
+async function inspectDataDir(target: string): Promise<{ kind: DataDirKind; entryCount: number }> {
+  if (await hasDataMarker(target)) return { kind: 'managed', entryCount: 0 };
   try {
-    // 只算用户内容：留下的缓存目录（例如换位置后回退到这里）不该让目录显得「非空」。
-    const visible = (await fs.readdir(target)).filter((name) => !isLibraryInternalName(name));
+    const visible = (await fs.readdir(target)).filter((name) => name !== DATA_MARKER_FILE);
     return visible.length === 0 ? { kind: 'empty', entryCount: 0 } : { kind: 'foreign', entryCount: visible.length };
   } catch {
     return { kind: 'missing', entryCount: 0 };
   }
 }
 
-/** 拒绝磁盘根目录与系统目录：它们一旦成为图库，整理/删除会波及无关文件。 */
-function validateLibraryLocation(target: string): string | null {
+/** 拒绝磁盘根目录、系统目录与配置目录（%APPDATA%\Kanitsu）及其内部：前两者一旦
+ *  成为数据目录会被应用子目录污染；后者会让大文件回到系统应用数据目录。 */
+function validateDataDir(target: string): string | null {
   const resolved = path.resolve(target);
-  if (resolved === path.resolve(getLibraryRoot())) return null;
   if (path.parse(resolved).root === resolved) {
-    return '不能把磁盘根目录作为图包保存位置，请先在其中新建一个专用文件夹。';
+    return '不能把磁盘根目录作为数据目录，请先在其中新建一个专用文件夹。';
   }
   const systemKeys = ['home', 'desktop', 'documents', 'downloads', 'pictures', 'videos', 'music', 'appData', 'temp', 'userData'] as const;
   for (const key of systemKeys) {
@@ -349,115 +389,54 @@ function validateLibraryLocation(target: string): string | null {
       continue; // 该平台没有这个路径
     }
     if (dir && path.resolve(dir) === resolved) {
-      return '不能把系统目录本身作为图包保存位置，请改用其中的一个新文件夹。';
+      return '不能把系统目录本身作为数据目录，请改用其中的一个新文件夹。';
     }
   }
-  const current = path.resolve(getLibraryRoot());
-  if (resolved.startsWith(current + path.sep)) {
-    return '新位置不能在当前图库内部，请选择其他文件夹。';
+  if (resolved === CONFIG_DIR || resolved.startsWith(CONFIG_DIR + path.sep)) {
+    return '不能把数据目录放在系统应用数据目录（含其内部），请选其他文件夹。';
   }
   return null;
 }
 
-/** 统计图库内的图片数量：用来决定是否要询问「是否搬移现有图包」。 */
-async function countLibraryImages(root: string): Promise<number> {
-  let count = 0;
-  try {
-    for (const entry of await fs.readdir(root, { withFileTypes: true })) {
-      // 缓存目录里的缩略图不是图库图片，不计入（也避免白白多走一遍 1.5GB）。
-      if (isLibraryInternalName(entry.name)) continue;
-      if (entry.isDirectory()) count += await countLibraryImages(path.join(root, entry.name));
-      else if (IMAGE_EXT.has(path.extname(entry.name).toLowerCase().slice(1))) count++;
-    }
-  } catch {
-    // 目录不可读按空处理
+/** 数据目录校验汇总：位置合法性 + 非空目录须为已管理目录。 */
+async function checkDataDir(target: string): Promise<string | null> {
+  const basic = validateDataDir(target);
+  if (basic) return basic;
+  const info = await inspectDataDir(target);
+  if (info.kind === 'foreign') {
+    return `该文件夹里已有 ${info.entryCount} 项内容，且不是 Kanitsu 数据目录，不能选作数据目录。请选一个空文件夹或新建专用文件夹，避免把已有文件卷进应用管理。`;
   }
-  return count;
+  return null;
 }
 
-/** 把图库内容搬到新位置：优先 rename（同盘瞬时完成），跨盘回退为复制后删除；
- *  目标已有同名项时跳过（绝不覆盖），并把跳过数报给调用方。 */
-async function moveLibraryContents(from: string, to: string): Promise<{ moved: number; skipped: number }> {
-  let moved = 0;
-  let skipped = 0;
-  for (const entry of await fs.readdir(from, { withFileTypes: true })) {
-    // 标记文件与缓存目录不是图库内容：缓存按绝对路径做键，跟着搬过去也会全部
-    // 失效重算，留在原处即可（原位置若重新启用，缓存仍然对得上）。
-    if (isLibraryInternalName(entry.name)) continue;
-    const src = path.join(from, entry.name);
-    const dest = path.join(to, entry.name);
-    if (await pathExists(dest)) {
-      logger.warn('library', `目标位置已存在同名项，跳过：${dest}`);
-      skipped++;
-      continue;
-    }
-    try {
-      // 被占用导致的 rename 失败重试即可恢复，不会被误判成跨盘搬移。
-      await withFileRetry(() => fs.rename(src, dest));
-    } catch {
-      await fs.cp(src, dest, { recursive: true, errorOnExist: true, force: false });
-      await removeWithRetry(src);
-    }
-    moved++;
-  }
-  return { moved, skipped };
-}
-
-/** 切换图包保存位置：校验目录 → 询问是否搬移现有图包 → 落盘设置。 */
-async function applyLibraryLocation(target: string): Promise<LibraryLocationChangeResult> {
-  const resolved = path.resolve(target);
-  const invalid = validateLibraryLocation(resolved);
-  if (invalid) return { canceled: false, error: invalid };
-
-  const current = path.resolve(getLibraryRoot());
-  const isDefault = resolved === path.resolve(defaultLibraryRoot());
-  const persist = { libraryRoot: isDefault ? '' : resolved, libraryLocationConfirmed: true };
-
-  if (resolved === current) {
-    await ensureDir(resolved);
-    await ensureLibraryScaffold(resolved);
-    saveDesktopSettings(persist);
-    return { canceled: false, path: resolved, isDefault };
-  }
-
-  // 默认位置是应用自己的目录，直接接管（升级上来的旧图库没有标记文件）。
-  if (!isDefault) {
-    const info = await inspectLibraryDir(resolved);
-    if (info.kind === 'foreign') {
-      return {
-        canceled: false,
-        error: `该文件夹里已有 ${info.entryCount} 项内容，且不是 Kanitsu 图库，不能选作保存位置。请选一个空文件夹或新建专用文件夹，避免把已有文件卷进图库的整理与删除。`,
-      };
-    }
-  }
-
-  let move = false;
-  if ((await countLibraryImages(current)) > 0) {
-    const answer = await dialog.showMessageBox({
-      type: 'question',
-      buttons: ['移动图包', '仅切换位置', '取消'],
-      defaultId: 0,
-      cancelId: 2,
-      message: '要一并移动现有图包吗？',
-      detail: `「移动图包」会把 ${current} 里的内容搬到新位置；「仅切换位置」保留在原处不删除，新位置从空图库开始。`,
-    });
-    if (answer.response === 2) return { canceled: true };
-    move = answer.response === 0;
-  }
-
+/** 数据目录建立管理标记（供下次选择时识别「这个目录由 Kanitsu 管理」）。 */
+async function ensureDataDirMarker(target: string): Promise<void> {
+  const marker = path.join(target, DATA_MARKER_FILE);
   try {
-    await ensureDir(resolved);
-    await ensureLibraryScaffold(resolved);
-    const moved = move ? await moveLibraryContents(current, resolved) : { moved: 0, skipped: 0 };
-    // 内容搬空后撤掉旧标记：原目录恢复成普通文件夹，避免被误认为仍是图库。
-    if (move) await fs.rm(path.join(current, LIBRARY_MARKER_FILE), { force: true });
-    libraryRoot = resolved;
-    saveDesktopSettings(persist);
-    logger.info('library', `图包保存位置切换为 ${resolved}${move ? `（已搬移 ${moved.moved} 项，跳过 ${moved.skipped} 项）` : ''}`);
-    return { canceled: false, path: resolved, isDefault, moved: move, movedCount: moved.moved, skippedCount: moved.skipped };
+    if (!(await pathExists(marker))) {
+      const content = { app: 'kanitsu', version: SETTINGS_VERSION, createdAt: new Date().toISOString() };
+      await fs.writeFile(marker, `${JSON.stringify(content, null, 2)}\n`, 'utf8');
+    }
   } catch (error) {
-    return { canceled: false, error: `切换保存位置失败：${String(error)}` };
+    logger.warn('data', `写入数据目录标记失败：${String(error)}`);
   }
+}
+
+/** 首次启动引导的「使用此位置」：校验 → 落标记与设置 → 把 Chromium 落盘切到数据目录。 */
+async function confirmDataDir(target: string): Promise<DataDirConfirmResult> {
+  // 空路径不能交给 path.resolve（它会解析成进程 CWD）。
+  const raw = String(target ?? '').trim();
+  if (!raw) return { ok: false, error: '尚未选择数据目录，请先选择一个文件夹。' };
+  const resolved = path.resolve(raw);
+  const invalid = await checkDataDir(resolved);
+  if (invalid) return { ok: false, error: invalid };
+  await ensureDir(resolved);
+  await ensureDataDirMarker(resolved);
+  saveDesktopSettings({ dataDir: resolved });
+  redirectUserData(path.join(resolved, 'profile', 'browser'));
+  setLogDir(path.join(resolved, 'logs'));
+  logger.info('data', `数据目录已设置为 ${resolved}`);
+  return { ok: true };
 }
 
 /** library:readSlice 单次读取上限：元数据解析只用得到头部几 KB。 */
@@ -788,23 +767,6 @@ async function pruneThumbCache(): Promise<void> {
   }
 }
 
-/**
- * 旧版缩略图缓存固定放在 userData/thumbcache。缓存改到图库内之后，那个目录
- * 再也不会被读到，成了最多 1.5GB 的孤儿，启动时清一次。缩略图是可再生的派生
- * 数据（设置页「清除缓存」做的也是同一件事），不涉及用户文件。
- */
-async function dropLegacyThumbCache(): Promise<void> {
-  const legacy = path.join(app.getPath('userData'), 'thumbcache');
-  if (path.resolve(legacy) === path.resolve(thumbCacheDir())) return;
-  if (!(await pathExists(legacy))) return;
-  try {
-    await fs.rm(legacy, { recursive: true, force: true });
-    logger.info('cache', `已清理旧位置的缩略图缓存：${legacy}`);
-  } catch (error) {
-    logger.warn('cache', `清理旧缩略图缓存失败：${String(error)}`);
-  }
-}
-
 // —— 缩略图 worker 池 ——
 // nativeImage 只能在主进程使用，解码大图会长时间阻塞事件循环（UI/IPC 全被拖
 // 慢）。缩略图生成交给 worker 线程（主路径 sharp/libvips），主进程只做缓存与
@@ -1016,7 +978,7 @@ function generateThumbnailBytesNative(file: DesktopFsEntry, targetSize: number):
 
 // —— RAW 查看派生服务 ——
 // RAW 原文件无法被 Chromium <img> 解码，查看器改用 ensureRawDerivative 换取
-// 解码后的 JPEG 派生图；派生文件落在 userData/rawcache，由
+// 解码后的 JPEG 派生图；派生文件落在 <数据目录>/rawcache，由
 // kanitsu-file 协议同样以流式服务（见 registerViewerProtocol 的放行逻辑）。
 // 按查看模式（RawViewMode，设置页「RAW 显示」）决定「显示哪份派生」，两份
 // 缓存互不相通：
@@ -1052,7 +1014,7 @@ function currentRawViewMode(): RawViewMode {
 }
 
 function rawDerivativeDir(): string {
-  return path.join(app.getPath('userData'), 'rawcache');
+  return path.join(getDataDir(), 'rawcache');
 }
 
 async function rawDerivativePathFor(filePath: string, mode: RawViewMode): Promise<string> {
@@ -1366,49 +1328,33 @@ function registerIpc(): void {
     if (state) state.cancelled = true;
   });
 
-  // —— 图包保存位置（仅桌面端：Web/Android 各自用应用目录，无此设置） ——
-  ipcMain.handle('library:getLocation', async (): Promise<LibraryLocationInfo> => {
-    const root = getLibraryRoot();
-    return {
-      path: root,
-      isDefault: path.resolve(root) === path.resolve(defaultLibraryRoot()),
-      confirmed: loadDesktopSettings().libraryLocationConfirmed,
-      exists: await pathExists(root),
-    };
+  // —— 数据目录（首次启动引导，仅桌面端） ——
+  ipcMain.handle('dataDir:get', async (): Promise<string> => {
+    return loadDesktopSettings().dataDir;
   });
 
-  ipcMain.handle('library:acknowledgeLocation', async (): Promise<LibraryLocationInfo> => {
-    const root = getLibraryRoot();
-    await ensureDir(root);
-    await ensureLibraryScaffold(root);
-    saveDesktopSettings({ libraryLocationConfirmed: true });
-    return {
-      path: root,
-      isDefault: path.resolve(root) === path.resolve(defaultLibraryRoot()),
-      confirmed: true,
-      exists: true,
-    };
-  });
-
-  ipcMain.handle('library:chooseLocation', async (): Promise<LibraryLocationChangeResult> => {
-    if (importCancelStates.size > 0) {
-      return { canceled: false, error: '有导入任务正在进行，请等它结束后再更改保存位置。' };
-    }
+  ipcMain.handle('dataDir:choose', async (): Promise<DataDirChoice> => {
     const result = await dialog.showOpenDialog({
-      title: '选择图包保存位置',
-      defaultPath: getLibraryRoot(),
+      title: '选择数据目录',
+      defaultPath: path.join(app.getPath('documents'), 'Kanitsu'),
       buttonLabel: '选择此文件夹',
       properties: ['openDirectory', 'createDirectory'],
     });
     if (result.canceled || result.filePaths.length === 0) return { canceled: true };
-    return applyLibraryLocation(result.filePaths[0]!);
+    const selected = path.resolve(result.filePaths[0]!);
+    const invalid = await checkDataDir(selected);
+    if (invalid) return { canceled: false, error: invalid };
+    return { canceled: false, path: selected };
   });
 
-  ipcMain.handle('library:resetLocation', async (): Promise<LibraryLocationChangeResult> => {
-    if (importCancelStates.size > 0) {
-      return { canceled: false, error: '有导入任务正在进行，请等它结束后再更改保存位置。' };
+  ipcMain.handle('dataDir:confirm', async (_event, candidate: unknown): Promise<DataDirConfirmResult> => {
+    const result = await confirmDataDir(typeof candidate === 'string' ? candidate : '');
+    if (result.ok) {
+      // 先开主窗口再关引导窗口：避免出现「没有窗口」的瞬间触发 window-all-closed。
+      startMainApp();
+      closeSetupWindow();
     }
-    return applyLibraryLocation(defaultLibraryRoot());
+    return result;
   });
 
   // Album library (app-managed copy)
@@ -1790,11 +1736,11 @@ const BUNDLE_MIME: Record<string, string> = {
 /**
  * Registers the `kanitsu-app://` protocol serving apps/web/dist build output.
  * 比 loadFile(file://) 稳：统一 scheme 规避绝对路径 404 与 file:// module CORS；
- * 只允许 dist 目录内文件（防目录穿越）。
+ * 只允许 dist 目录内文件（防目录穿越）。按会话注册（主会话/引导会话各一份）。
  */
-function registerBundleProtocol(): void {
+function registerBundleProtocol(proto: Protocol): void {
   const root = bundleRoot();
-  protocol.handle('kanitsu-app', async (request) => {
+  proto.handle('kanitsu-app', async (request) => {
     const url = new URL(request.url);
     let rel = decodeURIComponent(url.pathname).replace(/^\/+/, '');
     if (!rel) rel = 'index.html';
@@ -1817,10 +1763,10 @@ function registerBundleProtocol(): void {
  * Registers a guarded `kanitsu-file://` protocol so the renderer can display the
  * ORIGINAL file: Chromium streams and decodes it in the renderer (no cap, no giant
  * IPC buffer). Only files inside the library are served, plus RAW 查看派生图
- * (userData/rawcache,见 ensureRawDerivative)。
+ * (<数据目录>/rawcache,见 ensureRawDerivative)。只注册在主会话上。
  */
-function registerViewerProtocol(): void {
-  protocol.handle('kanitsu-file', async (request) => {
+function registerViewerProtocol(proto: Protocol): void {
+  proto.handle('kanitsu-file', async (request) => {
     const filePath = new URL(request.url).searchParams.get('p');
     if (!filePath) return new Response('错误请求', { status: 400 });
     try {
@@ -1852,7 +1798,8 @@ function registerWindowControlIpc(): void {
     return mainWindow.isMaximized();
   });
   ipcMain.handle('window:is-maximized', () => mainWindow?.isMaximized() ?? false);
-  ipcMain.handle('window:close', () => mainWindow?.close());
+  // 关闭发起调用的窗口（引导窗口的关闭按钮同样走这里）。
+  ipcMain.handle('window:close', (event) => BrowserWindow.fromWebContents(event.sender)?.close());
 }
 
 // —— 启动窗口底色 ——
@@ -1876,6 +1823,49 @@ function registerThemeBootstrap(): void {
   });
 }
 
+/**
+ * 首次启动引导窗口：数据目录未设置时的唯一窗口。跑在不落盘的内存会话
+ * （partition 无 persist: 前缀）上——选定目录前不产生任何需要保留的状态，
+ * 因此确认后无需搬移任何文件。直接关闭窗口即退出应用（等价取消）。
+ */
+function createSetupWindow(): void {
+  const win = new BrowserWindow({
+    width: 560,
+    height: 620,
+    resizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    frame: false,
+    // 引导窗口本体就是弹窗卡片：透明窗口 + 圆角卡片，窗外不露出空白底色。
+    transparent: true,
+    backgroundColor: '#00000000',
+    title: 'Kanitsu',
+    icon: applicationIconPath(),
+    show: false,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      partition: 'kanitsu-setup',
+    },
+  });
+  setupWindow = win;
+  win.once('ready-to-show', () => win.show());
+  win.on('closed', () => {
+    if (setupWindow === win) setupWindow = null;
+  });
+  win.webContents.on('will-navigate', (event) => {
+    event.preventDefault();
+  });
+  if (process.env.VITE_DEV_SERVER_URL) {
+    const url = process.env.VITE_DEV_SERVER_URL;
+    void win.loadURL(`${url}${url.includes('?') ? '&' : '?'}setup=1&v=${Date.now()}`);
+  } else {
+    // 生产构建：走 kanitsu-app:// 协议（见 registerBundleProtocol）。
+    void win.loadURL(`kanitsu-app://bundle/index.html?setup=1&v=${Date.now()}`);
+  }
+}
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1280,
@@ -1893,6 +1883,8 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      // 主会话固定落在 <数据目录>/profile（见 appSession）。
+      session: appSession(),
     },
   });
 
@@ -1928,6 +1920,41 @@ function createWindow() {
   }
 }
 
+/** 主会话的自定义协议只注册一次（同名 scheme 重复 handle 会互相覆盖/报错）。 */
+let appProtocolsRegistered = false;
+/** 引导会话只用 bundle 协议，同样只注册一次。 */
+let setupProtocolRegistered = false;
+
+/** 进入主界面：注册主会话协议、开主窗口、后台清理缩略图磁盘缓存。 */
+function startMainApp(): void {
+  if (mainWindow && !mainWindow.isDestroyed()) return; // 防重复确认/重复唤起
+  const ses = appSession();
+  if (!appProtocolsRegistered) {
+    registerBundleProtocol(ses.protocol);
+    registerViewerProtocol(ses.protocol);
+    appProtocolsRegistered = true;
+  }
+  createWindow();
+  // 后台清理缩略图磁盘缓存（超限时删除最旧）。
+  void pruneThumbCache();
+}
+
+/** 首次启动引导：内存会话 + 引导窗口（不落盘）。 */
+function startSetup(): void {
+  const ses = session.fromPartition('kanitsu-setup');
+  if (!setupProtocolRegistered) {
+    registerBundleProtocol(ses.protocol);
+    setupProtocolRegistered = true;
+  }
+  createSetupWindow();
+}
+
+function closeSetupWindow(): void {
+  const win = setupWindow;
+  setupWindow = null;
+  if (win && !win.isDestroyed()) win.close();
+}
+
 void app.whenReady().then(() => {
   // Windows 控制台切 UTF-8 代码页（尽力而为），避免中文日志按 GBK 显示乱码。
   if (process.platform === 'win32') {
@@ -1938,16 +1965,15 @@ void app.whenReady().then(() => {
     }
   }
   registerIpc();
-  registerViewerProtocol();
-  registerBundleProtocol();
   registerWindowControlIpc();
   registerThemeBootstrap();
-  createWindow();
-  // 后台清理缩略图磁盘缓存（超限时删除最旧），并回收旧版本留在 userData 的缓存。
-  void pruneThumbCache();
-  void dropLegacyThumbCache();
+  if (isDataDirConfigured()) startMainApp();
+  else startSetup();
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    if (BrowserWindow.getAllWindows().length === 0) {
+      if (isDataDirConfigured()) startMainApp();
+      else startSetup();
+    }
   });
 });
 

@@ -30,7 +30,7 @@ export const SETTINGS_TABS: ReadonlyArray<SettingsTab> = [
       ...ACCENT_OPTIONS.map((option) => option.label),
       'RAW 显示', 'RAW 观感', '内嵌预览', '完整解码', 'raw', 'arw', 'cr3', 'nef',
       '应用', '运行环境', '图库占用', '自定义整理规则',
-      '图包保存位置', '保存位置', '保存路径', '复制一份', '默认位置',
+      '数据目录', '保存位置', '保存路径', '复制一份', 'albums',
     ],
   },
   {

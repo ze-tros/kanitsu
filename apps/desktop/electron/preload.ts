@@ -54,20 +54,14 @@ type ClearCacheResult = {
   diskBytes: number;
 };
 
-type LibraryLocationInfo = {
-  path: string;
-  isDefault: boolean;
-  confirmed: boolean;
-  exists: boolean;
-};
-
-type LibraryLocationChangeResult = {
+type DataDirChoice = {
   canceled: boolean;
   path?: string;
-  isDefault?: boolean;
-  moved?: boolean;
-  movedCount?: number;
-  skippedCount?: number;
+  error?: string;
+};
+
+type DataDirConfirmResult = {
+  ok: boolean;
   error?: string;
 };
 
@@ -92,11 +86,10 @@ const bridge = {
   },
   cancelTask: (token: string): Promise<void> => ipcRenderer.invoke('import:cancel', token),
   releaseSource: (): Promise<void> => ipcRenderer.invoke('import:releaseSource'),
-  // 图包保存位置：首次运行引导与「设置 → 通用」共用（仅桌面端）。
-  getLibraryLocation: (): Promise<LibraryLocationInfo> => ipcRenderer.invoke('library:getLocation'),
-  acknowledgeLibraryLocation: (): Promise<LibraryLocationInfo> => ipcRenderer.invoke('library:acknowledgeLocation'),
-  chooseLibraryLocation: (): Promise<LibraryLocationChangeResult> => ipcRenderer.invoke('library:chooseLocation'),
-  resetLibraryLocation: (): Promise<LibraryLocationChangeResult> => ipcRenderer.invoke('library:resetLocation'),
+  // 数据目录：首次启动引导（仅桌面端）。确认成功后主进程直接打开主窗口。
+  getDataDir: (): Promise<string> => ipcRenderer.invoke('dataDir:get'),
+  chooseDataDir: (): Promise<DataDirChoice> => ipcRenderer.invoke('dataDir:choose'),
+  confirmDataDir: (path: string): Promise<DataDirConfirmResult> => ipcRenderer.invoke('dataDir:confirm', path),
   getLibraryRoot: (): Promise<DesktopEntry> => ipcRenderer.invoke('library:getRoot'),
   ensureLibraryRoot: (): Promise<DesktopEntry> => ipcRenderer.invoke('library:ensureRoot'),
   createLibraryFolder: (parent: DesktopEntry, name: string): Promise<DesktopEntry> =>

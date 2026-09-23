@@ -1,15 +1,20 @@
 // 主进程日志：结构化（时间/等级/tag/消息），写 UTF-8 日志文件 + 同步控制台。
 // 不引入第三方框架：本应用只需 分级过滤 + 落盘 + 尾部读取，几十行足够，
-// 也避免给 Electron 打包引入额外依赖。日志文件在 userData/logs/kanitsu-日期.log。
+// 也避免给 Electron 打包引入额外依赖。日志文件在 <数据目录>/logs/kanitsu-日期.log
+// （由 setLogDir 指定；未指定时落在当前 userData/logs，仅首次启动引导期间短暂出现）。
 import { app } from 'electron';
-import { appendFile, mkdir, readFile } from 'node:fs/promises';
+import { appendFile, mkdir, readdir, readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 const LEVEL_ORDER: Record<LogLevel, number> = { debug: 10, info: 20, warn: 30, error: 40 };
 
+/** 日志文件保留个数（按文件名日期取最新）。日志只增不删会无限膨胀，这里限一份月。 */
+const LOG_KEEP_FILES = 14;
+
 let minLevel: LogLevel = 'info';
+let logDir: string | null = null;
 let logFilePath: string | null = null;
 
 /** 是否为直连终端（非 npm/管道转发）。直连时输出中文（配合 chcp 65001）；
@@ -47,7 +52,7 @@ function asciiForConsole(text: string): string {
 function todayFile(): string {
   const d = new Date();
   const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
-  return path.join(app.getPath('userData'), 'logs', `kanitsu-${stamp}.log`);
+  return path.join(logDir ?? path.join(app.getPath('userData'), 'logs'), `kanitsu-${stamp}.log`);
 }
 
 async function ensureFile(): Promise<string> {
@@ -56,6 +61,26 @@ async function ensureFile(): Promise<string> {
     await mkdir(path.dirname(logFilePath), { recursive: true }).catch(() => {});
   }
   return logFilePath;
+}
+
+/** 指定日志目录（数据目录解析出之后调用），并重置已缓存的日志文件句柄。 */
+export function setLogDir(dir: string): void {
+  logDir = dir;
+  logFilePath = null;
+}
+
+/** 启动时清理：只保留最近 LOG_KEEP_FILES 个日志文件，其余删除。 */
+export async function rotateLogFiles(): Promise<void> {
+  try {
+    const dir = path.dirname(await ensureFile());
+    const names = (await readdir(dir)).filter((n) => /^kanitsu-\d{8}\.log$/.test(n)).sort();
+    const excess = names.slice(0, Math.max(0, names.length - LOG_KEEP_FILES));
+    for (const name of excess) {
+      await rm(path.join(dir, name), { force: true }).catch(() => {});
+    }
+  } catch {
+    // 目录不存在/不可读时忽略。
+  }
 }
 
 export function setLogLevel(level: LogLevel): void {

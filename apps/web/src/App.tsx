@@ -12,7 +12,7 @@ import {
   createIdbPersistentIndex,
   createMemoryPersistentIndex,
 } from '../../../packages/core/src/index';
-import { KanitsuLogo, LibraryBrowser } from '../../../packages/ui/src/index';
+import { KanitsuLogo, LibraryBrowser, DataDirSetup } from '../../../packages/ui/src/index';
 import { MobileApp } from '../../../packages/ui/src/mobile/MobileApp';
 
 type Platform = 'android' | 'electron' | 'web';
@@ -41,6 +41,11 @@ export default function App() {
     import.meta.env.DEV &&
     platform === 'web' &&
     new URLSearchParams(window.location.search).get('mobile-preview') === '1';
+  // 桌面端首次启动引导（独立引导窗口）：数据目录未设置时主进程只开这个窗口，
+  // 选定目录后才创建主界面窗口。
+  const setupMode =
+    platform === 'electron' &&
+    new URLSearchParams(window.location.search).get('setup') === '1';
   const [androidReady, setAndroidReady] = useState(platform !== 'android');
 
   // Android：启动即注册桥（window.kanitsuAndroid），完成后才进入 UI，
@@ -97,6 +102,10 @@ export default function App() {
 
   if (mobilePreview) {
     return <MobileApp picker={adapters.picker} store={adapters.store} index={index} />;
+  }
+
+  if (setupMode) {
+    return <DataDirSetup />;
   }
 
   // 桌面(Electron)开启 RAW 与 HEIF 收录;纯 web 演示(memory store)无解码管线,保持关闭。
