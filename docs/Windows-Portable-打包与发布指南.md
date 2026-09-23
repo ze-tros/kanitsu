@@ -13,11 +13,11 @@ SHA256SUMS.txt
 
 Portable 在这里表示“单 EXE、免安装”，不表示“数据随 EXE 携带”。数据写入用户首次启动时选定的**数据目录**（图库在其 `albums` 子目录，缩略图缓存放在图库的 `.kanitsu-cache` 子目录，另有 RAW 预览缓存、日志与索引数据）；系统应用数据目录（`%APPDATA%\Kanitsu`）只保留一个小的 `settings.json` 配置文件。
 
-当前还没有 Windows 代码签名证书和自定义 `.ico` 图标，因此：
+Windows 产物不做代码签名——这是既定发布策略（见 §14），不是待接入的缺失能力；自定义 `.ico` 图标则尚未完成。因此：
 
-- EXE 的 Authenticode 状态为 `NotSigned`。
-- Windows SmartScreen 可能显示风险提示。
-- 在签名和图标完成前，更适合称为“可分发的 Portable 构建”，不应宣称已通过 Windows 信任验证。
+- EXE 的 Authenticode 状态为 `NotSigned`，这是所有版本的预期状态。
+- Windows SmartScreen 首次运行时可能显示风险提示，用户需通过“更多信息 → 仍要运行”放行。
+- 不应宣称已通过 Windows 信任验证；对外更宜称为“可分发的 Portable 构建”。
 
 ## 2. 流水线结构
 
@@ -243,7 +243,7 @@ Write-Host "SHA-256 verified: $actual"
 
 哈希不匹配时不得发布或运行该 EXE。应重新下载 Artifact；如果仍不匹配，应保留 workflow run 和下载文件供排查。
 
-`SHA256SUMS.txt` 与 EXE 来自同一次 CI，可用于发现下载损坏或非预期替换，但不能单独证明发布者身份。发布者身份与文件信任最终需要 Authenticode 代码签名。
+`SHA256SUMS.txt` 与 EXE 来自同一次 CI，可用于发现下载损坏或非预期替换。按无签名发布策略，文件校验加官方 GitHub Releases 渠道就是发布可信度的全部来源：应引导用户只从官方渠道下载，并核对 SHA-256。
 
 ### 8.4 检查签名状态
 
@@ -252,7 +252,7 @@ Get-AuthenticodeSignature -LiteralPath .\Kanitsu-Portable-0.2.0-x64.exe |
   Select-Object Status, StatusMessage, SignerCertificate
 ```
 
-当前版本预期为 `NotSigned`。未签名是已知限制，不应被当作校验失败；但在宣称已签名的版本中，任何非 `Valid` 状态都必须阻止发布。
+按发布策略，所有版本预期为 `NotSigned`，这不应被当作校验失败；反之，若产物出现任何已签名状态，说明文件已被第三方改动或替换，必须阻止发布。
 
 ## 9. 发布前验收
 
@@ -266,7 +266,7 @@ Get-AuthenticodeSignature -LiteralPath .\Kanitsu-Portable-0.2.0-x64.exe |
 - 执行整理预览、整理和撤销。
 - 导出 ZIP，检查目录结构和 `index.json`。
 - 关闭并重新启动，确认图包索引和缩略图缓存可继续使用。
-- 确认 SmartScreen 提示与本次发布的签名状态一致。
+- 确认 SmartScreen 提示符合无签名分发预期（`NotSigned`，出现风险提示属正常）。
 
 验收过程会写入当前 Windows 用户的 Electron `userData`。使用专用测试账号或虚拟机可避免污染日常数据。
 
@@ -383,18 +383,17 @@ Remove-Item Env:ELECTRON_BUILDER_BINARIES_MIRROR
 
 当前应用没有自动更新链路，所以回滚的核心是停止分发问题产物并发布新补丁版，而不是覆盖旧文件。
 
-## 14. 后续接入代码签名
+## 14. 签名策略：不做代码签名
 
-取得 Windows 代码签名证书后，建议：
+Windows 产物确定不接入 Authenticode 代码签名，直接分发无签名版本。这是既定发布策略，不是待办事项；此前预留的证书接入方案（`WIN_CSC_LINK` / `WIN_CSC_KEY_PASSWORD` 等）一并作废。
 
-1. 使用 GitHub Environment 保护正式发布密钥，并要求人工审批。
-2. 仅允许可信 `v*` tag 的构建使用 `WIN_CSC_LINK` 和 `WIN_CSC_KEY_PASSWORD`。
-3. 不在 pull request 或任意分支构建中暴露签名密钥。
-4. 签名完成后再生成 SHA-256。
-5. 在 CI 中增加 `Get-AuthenticodeSignature` 检查，非 `Valid` 状态必须失败。
-6. 用新的已签名产物重跑干净 Windows 验收。
+该策略下的配套约定：
 
-签名接入是独立的发布安全变更，应单独评审和测试，不与普通功能发布混在同一次变更中。
+1. 完整性由 `SHA256SUMS.txt` 保障，发布者信任由官方 GitHub Releases 渠道承载。
+2. 发布说明如实说明 SmartScreen 风险提示与放行方式，不宣称已通过 Windows 信任验证。
+3. `Get-AuthenticodeSignature` 检查预期结果为 `NotSigned`；出现任何已签名状态视为文件被替换，必须阻止发布。
+
+若未来分发形态变化（如企业渠道、应用商店）确需签名，再作为独立发布安全变更重新评审。
 
 ## 15. 发布检查清单
 
@@ -408,7 +407,7 @@ Remove-Item Env:ELECTRON_BUILDER_BINARIES_MIRROR
 - [ ] `Windows Portable` workflow 成功。
 - [ ] 已下载 CI 产物并解压（draft Release 的附件与 Actions Artifact 是同一批文件）。
 - [ ] SHA-256 校验通过。
-- [ ] 签名状态与发布预期一致。
+- [ ] 签名状态为 `NotSigned`（无签名发布策略）。
 - [ ] 干净 Windows x64 环境验收通过。
 - [ ] draft Release 使用对应 tag，且已附加 EXE 和 `SHA256SUMS.txt`（工作流自动完成）。
 - [ ] 验收通过后将 draft 发布（`gh release edit <tag> --draft=false`）。
