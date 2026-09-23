@@ -1,5 +1,13 @@
 apply plugin: 'com.android.application'
 
+// 发布签名来自 android/keystore.properties（已 gitignore，格式见 keystore.properties.example）。
+// 文件缺失时不配置签名，assembleRelease 产出未签名 APK，debug 构建不受影响。
+def keystorePropsFile = rootProject.file('keystore.properties')
+def keystoreProps = new Properties()
+if (keystorePropsFile.exists()) {
+    keystorePropsFile.withInputStream { keystoreProps.load(it) }
+}
+
 android {
     namespace "com.kanitsu.viewer"
     compileSdk rootProject.ext.compileSdkVersion
@@ -16,10 +24,23 @@ android {
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        release {
+            if (keystorePropsFile.exists()) {
+                storeFile rootProject.file(keystoreProps.storeFile)
+                storePassword keystoreProps.storePassword
+                keyAlias keystoreProps.keyAlias
+                keyPassword keystoreProps.keyPassword
+            }
+        }
+    }
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            if (keystorePropsFile.exists()) {
+                signingConfig signingConfigs.release
+            }
         }
     }
 }
