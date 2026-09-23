@@ -102,9 +102,9 @@ git diff -- package.json apps/desktop/package.json package-lock.json
 
 SemVer 允许在补丁号后用连字符携带预发布段，例如 `0.3.0-alpha.1`、`0.3.0-beta.2`、`0.3.0-rc.1`。发布步骤与正式版完全一致：同步修改两个 `package.json` 的 `version`，提交后打 `v0.3.0-alpha.1` 形式的 tag 并推送。
 
-tag 或版本号含预发布段时，`Windows Portable` 工作流创建的 draft Release 会自动附加 Pre-release 标记，发布后在 Releases 页面明确显示为预发布，不与稳定版混淆。SemVer 排序保证 `0.3.0-alpha.1 < 0.3.0-beta.1 < 0.3.0-rc.1 < 0.3.0`。`Android Release APK` 工作流同样由 `v*` tag 触发，预发布 tag 会产出对应的签名 APK artifact。
+tag 或版本号含预发布段时，`Windows Portable` 工作流不经 draft 关口，直接创建带 Pre-release 标记的 Release，在 Releases 页面明确显示为预发布，不与稳定版混淆；稳定版仍走 draft → 人工验收 → 手动发布（第 8 节）。SemVer 排序保证 `0.3.0-alpha.1 < 0.3.0-beta.1 < 0.3.0-rc.1 < 0.3.0`。`Android Release APK` 工作流同样由 `v*` tag 触发，预发布 tag 会产出对应的签名 APK artifact。
 
-预发布版本的验收流程与正式版一致（第 9 节），差异仅在发布定位：适合先行体验与内部测试，不作为稳定渠道分发。
+由于预发布 Release 推送 tag 后立即公开，应在推 tag 前完成与第 9 节等价的验收（`npm run release:portable` 加干净环境试跑）。预发布定位是先行体验与内部测试，不作为稳定渠道分发。
 
 ## 5. 本地发布预检
 
