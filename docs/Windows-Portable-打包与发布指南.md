@@ -37,8 +37,9 @@ Windows 产物不做代码签名——这是既定发布策略（见 §14），�
 完整发布链路为：
 
 ```text
-更新版本 -> 本地预检 -> 提交/合并 -> 创建 tag -> CI 构建
--> 自动生成 draft Release -> 校验与验收 -> 在 draft 上补齐说明并发布 -> 发布后复核
+更新版本 -> 本地预检 -> 提交/合并 -> 创建 tag -> CI 构建（Portable + Setup）
+-> 稳定版：draft Release -> 校验与验收 -> 补齐说明并发布 -> 发布后复核
+   预发布版：直接发布 Pre-release -> 发布后复核
 ```
 
 GitHub Actions 工作流位于：
@@ -54,11 +55,10 @@ GitHub Actions 工作流位于：
 3. 运行全工作区 TypeScript 检查。
 4. 运行所有已配置的 workspace 测试。
 5. 构建 Web 生产包和 Electron 主进程、preload 代码。
-6. 使用唯一 staging 目录构建 Windows x64 Portable EXE。
-7. 校验文件名、文件体积、DOS/PE/COFF 结构和 SHA-256。
-8. 再次以只读方式核对 `SHA256SUMS.txt`。
-9. 上传 EXE 和校验文件为 Actions Artifact，保留 14 天。
-10. 构建成功后由 `release` 作业自动创建一个 draft Release，附加同一个 EXE 与 `SHA256SUMS.txt`，并生成变更日志。draft 对公众不可见，验收通过后由发布者补齐说明并手动发布；手动触发（非 tag）的构建不会创建 Release。
+6. 使用唯一 staging 目录构建 Windows x64 Portable EXE，校验文件名、文件体积、DOS/PE/COFF 结构和 SHA-256，并再次以只读方式核对 `SHA256SUMS.txt`。
+7. 以同样的方式构建 Windows x64 Setup（NSIS）安装包并校验。
+8. 上传两种产物和各自校验文件为 Actions Artifact，保留 14 天。
+9. tag 构建成功后由 `release` 作业自动创建 Release，附件为 Portable EXE、Setup EXE 与合并的 `SHA256SUMS.txt`，并生成变更日志。稳定版为 draft：对公众不可见，验收通过后由发布者补齐说明并手动发布；预发布版本直接发布并带 Pre-release 标记。手动触发（非 tag）的构建不会创建 Release。
 
 同一 ref 上有新构建启动时，旧的未完成构建会被取消。
 
@@ -193,6 +193,8 @@ NSIS 行为由 `apps/desktop/package.json` 的 `build.nsis` 配置：
 
 EXE 的图标与版本信息由 `build.afterPack`（`scripts/afterPack.cjs`）用 `rcedit` 写入。该钩子不依赖 winCodeSign，本地与 CI 都生效——即使 `KANITSU_SIGN_AND_EDIT_EXECUTABLE=false`，`Kanitsu.exe` 也带产品图标，开始菜单/桌面/任务栏/卸载列表显示一致。`KANITSU_SIGN_AND_EDIT_EXECUTABLE` 的语义与 Portable 相同：本地默认 `false`，CI 上为 `true`；开启时 electron-builder 会再编辑一次资源，与钩子结果一致，无害。
 
+CI 的 `Windows Portable` 工作流会同时构建两种形态：Setup 与 Portable 一样作为 Release 附件上传，两份 `SHA256SUMS.txt` 由工作流合并为一个文件。
+
 ## 6. 手动触发 CI
 
 手动触发适合预发布验证、补包和不创建 tag 的分支构建。
@@ -263,15 +265,16 @@ git push origin $tag
 
 1. 打开成功的 workflow run。
 2. 找到页面底部的 `Artifacts`。
-3. 下载 `Kanitsu-Portable-<version>-x64`。
+3. 下载 `Kanitsu-Portable-<version>-x64` 与 `Kanitsu-Setup-<version>-x64`。
 4. 将 Artifact ZIP 解压到新的空目录。
 
-Actions Artifact 总是带 ZIP 外包装；ZIP 内部的应用仍是 Portable 单 EXE。
+Actions Artifact 总是带 ZIP 外包装；Portable 的 ZIP 内部是单 EXE，Setup 的 ZIP 内部是 NSIS 安装包。
 
 ### 8.2 使用 GitHub CLI 下载
 
 ```powershell
 gh run download <run-id> --name Kanitsu-Portable-0.2.0-x64 --dir .\release-download
+gh run download <run-id> --name Kanitsu-Setup-0.2.0-x64 --dir .\release-download
 ```
 
 ### 8.3 校验 SHA-256
@@ -455,10 +458,10 @@ Windows 产物确定不接入 Authenticode 代码签名，直接分发无签名�
 - [ ] 目标 commit 已推送至远端。
 - [ ] `v<version>` tag 指向正确 commit。
 - [ ] `Windows Portable` workflow 成功。
-- [ ] 已下载 CI 产物并解压（draft Release 的附件与 Actions Artifact 是同一批文件）。
-- [ ] SHA-256 校验通过。
+- [ ] 已下载 CI 产物并解压（Release 的附件与 Actions Artifact 是同一批文件）。
+- [ ] SHA-256 校验通过（合并后的 `SHA256SUMS.txt` 覆盖两种产物）。
 - [ ] 签名状态为 `NotSigned`（无签名发布策略）。
 - [ ] 干净 Windows x64 环境验收通过。
-- [ ] draft Release 使用对应 tag，且已附加 EXE 和 `SHA256SUMS.txt`（工作流自动完成）。
+- [ ] Release 使用对应 tag，且已附加 Portable EXE、Setup EXE 和合并的 `SHA256SUMS.txt`（工作流自动完成）。
 - [ ] 验收通过后将 draft 发布（`gh release edit <tag> --draft=false`）。
 - [ ] 发布后重新下载并复核。

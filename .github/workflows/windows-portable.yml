@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   build:
-    name: Build Windows x64 Portable
+    name: Build Windows x64 Portable and Setup
     runs-on: windows-latest
     timeout-minutes: 30
     outputs:
@@ -58,6 +58,12 @@ jobs:
       - name: Re-verify published artifact
         run: npm run verify:portable
 
+      - name: Build and verify Setup installer
+        run: npm run build:setup
+
+      - name: Re-verify published Setup artifact
+        run: node apps/desktop/scripts/verify-portable.mjs --artifact-name "Kanitsu-Setup-${{ steps.metadata.outputs.version }}-x64.exe" --output-dir apps/desktop/release/setup
+
       - name: Upload Portable executable
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -65,6 +71,17 @@ jobs:
           path: |
             apps/desktop/release/portable/Kanitsu-Portable-${{ steps.metadata.outputs.version }}-x64.exe
             apps/desktop/release/portable/SHA256SUMS.txt
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+      - name: Upload Setup installer
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: Kanitsu-Setup-${{ steps.metadata.outputs.version }}-x64
+          path: |
+            apps/desktop/release/setup/Kanitsu-Setup-${{ steps.metadata.outputs.version }}-x64.exe
+            apps/desktop/release/setup/SHA256SUMS.txt
           if-no-files-found: error
           compression-level: 0
           retention-days: 14
@@ -87,9 +104,15 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: Kanitsu-Portable-${{ needs.build.outputs.version }}-x64
-          path: release-assets
+          path: release-assets/portable
 
-      - name: Create Release with EXE and checksum
+      - name: Download Setup artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: Kanitsu-Setup-${{ needs.build.outputs.version }}-x64
+          path: release-assets/setup
+
+      - name: Create Release with installers and checksum
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # 该作业没有 checkout，gh 无法通过 git 推断仓库，必须显式指定
@@ -97,13 +120,15 @@ jobs:
           TAG: ${{ github.ref_name }}
           VERSION: ${{ needs.build.outputs.version }}
           RELEASE_NOTES: |
-            本页附件由 CI 构建，并通过文件名、体积、PE 结构与 SHA-256 校验；产物不做代码签名（既定策略），
-            Windows SmartScreen 首次运行可能提示风险，请通过“更多信息 → 仍要运行”放行。
+            附件包含 Portable 免安装版与 Setup 安装包两种形态，均通过文件名、体积、PE 结构与 SHA-256 校验；
+            产物不做代码签名（既定策略），Windows SmartScreen 首次运行可能提示风险，请通过“更多信息 → 仍要运行”放行。
         run: |
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "已存在 $TAG 的 Release，跳过创建；如需重做，请先删除该 Release。"
             exit 0
           fi
+          # 合并两种产物的校验文件为一个 SHA256SUMS.txt（行内文件名不同，不会冲突）
+          cat release-assets/portable/SHA256SUMS.txt release-assets/setup/SHA256SUMS.txt > release-assets/SHA256SUMS.txt
           # 稳定版走 draft，人工验收后手动发布；预发布段（如 0.3.0-alpha.1）直接创建 Pre-release
           notes="$RELEASE_NOTES"
           release_flags=()
@@ -113,7 +138,8 @@ jobs:
                 notes="$notes"$'\n'"发布前请按 docs/Windows-Portable-打包与发布指南.md 第 9 节完成验收。" ;;
           esac
           gh release create "$TAG" \
-            "release-assets/Kanitsu-Portable-${VERSION}-x64.exe" \
+            "release-assets/portable/Kanitsu-Portable-${VERSION}-x64.exe" \
+            "release-assets/setup/Kanitsu-Setup-${VERSION}-x64.exe" \
             "release-assets/SHA256SUMS.txt" \
             --title "Kanitsu $TAG" \
             --notes "$notes" \
