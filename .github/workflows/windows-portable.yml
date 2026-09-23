@@ -70,7 +70,7 @@ jobs:
           retention-days: 14
 
   # 构建通过后为 tag 生成 draft Release，附件与 Actions Artifact 是同一批文件。
-  # 只创建 draft：产物尚未代码签名，验收通过后由发布者补齐说明并手动发布。
+  # 只创建 draft：产物按既定策略不做代码签名，验收通过后由发布者补齐说明并手动发布。
   release:
     name: Create Draft GitHub Release
     needs: build
@@ -96,8 +96,8 @@ jobs:
           TAG: ${{ github.ref_name }}
           VERSION: ${{ needs.build.outputs.version }}
           RELEASE_NOTES: |
-            本页附件由 CI 构建，并通过文件名、体积、PE 结构与 SHA-256 校验；产物尚未做代码签名，
-            Windows SmartScreen 可能提示风险。
+            本页附件由 CI 构建，并通过文件名、体积、PE 结构与 SHA-256 校验；产物不做代码签名（既定策略），
+            Windows SmartScreen 首次运行可能提示风险，请通过“更多信息 → 仍要运行”放行。
             发布前请按 docs/Windows-Portable-打包与发布指南.md 第 9 节完成验收。
         run: |
           if gh release view "$TAG" >/dev/null 2>&1; then

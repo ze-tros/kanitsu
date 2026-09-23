@@ -76,7 +76,7 @@ apps/desktop/release/portable/SHA256SUMS.txt
 
 GitHub Actions 中的 `Windows Portable` 工作流支持手动运行，也会在推送 `v*` tag 时触发。tag 必须与桌面包版本一致，例如版本 `0.1.0` 对应 `v0.1.0`。完成后可从该次 Actions 运行的 Artifacts 下载 EXE 和校验文件；推送 tag 时工作流还会在构建成功后自动创建一个 draft Release（附件为同一批产物），验收通过后在 GitHub 上发布该 draft 即可。
 
-当前没有 Windows 代码签名证书，因此产物未签名，Windows SmartScreen 可能显示风险提示。本地构建默认关闭 Electron Builder 的 EXE 资源编辑，以兼容未开启符号链接权限的 Windows 环境；启用 Windows 开发者模式后，可设置 `KANITSU_SIGN_AND_EDIT_EXECUTABLE=true` 再构建。
+Windows 产物不做代码签名（既定发布策略），Authenticode 状态为 `NotSigned`，Windows SmartScreen 首次运行可能显示风险提示，需通过“更多信息 → 仍要运行”放行。本地构建默认关闭 Electron Builder 的 EXE 资源编辑，以兼容未开启符号链接权限的 Windows 环境；启用 Windows 开发者模式后，可设置 `KANITSU_SIGN_AND_EDIT_EXECUTABLE=true` 再构建。
 
 正式 CI 固定使用 Electron 和 electron-builder 的官方 GitHub 发布源。本地网络需要镜像时，可在当前 shell 显式设置 `ELECTRON_MIRROR` 和 `ELECTRON_BUILDER_BINARIES_MIRROR`；镜像配置不应用于生成正式发布产物。
 

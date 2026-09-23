@@ -80,6 +80,5 @@ Android 工作流当前不在 pull request 上运行，因此不参与合并门�
 ## 7. 后续可选扩展
 
 - 在 pull request 上按路径触发 Android 构建（`apps/mobile/**`、`apps/web/**`、`packages/**`）。
-- 让 `release` 作业直接发布 Release（去掉 `--draft`）——目前保留人工验收关口，因为产物还没有代码签名。
+- 让 `release` 作业直接发布 Release（去掉 `--draft`）——人工验收关口与签名无关（已确定无签名发布），作为发布前的质量关口保留。
 - 把 Web 演示模式部署到 GitHub Pages（需在仓库设置中把 Pages 的 Source 改为 GitHub Actions）。
-- 接入 Windows 代码签名密钥，见 Portable 指南第 14 节。
