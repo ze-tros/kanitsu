@@ -15,6 +15,8 @@
     "build:portable": "node apps/desktop/scripts/build-portable.mjs",
     "verify:portable": "node apps/desktop/scripts/verify-portable.mjs",
     "release:portable": "npm run typecheck && npm test --workspaces --if-present && npm run build:portable",
+    "build:setup": "node apps/desktop/scripts/build-setup.mjs",
+    "release:setup": "npm run typecheck && npm test --workspaces --if-present && npm run build:setup",
     "build:android": "npm run build:web && npm run cap:sync -w @kanitsu/mobile && node apps/mobile/scripts/build-debug.mjs",
     "build:android:release": "npm run build:web && npm run cap:sync -w @kanitsu/mobile && node apps/mobile/scripts/build-release.mjs",
     "cap:add:android": "npm run cap:add -w @kanitsu/mobile",

@@ -58,11 +58,12 @@ if (tag && tag !== `v${desktopPackage.version}`) {
 }
 
 const outputDirOption = readOption('--output-dir');
+const artifactNameOption = readOption('--artifact-name');
 const writeChecksum = process.argv.includes('--write-checksum');
 const outputDir = outputDirOption
   ? path.resolve(outputDirOption)
   : path.join(desktopDir, 'release', 'portable');
-const executableFilename = `Kanitsu-Portable-${desktopPackage.version}-x64.exe`;
+const executableFilename = artifactNameOption ?? `Kanitsu-Portable-${desktopPackage.version}-x64.exe`;
 const executablePath = path.join(outputDir, executableFilename);
 const checksumPath = path.join(outputDir, checksumFilename);
 
@@ -71,7 +72,7 @@ try {
   entries = await readdir(outputDir, { withFileTypes: true });
 } catch (error) {
   if (error?.code === 'ENOENT') {
-    throw new Error(`Portable output directory does not exist: ${outputDir}`);
+    throw new Error(`Artifact output directory does not exist: ${outputDir}`);
   }
   throw error;
 }

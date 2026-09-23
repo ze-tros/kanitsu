@@ -3,9 +3,11 @@
   "private": true,
   "version": "0.2.1",
   "productName": "Kanitsu",
+  "description": "Kanitsu Viewer - cross-platform image viewer",
   "main": "dist/main.js",
   "build": {
     "appId": "com.kanitsu.viewer",
+    "afterPack": "scripts/afterPack.cjs",
     "icon": "../../assets/kanitsu-icon.png",
     "directories": {
       "output": "release"
@@ -40,6 +42,19 @@
     },
     "portable": {
       "artifactName": "Kanitsu-Portable-${version}-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": false,
+      "installerLanguages": [
+        "zh_CN",
+        "zh_TW",
+        "en_US"
+      ],
+      "differentialPackage": false,
+      "artifactName": "Kanitsu-Setup-${version}-${arch}.${ext}"
     }
   },
   "scripts": {
@@ -59,6 +74,7 @@
   "devDependencies": {
     "@types/omggif": "^1.0.5",
     "electron": "33.4.11",
-    "electron-builder": "25.1.8"
+    "electron-builder": "25.1.8",
+    "rcedit": "^5.0.1"
   }
 }

@@ -9,6 +9,7 @@ apps/desktop/dist-electron/
 apps/desktop/dist/
 apps/desktop/release*/
 apps/desktop/.portable-staging-*/
+apps/desktop/.setup-staging-*/
 # electron-builder 输出目录的勘察副本（可随时删除）
 apps/desktop/.dir-inspect*/
 *.js.map

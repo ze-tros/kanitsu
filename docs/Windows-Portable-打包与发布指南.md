@@ -4,20 +4,33 @@
 
 ## 1. 发布产物与当前边界
 
-当前 Windows 目标是 x64 Portable 单 EXE，产物名称固定为：
+当前 Windows 目标有两种形态（均为 x64）：
+
+**Portable 单 EXE（免安装）**
 
 ```text
 Kanitsu-Portable-<version>-x64.exe
 SHA256SUMS.txt
 ```
 
+**Setup 安装包（NSIS）**
+
+```text
+Kanitsu-Setup-<version>-x64.exe
+SHA256SUMS.txt
+```
+
 Portable 在这里表示“单 EXE、免安装”，不表示“数据随 EXE 携带”。数据写入用户首次启动时选定的**数据目录**（图库在其 `albums` 子目录，缩略图缓存放在图库的 `.kanitsu-cache` 子目录，另有 RAW 预览缓存、日志与索引数据）；系统应用数据目录（`%APPDATA%\Kanitsu`）只保留一个小的 `settings.json` 配置文件。
+
+两种形态的数据目录行为完全一致，Setup 卸载时也不删除用户数据目录。
+
+Portable 单 EXE 是自解压程序，每次启动都要把运行时解压到 `%TEMP%` 再启动应用，“双击图标到窗口出现”明显慢于安装版；对启动速度敏感的用户建议使用 Setup 版。
 
 Windows 产物不做代码签名——这是既定发布策略（见 §14），不是待接入的缺失能力；自定义 `.ico` 图标则尚未完成。因此：
 
 - EXE 的 Authenticode 状态为 `NotSigned`，这是所有版本的预期状态。
 - Windows SmartScreen 首次运行时可能显示风险提示，用户需通过“更多信息 → 仍要运行”放行。
-- 不应宣称已通过 Windows 信任验证；对外更宜称为“可分发的 Portable 构建”。
+- 不应宣称已通过 Windows 信任验证；对外更宜称为“可分发的 Portable/Setup 构建”。
 
 ## 2. 流水线结构
 
@@ -150,6 +163,35 @@ Remove-Item Env:KANITSU_SIGN_AND_EDIT_EXECUTABLE
 ```
 
 由于打包时间戳和资源编辑设置可能不同，本地 EXE 与 CI EXE 的 SHA-256 不必相同。对外发布时以 CI 产物为准。
+
+### 5.1 本地打包 Setup 安装包
+
+Setup（NSIS）与 Portable 共用同一条构建链路，只是打包目标不同：
+
+```powershell
+npm run build:setup        # 仅打包（web build -> desktop build -> NSIS -> 校验）
+npm run release:setup      # typecheck -> tests -> build:setup
+```
+
+成功后本地产物位于：
+
+```text
+apps/desktop/release/setup/Kanitsu-Setup-<version>-x64.exe
+apps/desktop/release/setup/SHA256SUMS.txt
+```
+
+产物校验复用 `verify-portable.mjs`（已支持 `--artifact-name` 参数），对 Setup EXE 做同样的文件名、体积、DOS/PE/COFF 结构和 SHA-256 检查。
+
+NSIS 行为由 `apps/desktop/package.json` 的 `build.nsis` 配置：
+
+- `oneClick: false` + `allowToChangeInstallationDirectory: true`：向导式安装，用户可选择安装目录。
+- `perMachine: false`：默认按用户安装到 `%LOCALAPPDATA%\Programs\Kanitsu`，不需要管理员权限。
+- `createDesktopShortcut: false` + `build/installer.nsh`：**桌面快捷方式是安装时的可选项**。模板的自动创建已关闭，由 `build/installer.nsh` 用 `customFinishPage` 钩子替换默认完成页：最后一屏并排放「运行 Kanitsu」（默认勾选）与「创建桌面快捷方式」（默认不勾选）；未勾选时会清掉旧版安装遗留的桌面快捷方式，卸载时也会移除。「开始菜单」快捷方式始终创建。
+- `installerLanguages: ["zh_CN", "zh_TW", "en_US"]`：安装器语言限定为简体中文、繁体中文、英文（与界面语言一致），`build/installer.nsh` 中的自定义文案也只需覆盖这三种。
+- `differentialPackage: false`：不生成 `.blockmap`（目前无自动更新分发）。
+- 卸载不删除用户数据目录（数据目录本就由用户选定，与安装目录无关）。
+
+EXE 的图标与版本信息由 `build.afterPack`（`scripts/afterPack.cjs`）用 `rcedit` 写入。该钩子不依赖 winCodeSign，本地与 CI 都生效——即使 `KANITSU_SIGN_AND_EDIT_EXECUTABLE=false`，`Kanitsu.exe` 也带产品图标，开始菜单/桌面/任务栏/卸载列表显示一致。`KANITSU_SIGN_AND_EDIT_EXECUTABLE` 的语义与 Portable 相同：本地默认 `false`，CI 上为 `true`；开启时 electron-builder 会再编辑一次资源，与钩子结果一致，无害。
 
 ## 6. 手动触发 CI
 
