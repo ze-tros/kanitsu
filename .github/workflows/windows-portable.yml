@@ -91,6 +91,8 @@ jobs:
       - name: Create draft Release with EXE and checksum
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 该作业没有 checkout，gh 无法通过 git 推断仓库，必须显式指定
+          GH_REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
           VERSION: ${{ needs.build.outputs.version }}
           RELEASE_NOTES: |
