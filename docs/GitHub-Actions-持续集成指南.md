@@ -8,9 +8,9 @@
 |---|---|---|---|---|---|
 | `CI` | `.github/workflows/ci.yml` | 推送到 `master`、任意 pull request、手动 | `ubuntu-latest` | 合并前质量门禁 | 无 |
 | `Android Debug APK` | `.github/workflows/android-debug.yml` | 手动、推送 `v*` tag | `ubuntu-latest` | 构建 Android 调试 APK | `Kanitsu-Android-Debug`（`app-debug.apk`，保留 14 天） |
-| `Windows Portable` | `.github/workflows/windows-portable.yml` | 手动、推送 `v*` tag | `windows-latest` | 打包并校验 Windows x64 Portable | `Kanitsu-Portable-<version>-x64`（EXE + `SHA256SUMS.txt`，保留 14 天） |
+| `Windows Portable` | `.github/workflows/windows-portable.yml` | 手动、推送 `v*` tag | `windows-latest` | 打包并校验 Windows x64 Portable | `Kanitsu-Portable-<version>-x64`（EXE + `SHA256SUMS.txt`，保留 14 天）；tag 上由 `release` 作业自动创建 draft Release |
 
-三个工作流都只申请 `contents: read` 权限，不写入仓库、不创建 Release。同一 ref 上有新的运行启动时，旧的未完成运行会被取消（`concurrency.cancel-in-progress`）。
+三个工作流的默认权限是 `contents: read`；只有 `Windows Portable` 的 `release` 作业申请 `contents: write`，用于在 tag 上创建 draft Release（`build` 作业本身仍是只读）。同一 ref 上有新的运行启动时，旧的未完成运行会被取消（`concurrency.cancel-in-progress`）。
 
 `CI` 只监听 `master` 推送和 pull request，不监听其他分支的推送。需要让长期分支也常驻检查时，在 `ci.yml` 的 `push.branches` 中补上分支名即可。
 
@@ -80,6 +80,6 @@ Android 工作流当前不在 pull request 上运行，因此不参与合并门�
 ## 7. 后续可选扩展
 
 - 在 pull request 上按路径触发 Android 构建（`apps/mobile/**`、`apps/web/**`、`packages/**`）。
-- 由 tag 触发的工作流自动创建 GitHub Release 并附加产物——需要注意这与“验收通过后才发布”的既有流程冲突，应作为独立变更评审。
+- 让 `release` 作业直接发布 Release（去掉 `--draft`）——目前保留人工验收关口，因为产物还没有代码签名。
 - 把 Web 演示模式部署到 GitHub Pages（需在仓库设置中把 Pages 的 Source 改为 GitHub Actions）。
 - 接入 Windows 代码签名密钥，见 Portable 指南第 14 节。

@@ -74,7 +74,7 @@ apps/desktop/release/portable/SHA256SUMS.txt
 
 构建脚本使用每次唯一的 staging 目录，只在新产物通过文件名、PE 文件头、体积和 SHA-256 检查后才替换上一版。可随时用 `npm run verify:portable` 重新校验。
 
-GitHub Actions 中的 `Windows Portable` 工作流支持手动运行，也会在推送 `v*` tag 时触发。tag 必须与桌面包版本一致，例如版本 `0.1.0` 对应 `v0.1.0`。完成后可从该次 Actions 运行的 Artifacts 下载 EXE 和校验文件。
+GitHub Actions 中的 `Windows Portable` 工作流支持手动运行，也会在推送 `v*` tag 时触发。tag 必须与桌面包版本一致，例如版本 `0.1.0` 对应 `v0.1.0`。完成后可从该次 Actions 运行的 Artifacts 下载 EXE 和校验文件；推送 tag 时工作流还会在构建成功后自动创建一个 draft Release（附件为同一批产物），验收通过后在 GitHub 上发布该 draft 即可。
 
 当前没有 Windows 代码签名证书，因此产物未签名，Windows SmartScreen 可能显示风险提示。本地构建默认关闭 Electron Builder 的 EXE 资源编辑，以兼容未开启符号链接权限的 Windows 环境；启用 Windows 开发者模式后，可设置 `KANITSU_SIGN_AND_EDIT_EXECUTABLE=true` 再构建。
 
@@ -98,7 +98,7 @@ APK 固定位于 `apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk`
 |---|---|---|
 | `CI` | 推送 `master`、pull request、手动 | 类型检查、全工作区测试、Web 生产构建、Electron 主进程编译 |
 | `Android Debug APK` | 手动、`v*` tag | 构建调试 APK 并上传 Artifact |
-| `Windows Portable` | 手动、`v*` tag | 打包并校验 Windows x64 Portable |
+| `Windows Portable` | 手动、`v*` tag | 打包并校验 Windows x64 Portable，tag 上自动创建 draft Release |
 
 触发方式、失败排查和首次接入清单见 [GitHub Actions 持续集成指南](docs/GitHub-Actions-持续集成指南.md)。
 

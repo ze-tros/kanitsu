@@ -25,7 +25,7 @@ Portable 在这里表示“单 EXE、免安装”，不表示“数据随 EXE �
 
 ```text
 更新版本 -> 本地预检 -> 提交/合并 -> 创建 tag -> CI 构建
--> 下载 Artifact -> 校验与验收 -> 创建 Release -> 发布后复核
+-> 自动生成 draft Release -> 校验与验收 -> 在 draft 上补齐说明并发布 -> 发布后复核
 ```
 
 GitHub Actions 工作流位于：
@@ -45,6 +45,7 @@ GitHub Actions 工作流位于：
 7. 校验文件名、文件体积、DOS/PE/COFF 结构和 SHA-256。
 8. 再次以只读方式核对 `SHA256SUMS.txt`。
 9. 上传 EXE 和校验文件为 Actions Artifact，保留 14 天。
+10. 构建成功后由 `release` 作业自动创建一个 draft Release，附加同一个 EXE 与 `SHA256SUMS.txt`，并生成变更日志。draft 对公众不可见，验收通过后由发布者补齐说明并手动发布；手动触发（非 tag）的构建不会创建 Release。
 
 同一 ref 上有新构建启动时，旧的未完成构建会被取消。
 
@@ -54,7 +55,7 @@ GitHub Actions 工作流位于：
 
 发布操作者需要：
 
-- 具有仓库推送 tag 和创建 GitHub Release 的权限。
+- 具有仓库推送 tag 的权限，以及发布（publish）draft Release 的权限。
 - 确认仓库已启用 GitHub Actions。
 - 确认 `windows-portable.yml` 已存在于 GitHub 默认分支。
 - 本地预检时使用 Windows x64、Node.js 24 和 npm。
@@ -269,25 +270,33 @@ Get-AuthenticodeSignature -LiteralPath .\Kanitsu-Portable-0.2.0-x64.exe |
 
 验收过程会写入当前 Windows 用户的 Electron `userData`。使用专用测试账号或虚拟机可避免污染日常数据。
 
-## 10. 创建 GitHub Release
+## 10. 发布 GitHub Release
 
-当前工作流只生成 Actions Artifact，不会自动创建 GitHub Release。验收通过后才应发布。
+推送 `v*` tag 后，`release` 作业会在构建成功时自动创建一个 **draft Release**：标题为 `Kanitsu v<version>`，附件是同一批 CI 产物（EXE 与 `SHA256SUMS.txt`），变更日志已自动生成。draft 对公众不可见，所以验收流程不变 —— **验收通过后才发布**。
 
-### 10.1 GitHub 网页操作
+如果 draft 不存在（手动触发构建、`build` 作业失败、或同名 tag 已存在 Release 被跳过），按 10.2 的备用命令手工创建。
 
-1. 进入仓库的 `Releases`。
-2. 选择 `Draft a new release`。
-3. 选择已触发成功构建的 tag，例如 `v0.2.0`。
-4. 标题建议使用 `Kanitsu v0.2.0`。
-5. 记录新功能、修复、已知问题和数据兼容性说明。
-6. 上传从该 tag 的 CI Artifact 中解压得到的 EXE 和 `SHA256SUMS.txt`。
-7. 再次检查文件名、版本号和 SHA-256。
-8. 预发布版本勾选 `Set as a pre-release`；稳定版本再设为 latest release。
-9. 点击 `Publish release`。
+### 10.1 从 draft 发布
+
+1. 进入仓库的 `Releases`，找到标记为 `Draft` 的那一条。
+2. 核对 tag、标题、附件文件名，并按第 8.3 节校验 SHA-256。
+3. 补齐变更说明：新功能、修复、已知问题、数据兼容性说明。
+4. 预发布版本勾选 `Set as a pre-release`；稳定版本再设为 latest release。
+5. 点击 `Publish release`。
 
 不要把 Actions 下载的整个 ZIP 作为唯一附件。Release 中应直接提供 EXE 和校验文件，方便用户下载单文件应用。
 
 ### 10.2 GitHub CLI 操作
+
+从 draft 发布：
+
+```powershell
+$tag = 'v0.2.0'
+gh release view $tag --web          # 复核附件与说明
+gh release edit $tag --draft=false  # 验收通过后发布
+```
+
+draft 缺失时手工补建：
 
 ```powershell
 $tag = 'v0.2.0'
@@ -300,7 +309,7 @@ gh release create $tag $exe $sum `
   --draft
 ```
 
-先创建 draft，在 GitHub 网页完成最后复核后再发布。
+先创建 draft，在 GitHub 网页完成最后复核后再发布。若该 tag 已有 Release，`gh release create` 会失败，需要先删除旧条目。
 
 ## 11. 发布后检查
 
@@ -397,10 +406,10 @@ Remove-Item Env:ELECTRON_BUILDER_BINARIES_MIRROR
 - [ ] 目标 commit 已推送至远端。
 - [ ] `v<version>` tag 指向正确 commit。
 - [ ] `Windows Portable` workflow 成功。
-- [ ] 已下载并解压 CI Artifact。
+- [ ] 已下载 CI 产物并解压（draft Release 的附件与 Actions Artifact 是同一批文件）。
 - [ ] SHA-256 校验通过。
 - [ ] 签名状态与发布预期一致。
 - [ ] 干净 Windows x64 环境验收通过。
-- [ ] GitHub Release 使用对应 tag。
-- [ ] Release 直接附加 EXE 和 `SHA256SUMS.txt`。
+- [ ] draft Release 使用对应 tag，且已附加 EXE 和 `SHA256SUMS.txt`（工作流自动完成）。
+- [ ] 验收通过后将 draft 发布（`gh release edit <tag> --draft=false`）。
 - [ ] 发布后重新下载并复核。
