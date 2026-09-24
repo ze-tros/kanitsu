@@ -12,6 +12,7 @@ apps/desktop/.portable-staging-*/
 apps/desktop/.setup-staging-*/
 # electron-builder 输出目录的勘察副本（可随时删除）
 apps/desktop/.dir-inspect*/
+apps/desktop/.icon-check*/
 *.js.map
 # 手写的模块声明（*.d.ts）属于源码，必须入库；生成的声明只会落在 dist/ 等已忽略目录
 .test-build/
