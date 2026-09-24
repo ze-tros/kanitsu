@@ -104,7 +104,7 @@ APK 固定位于 `apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk`
 
 ## 文档
 
-- [产品与架构设计](DESIGN.md)
+- [产品与架构设计](docs/DESIGN.md)
 - [开发进度与复盘](docs/开发进度与复盘.md)
 - [Android 平台实现](docs/Android端设计.md)
 - [Windows Portable 打包与发布](docs/Windows-Portable-打包与发布指南.md)
