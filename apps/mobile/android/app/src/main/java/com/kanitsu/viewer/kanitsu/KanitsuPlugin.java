@@ -8,6 +8,7 @@ import android.util.Base64;
 import androidx.activity.result.ActivityResult;
 
 import com.getcapacitor.Bridge;
+import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
@@ -19,8 +20,10 @@ import org.json.JSONArray;
 
 import java.io.File;
 import java.util.ArrayDeque;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -384,7 +387,10 @@ public class KanitsuPlugin extends Plugin {
             Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
             intent.addCategory(Intent.CATEGORY_OPENABLE);
             intent.setType("application/zip");
-            String base = target.isEmpty() ? "相册" : baseName(target);
+            String archiveName = call.getString("archiveName", "");
+            String base = archiveName != null && !archiveName.isEmpty()
+                    ? archiveName
+                    : target.isEmpty() ? "相册" : baseName(target);
             intent.putExtra(Intent.EXTRA_TITLE, base + ".zip");
             startActivityForResult(call, intent, "exportZipResult");
         });
@@ -407,10 +413,21 @@ public class KanitsuPlugin extends Plugin {
         }
         String target = call.getString("targetRelPath", "");
         String cancelToken = pendingExportToken;
+        // 多选导出：只打包列出的 relPath（为空/缺省时导出整个目标目录）。
+        Set<String> include = null;
+        JSArray includeArr = call.getArray("includeRelPaths");
+        if (includeArr != null) {
+            include = new HashSet<>();
+            for (int i = 0; i < includeArr.length(); i++) {
+                String rel = includeArr.optString(i, "");
+                if (!rel.isEmpty()) include.add(rel.replace('\\', '/'));
+            }
+        }
+        final Set<String> includeSet = include;
         executor.execute(() -> {
             AtomicBoolean cancel = registerCancel(cancelToken);
             try {
-                int[] counts = zipExport.export(albums, target, uri, exportEmitter(), cancel);
+                int[] counts = zipExport.export(albums, target, includeSet, uri, exportEmitter(), cancel);
                 JSObject out = new JSObject();
                 out.put("canceled", cancel.get());
                 out.put("outputPath", uri.toString());

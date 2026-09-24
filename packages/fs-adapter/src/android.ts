@@ -76,7 +76,7 @@ interface KanitsuPluginNative {
   getLibraryFingerprint(): Promise<{ fingerprint: string }>;
   getViewerUrl(opts: { file: AndroidFsEntry }): Promise<{ url: string }>;
   ensureViewerDerivative(opts: { file: AndroidFsEntry }): Promise<{ url: string }>;
-  exportZip(opts: { targetRelPath: string; cancelToken?: string }): Promise<AndroidExportResultPayload>;
+  exportZip(opts: { targetRelPath: string; cancelToken?: string; includeRelPaths?: string[]; archiveName?: string }): Promise<AndroidExportResultPayload>;
   cancelTask(opts: { token: string }): Promise<void>;
   getThumbnailStats(): Promise<AndroidThumbnailStats>;
   clearCaches(): Promise<void>;
@@ -109,7 +109,7 @@ export interface KanitsuAndroidBridge {
   getLibraryFingerprint(): Promise<string>;
   getViewerUrl(file: AndroidFsEntry): Promise<string>;
   ensureViewerDerivative(file: AndroidFsEntry): Promise<string>;
-  exportZip(targetRelPath: string, cancelToken?: string): Promise<AndroidExportResultPayload>;
+  exportZip(targetRelPath: string, cancelToken?: string, selection?: { includeRelPaths: string[]; archiveName: string }): Promise<AndroidExportResultPayload>;
   cancelTask(token: string): Promise<void>;
   onExportProgress(callback: (p: { done: number; total: number }) => void): () => void;
   getThumbnailStats(): Promise<AndroidThumbnailStats>;
@@ -246,7 +246,7 @@ function requireBridge(): Promise<KanitsuAndroidBridge> {
         getLibraryFingerprint: async () => (await p.getLibraryFingerprint()).fingerprint,
         getViewerUrl: async (file) => (await p.getViewerUrl({ file })).url,
         ensureViewerDerivative: async (file) => (await p.ensureViewerDerivative({ file })).url,
-        exportZip: (targetRelPath, cancelToken) => p.exportZip({ targetRelPath, cancelToken }),
+        exportZip: (targetRelPath, cancelToken, selection) => p.exportZip({ targetRelPath, cancelToken, ...selection }),
         cancelTask: (token) => p.cancelTask({ token }),
         onExportProgress: (callback) => {
           const handle = p.addListener('exportProgress', callback);
@@ -401,6 +401,25 @@ export class AndroidLibraryStore implements LibraryStore {
     try {
       onProgress?.(0, 0);
       const result = await bridge.exportZip(targetRelPath, cancelToken);
+      onProgress?.(result.exportedCount ?? 0, result.totalImages ?? 0);
+      return {
+        kind: 'file',
+        outputPath: result.outputPath,
+        canceled: result.canceled,
+        totalImages: result.totalImages ?? 0,
+        exportedCount: result.exportedCount ?? 0,
+      };
+    } finally {
+      off();
+    }
+  }
+
+  async zipSelection(relPaths: string[], archiveName: string, onProgress?: (done: number, total: number) => void, cancelToken?: string): Promise<ZipExportResult> {
+    const bridge = await requireBridge();
+    const off = bridge.onExportProgress((p) => onProgress?.(p.done, p.total));
+    try {
+      onProgress?.(0, relPaths.length);
+      const result = await bridge.exportZip('', cancelToken, { includeRelPaths: relPaths, archiveName });
       onProgress?.(result.exportedCount ?? 0, result.totalImages ?? 0);
       return {
         kind: 'file',

@@ -34,6 +34,14 @@ public final class ZipExportService {
     }
 
     public int[] export(AlbumLibrary albums, String targetRelPath, Uri outUri, ProgressEmitter emitter, AtomicBoolean cancel) throws IOException, JSONException {
+        return export(albums, targetRelPath, null, outUri, emitter, cancel);
+    }
+
+    /**
+     * include 非空时只打包其中列出的图片（相对图库根的 relPath）。条目仍由遍历图库得到、
+     * 再按集合过滤，传入的路径不直接拼接成文件，不会越出图库根。
+     */
+    public int[] export(AlbumLibrary albums, String targetRelPath, Set<String> include, Uri outUri, ProgressEmitter emitter, AtomicBoolean cancel) throws IOException, JSONException {
         File root = albums.ensureRoot();
         String norm = normalize(targetRelPath);
         File sourceDir = norm.isEmpty() ? root : new File(root, norm);
@@ -42,6 +50,15 @@ public final class ZipExportService {
 
         List<Item> items = new ArrayList<>();
         collectItems(sourceDir, root, albums, items);
+        if (include != null) {
+            List<Item> kept = new ArrayList<>();
+            for (Item item : items) {
+                if (include.contains(item.relPath)) {
+                    kept.add(item);
+                }
+            }
+            items = kept;
+        }
         items.sort((a, b) -> a.relPath.compareTo(b.relPath));
 
         int total = items.size();

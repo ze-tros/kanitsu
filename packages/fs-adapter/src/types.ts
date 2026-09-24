@@ -95,6 +95,11 @@ export interface LibraryStore {
   /** Zips targetRelPath (empty = whole library) preserving directory structure. */
   zipLibrary(targetRelPath: string, onProgress?: (done: number, total: number) => void, cancelToken?: string): Promise<ZipExportResult>;
   /**
+   * 可选：只打包图库中指定的图片（相对图库根的 relPath，保留目录结构），用于移动端
+   * 多选导出。archiveName 为建议的文件名（不含 .zip）。未实现的平台 UI 不提供入口。
+   */
+  zipSelection?(relPaths: string[], archiveName: string, onProgress?: (done: number, total: number) => void, cancelToken?: string): Promise<ZipExportResult>;
+  /**
    * Optional native fast path: copies the whole source tree into the library without
    * round-tripping file bytes through the JS bridge. Android SAF and Electron can both
    * implement this; platforms without it fall back to picker.readBlob + writeBlob.

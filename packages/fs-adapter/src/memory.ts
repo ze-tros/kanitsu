@@ -271,6 +271,19 @@ export class MemoryLibraryStore implements LibraryStore {
   }
 
   async zipLibrary(targetRelPath: string, onProgress?: (done: number, total: number) => void): Promise<ZipExportResult> {
+    return this.zipTree(targetRelPath, null, onProgress);
+  }
+
+  async zipSelection(relPaths: string[], _archiveName: string, onProgress?: (done: number, total: number) => void): Promise<ZipExportResult> {
+    return this.zipTree('', new Set(relPaths.map((p) => normalizeRel(p))), onProgress);
+  }
+
+  /** include 非空时只打包其中列出的图片（相对图库根的 relPath）。 */
+  private async zipTree(
+    targetRelPath: string,
+    include: ReadonlySet<string> | null,
+    onProgress?: (done: number, total: number) => void,
+  ): Promise<ZipExportResult> {
     const norm = normalizeRel(targetRelPath || '');
     const targetId = norm ? `/${norm}` : '/';
     const targetNode = this.tree.get(targetId) ?? this.tree.root;
@@ -287,6 +300,7 @@ export class MemoryLibraryStore implements LibraryStore {
         if (child.kind === 'folder') {
           await walkCount(child, joinSeg(suffix, child.name));
         } else if (SUPPORTED_IMAGE_EXT.has(extOfName(child.name))) {
+          if (include && !include.has(joinSeg(base, suffix, child.name))) continue;
           total++;
         }
       }
@@ -301,6 +315,7 @@ export class MemoryLibraryStore implements LibraryStore {
           const node = this.tree.get(child.id);
           if (!node?.blob) continue;
           const relPath = joinSeg(base, suffix, child.name);
+          if (include && !include.has(relPath)) continue;
           const data = new Uint8Array(await node.blob.arrayBuffer());
           entries.push({ name: relPath, data });
           meta.push({ relPath, size: node.blob.size, mtime: node.mtime ?? 0 });
