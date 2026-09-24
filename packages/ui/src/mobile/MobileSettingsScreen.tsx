@@ -18,10 +18,14 @@ import {
   applyAccentMode,
   applyThemeMode,
   formatBytes,
+  isRawFullDecodeEnabled,
   loadAccentMode,
   loadThemeMode,
+  setRawFullDecodeEnabled,
   type ThemeMode,
 } from './mobileShared';
+import { MobileIcon, type MobileIconName } from './mobileIcons';
+import { Switch } from './MobileDisplaySheets';
 import { Z_SETTINGS } from './zindex';
 import { useExitPresence } from './useExitPresence';
 import { MobileConfirmDialog } from './MobileSheets';
@@ -38,7 +42,7 @@ function androidBridge(): KanitsuAndroidBridge | undefined {
   return (window as unknown as { kanitsuAndroid?: KanitsuAndroidBridge }).kanitsuAndroid;
 }
 
-function SettingsGlyph({ name }: { name: 'appearance' | 'performance' | 'cache' | 'rules' | 'debug' | 'about' }) {
+function SettingsGlyph({ name }: { name: SettingsSectionId }) {
   const common = {
     viewBox: '0 0 24 24',
     className: 'w-[18px] h-[18px]',
@@ -50,21 +54,6 @@ function SettingsGlyph({ name }: { name: 'appearance' | 'performance' | 'cache' 
     'aria-hidden': true,
   };
 
-  if (name === 'appearance') {
-    return (
-      <svg {...common}>
-        <circle cx="12" cy="12" r="4" />
-        <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
-      </svg>
-    );
-  }
-  if (name === 'performance') {
-    return (
-      <svg {...common}>
-        <path d="M13 2L5 14h7l-1 8 8-12h-7z" />
-      </svg>
-    );
-  }
   if (name === 'cache') {
     return (
       <svg {...common}>
@@ -82,68 +71,206 @@ function SettingsGlyph({ name }: { name: 'appearance' | 'performance' | 'cache' 
       </svg>
     );
   }
-  if (name === 'debug') {
-    return (
-      <svg {...common}>
-        <path d="M8 9h8M8 13h8M9 3l1.2 2h3.6L15 3M6 7h12v11a3 3 0 01-3 3H9a3 3 0 01-3-3z" />
-      </svg>
-    );
-  }
   return (
     <svg {...common}>
-      <circle cx="12" cy="12" r="9" />
-      <path d="M12 11v5M12 8h.01" />
+      <path d="M8 9h8M8 13h8M9 3l1.2 2h3.6L15 3M6 7h12v11a3 3 0 01-3 3H9a3 3 0 01-3-3z" />
     </svg>
   );
 }
 
-/** 设置三级结构的分类 id（工具 tab → 设置 → 分类详情）。 */
-export type SettingsSectionId = 'appearance' | 'performance' | 'cache' | 'rules' | 'debug';
+/** 设置二级详情页 id（设置首页 → 分类详情）。外观与浏览选项直接在首页设置。 */
+export type SettingsSectionId = 'cache' | 'rules' | 'debug';
 
 const SECTION_META: ReadonlyArray<{
   id: SettingsSectionId;
-  glyph: 'appearance' | 'performance' | 'cache' | 'rules' | 'debug';
   title: string;
   subtitle: string;
 }> = [
-  { id: 'appearance', glyph: 'appearance', title: '外观', subtitle: '界面主题与主题色' },
-  { id: 'performance', glyph: 'performance', title: '性能', subtitle: '后台预取' },
-  { id: 'cache', glyph: 'cache', title: '缓存', subtitle: '缩略图缓存统计与清除' },
-  { id: 'rules', glyph: 'rules', title: '整理规则', subtitle: '文件名匹配与自定义规则' },
-  { id: 'debug', glyph: 'debug', title: '诊断', subtitle: '日志等级与查看' },
+  { id: 'cache', title: '缓存', subtitle: '缩略图缓存统计与清除' },
+  { id: 'rules', title: '整理规则', subtitle: '文件名匹配与自定义规则' },
+  { id: 'debug', title: '诊断', subtitle: '日志等级与查看' },
 ];
 
 function SettingsHeaderBar({ title, subtitle, onBack }: { title: string; subtitle: string; onBack: () => void }) {
   return (
-    <header className="m-settings-header m-context-header shrink-0" style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}>
-      <div className="m-context-bar">
-        <button className="m-icon-button" onClick={onBack} aria-label="返回">
-          <svg viewBox="0 0 24 24" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M19 12H5M12 19l-7-7 7-7" />
-          </svg>
+    <header className="m2-appbar is-solid is-static" style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}>
+      <div className="m2-appbar-row">
+        <button className="m2-icon-button" onClick={onBack} aria-label="返回">
+          <MobileIcon name="back" className="w-[22px] h-[22px]" />
         </button>
-        <div className="m-context-title">
-          <strong>{title}</strong>
-          <span>{subtitle}</span>
+        <div className="m2-appbar-title is-visible">
+          {title}
+          <small>{subtitle}</small>
         </div>
-        <span className="w-11 h-11 shrink-0" aria-hidden="true" />
       </div>
     </header>
   );
 }
 
-/** 设置分类条目的右侧箭头。 */
-function SectionChevron() {
+const ACCENT_SWATCH: Record<AccentMode, string> = {
+  coral: '#ff785e',
+  cobalt: '#8aa4e8',
+  amber: '#e2ad55',
+  graphite: '#c2c9d0',
+};
+
+function SettingsItem({
+  icon,
+  title,
+  subtitle,
+  value,
+  onClick,
+  trailing,
+}: {
+  icon: MobileIconName;
+  title: string;
+  subtitle: string;
+  value?: string;
+  onClick?: () => void;
+  trailing?: React.ReactNode;
+}) {
+  const body = (
+    <>
+      <span className="m2-set-icon">
+        <MobileIcon name={icon} className="w-[18px] h-[18px]" />
+      </span>
+      <span className="m2-set-copy">
+        <strong>{title}</strong>
+        <small>{subtitle}</small>
+      </span>
+      {value && <span className="m2-set-value tabular-nums">{value}</span>}
+      {trailing ?? (onClick ? <MobileIcon name="chevron-right" className="w-4 h-4 m2-muted shrink-0" /> : null)}
+    </>
+  );
+  return onClick ? (
+    <button className="m2-set-item" onClick={onClick}>
+      {body}
+    </button>
+  ) : (
+    <div className="m2-set-item">{body}</div>
+  );
+}
+
+/** 外观（首页内联）：明暗模式 + 主题色。 */
+function AppearanceInline() {
+  const [theme, setTheme] = useState<ThemeMode>(() => loadThemeMode());
+  const [accent, setAccent] = useState<AccentMode>(() => loadAccentMode());
+  useEffect(() => applyThemeMode(theme), [theme]);
+  useEffect(() => applyAccentMode(accent), [accent]);
   return (
-    <svg viewBox="0 0 24 24" className="m-list-chevron w-4 h-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M9 18l6-6-6-6" />
-    </svg>
+    <>
+      <div className="m2-set-pad">
+        <div className="m2-segmented" role="radiogroup" aria-label="界面主题">
+          {(
+            [
+              ['dark', '深色'],
+              ['light', '浅色'],
+              ['system', '跟随系统'],
+            ] as [ThemeMode, string][]
+          ).map(([value, label]) => (
+            <button key={value} role="radio" aria-checked={theme === value} className={theme === value ? 'is-on' : ''} onClick={() => setTheme(value)}>
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="m2-swatches" role="radiogroup" aria-label="主题色">
+        {ACCENT_OPTIONS.map(({ value, label }) => (
+          <button
+            key={value}
+            role="radio"
+            aria-checked={accent === value}
+            aria-label={label}
+            className={accent === value ? 'is-on' : ''}
+            style={{ background: ACCENT_SWATCH[value] }}
+            onClick={() => setAccent(value)}
+          />
+        ))}
+        <span className="m2-swatch-label">{ACCENT_OPTIONS.find((o) => o.value === accent)?.label}</span>
+      </div>
+    </>
+  );
+}
+
+/** 存储概览：缩略图内存缓存 + Android 磁盘缓存（缩略图与 RAW/HEIC 派生图）。 */
+function StorageInline({ onOpenDetail }: { onOpenDetail: () => void }) {
+  const [renderer, setRenderer] = useState<RendererThumbnailStats>(() => getRendererThumbnailStats());
+  const [native, setNative] = useState<{ diskFiles: number; diskBytes: number } | null>(null);
+  useEffect(() => {
+    const refresh = (): void => {
+      setRenderer(getRendererThumbnailStats());
+      void androidBridge()
+        ?.getThumbnailStats?.()
+        .then((st) => setNative(st))
+        .catch(() => setNative(null));
+    };
+    refresh();
+    const timer = setInterval(refresh, 3000);
+    return () => clearInterval(timer);
+  }, []);
+  const total = renderer.bytes + (native?.diskBytes ?? 0);
+  const memPct = total > 0 ? (renderer.bytes / total) * 100 : 0;
+  return (
+    <>
+      <div className="m2-set-pad m2-cache-summary">
+        <span>缓存占用</span>
+        <b className="tabular-nums">{formatBytes(total)}</b>
+      </div>
+      <div className="m2-cache-bar" aria-hidden="true">
+        <i style={{ width: `${memPct}%` }} />
+        <i className="is-disk" style={{ width: `${100 - memPct}%` }} />
+      </div>
+      <div className="m2-cache-legend tabular-nums">
+        <span className="is-mem">内存 {formatBytes(renderer.bytes)}</span>
+        {native && <span className="is-disk">磁盘 {formatBytes(native.diskBytes)} · {native.diskFiles} 个文件</span>}
+      </div>
+      <SettingsItem icon="database" title="缓存详情与清理" subtitle="命中率、解码队列；清理不影响图库" onClick={onOpenDetail} />
+    </>
+  );
+}
+
+function BrowseInline() {
+  const [prefetch, setPrefetch] = useState<boolean>(() => isPrefetchEnabled());
+  const [rawFull, setRawFull] = useState<boolean>(() => isRawFullDecodeEnabled());
+  return (
+    <>
+      <SettingsItem
+        icon="gauge"
+        title="后台预取"
+        subtitle="空闲时预热当前目录、子目录与全库缩略图，滚动更顺"
+        trailing={
+          <Switch
+            checked={prefetch}
+            label="后台预取"
+            onChange={(v) => {
+              setPrefetch(v);
+              setPrefetchEnabled(v);
+            }}
+          />
+        }
+      />
+      <SettingsItem
+        icon="aperture"
+        title="RAW 完整解码"
+        subtitle="先显示相机内嵌预览，当前页再后台完整解码；关闭可省电"
+        trailing={
+          <Switch
+            checked={rawFull}
+            label="RAW 完整解码"
+            onChange={(v) => {
+              setRawFull(v);
+              setRawFullDecodeEnabled(v);
+            }}
+          />
+        }
+      />
+    </>
   );
 }
 
 /**
- * 移动端设置页（三级导航的二级页）：分类列表；点分类进入三级详情页。
- * section 由 MobileApp 持有，硬件返回可逐级退回（详情 → 设置 → 工具）。
+ * 移动端设置页：首页直接调整外观与浏览选项，缓存 / 整理规则 / 诊断进入二级详情。
+ * section 由 MobileApp 持有，硬件返回可逐级退回（详情 → 设置 → 图库）。
  * exiting：整页关闭时由父层置 true，播放滑出动画后再卸载。
  */
 export function MobileSettingsScreen({
@@ -161,7 +288,7 @@ export function MobileSettingsScreen({
   onSectionChange: (section: SettingsSectionId | null) => void;
   exiting?: boolean;
 }) {
-  // 三级详情作为覆盖层：打开时从右滑入盖在二级列表上，返回时向右滑出露出列表。
+  // 详情作为覆盖层：打开时从右滑入盖在首页上，返回时向右滑出露出首页。
   // 退场期间 section 已复位，用 ref 记住最后一个分类用于渲染。
   const detailOpen = section != null && !!SECTION_META.find((s) => s.id === section);
   const detailPresence = useExitPresence(detailOpen, 240);
@@ -169,53 +296,74 @@ export function MobileSettingsScreen({
   if (section != null) lastSectionRef.current = section;
   const shownSection = detailPresence.present ? lastSectionRef.current : null;
   const shownMeta = shownSection != null ? SECTION_META.find((s) => s.id === shownSection) : undefined;
+  const [solid, setSolid] = useState(false);
+  const enabledRules = rules.filter((r) => r.enabled).length;
 
   return (
     <>
-      {/* 二级列表：设置打开期间常驻，作为三级页滑入/滑出的背景 */}
       <div
-        className={`m-settings-screen fixed inset-0 flex flex-col ${exiting ? 'm-page-exit-right' : 'm-subpage-enter'}`}
+        className={`m-settings-screen m2-page fixed inset-0 flex flex-col ${exiting ? 'm-page-exit-right' : 'm-subpage-enter'}`}
         style={{ zIndex: Z_SETTINGS }}
       >
-        <SettingsHeaderBar title="设置" subtitle="外观 · 性能 · 缓存 · 规则 · 诊断" onBack={onBack} />
-        <main className="m-settings-content flex-1 overflow-y-auto overscroll-contain">
-          <section className="m-settings-hero">
-            <span className="m-eyebrow">设备偏好</span>
-            <h1>偏好与运行状态</h1>
-            <p>管理移动端主题、性能、缓存、整理规则与诊断信息。</p>
+        <header className={`m2-appbar ${solid ? 'is-solid' : ''}`} style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}>
+          <div className="m2-appbar-row">
+            <button className="m2-icon-button" onClick={onBack} aria-label="返回">
+              <MobileIcon name="back" className="w-[22px] h-[22px]" />
+            </button>
+            <div className={`m2-appbar-title ${solid ? 'is-visible' : ''}`}>设置</div>
+          </div>
+        </header>
+        <main
+          className="m-settings-content m2-scroll flex-1 overflow-y-auto overscroll-contain"
+          onScroll={(e) => {
+            const next = e.currentTarget.scrollTop > 40;
+            if (next !== solid) setSolid(next);
+          }}
+        >
+          <div className="m2-set-head">
+            <h1>设置</h1>
+          </div>
+
+          <section className="m2-set-card" aria-label="外观">
+            <h4>外观</h4>
+            <AppearanceInline />
           </section>
 
-          <section className="m-settings-group">
-            {SECTION_META.map((s) => (
-              <button key={s.id} className="m-mine-entry" onClick={() => onSectionChange(s.id)}>
-                <span className="m-mine-entry-icon"><SettingsGlyph name={s.glyph} /></span>
-                <span className="m-mine-entry-copy">
-                  <strong>{s.title}</strong>
-                  <span>{s.subtitle}</span>
-                </span>
-                <SectionChevron />
-              </button>
-            ))}
+          <section className="m2-set-card" aria-label="浏览">
+            <h4>浏览</h4>
+            <BrowseInline />
           </section>
 
-          <section className="m-settings-group">
-            <h2 className="m-settings-group-title">关于</h2>
-            <div className="m-about-card">
-              <span className="m-settings-row-icon"><SettingsGlyph name="about" /></span>
-              <span>
-                <strong>Kanitsu</strong>
-                <small>Android 模式 · v{androidBridge()?.version ?? '0.1.0'}</small>
-              </span>
-            </div>
+          <section className="m2-set-card" aria-label="存储">
+            <h4>存储</h4>
+            <StorageInline onOpenDetail={() => onSectionChange('cache')} />
+            <SettingsItem icon="folder" title="图库位置" subtitle="应用私有目录（Android/data/…/files/albums），无需存储权限" />
+          </section>
+
+          <section className="m2-set-card" aria-label="整理与诊断">
+            <h4>整理与诊断</h4>
+            <SettingsItem
+              icon="braces"
+              title="整理规则"
+              subtitle={`6 条内置 · ${rules.length} 条自定义${rules.length ? `（启用 ${enabledRules}）` : ''}`}
+              onClick={() => onSectionChange('rules')}
+            />
+            <SettingsItem icon="bug" title="诊断" subtitle="日志等级、查看渲染端与原生日志" value={getLogLevelPref()} onClick={() => onSectionChange('debug')} />
+          </section>
+
+          <section className="m2-set-card" aria-label="关于">
+            <h4>关于</h4>
+            <SettingsItem icon="shield" title="隐私" subtitle="不联网、不上传；只访问你授权的文件夹，导入后不修改源文件夹" />
+            <SettingsItem icon="info" title="Kanitsu" subtitle={`Android 版 · v${androidBridge()?.version ?? '0.1.0'}`} />
           </section>
         </main>
       </div>
 
-      {/* 三级分类详情覆盖层 */}
+      {/* 二级分类详情覆盖层 */}
       {detailPresence.present && shownMeta && (
         <div
           key={shownMeta.id}
-          className={`m-settings-screen fixed inset-0 flex flex-col ${
+          className={`m-settings-screen m2-page fixed inset-0 flex flex-col ${
             detailPresence.exiting || exiting ? 'm-page-exit-right' : 'm-subpage-enter'
           }`}
           style={{ zIndex: Z_SETTINGS }}
@@ -223,8 +371,6 @@ export function MobileSettingsScreen({
           <SettingsHeaderBar title={shownMeta.title} subtitle={shownMeta.subtitle} onBack={() => onSectionChange(null)} />
           <main className="m-settings-content flex-1 overflow-y-auto overscroll-contain">
             <section className="m-settings-group">
-              {shownSection === 'appearance' && <AppearanceCard />}
-              {shownSection === 'performance' && <PerformanceCard />}
               {shownSection === 'cache' && <CacheCard />}
               {shownSection === 'rules' && <RulesCard rules={rules} onChange={onChange} />}
               {shownSection === 'debug' && <LogCard />}
@@ -233,97 +379,6 @@ export function MobileSettingsScreen({
         </div>
       )}
     </>
-  );
-}
-
-/** 外观：界面主题 + 主题色。 */
-function AppearanceCard() {
-  const [theme, setTheme] = useState<ThemeMode>(() => loadThemeMode());
-  const [accent, setAccent] = useState<AccentMode>(() => loadAccentMode());
-
-  useEffect(() => {
-    applyThemeMode(theme);
-  }, [theme]);
-
-  useEffect(() => {
-    applyAccentMode(accent);
-  }, [accent]);
-
-  return (
-    <div className="m-settings-card">
-      <div className="m-settings-row is-stacked">
-        <span className="m-settings-row-icon"><SettingsGlyph name="appearance" /></span>
-        <span className="m-settings-row-copy">
-          <strong>界面主题</strong>
-          <span>明暗模式切换表面与文字，主题色在下方单独设置。</span>
-        </span>
-      </div>
-      <div className="m-theme-segment" role="group" aria-label="界面主题">
-        {(
-          [
-            ['system', '跟随系统'],
-            ['light', '浅色'],
-            ['dark', '深色'],
-          ] as [ThemeMode, string][]
-        ).map(([value, label]) => (
-          <button
-            key={value}
-            className={theme === value ? 'is-active' : ''}
-            aria-pressed={theme === value}
-            onClick={() => setTheme(value)}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-      <div className="m-settings-row is-stacked">
-        <span className="m-settings-row-icon"><SettingsGlyph name="appearance" /></span>
-        <span className="m-settings-row-copy">
-          <strong>主题色</strong>
-          <span>选中状态、关键操作与焦点环使用的强调色。</span>
-        </span>
-      </div>
-      <div className="m-theme-segment is-accent" role="group" aria-label="主题色">
-        {ACCENT_OPTIONS.map(({ value, label }) => (
-          <button
-            key={value}
-            className={accent === value ? 'is-active' : ''}
-            aria-pressed={accent === value}
-            onClick={() => setAccent(value)}
-          >
-            <span className={`m-accent-dot is-${value}`} aria-hidden="true" />
-            {label}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-/** 性能：后台预取开关。 */
-function PerformanceCard() {
-  const [prefetch, setPrefetch] = useState<boolean>(() => isPrefetchEnabled());
-  useEffect(() => {
-    setPrefetchEnabled(prefetch);
-  }, [prefetch]);
-
-  return (
-    <div className="m-settings-card">
-      <label className="m-settings-row">
-        <span className="m-settings-row-icon"><SettingsGlyph name="performance" /></span>
-        <span className="m-settings-row-copy">
-          <strong>后台预取</strong>
-          <span>预生成当前目录、子文件夹与全库缩略图，让连续滚动更流畅。</span>
-        </span>
-        <input
-          type="checkbox"
-          className="m-switch"
-          checked={prefetch}
-          onChange={(e) => setPrefetch(e.target.checked)}
-          aria-label="后台预取"
-        />
-      </label>
-    </div>
   );
 }
 

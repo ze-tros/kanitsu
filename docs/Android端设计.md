@@ -117,14 +117,16 @@ HEIF/HEIC 原图 WebView 解不了（Chromium 无 HEVC 软解）：`getViewerUrl
 
 ```text
 ACTION_CREATE_DOCUMENT
-  → 用户选择目标 URI
-  → ZipOutputStream 流式遍历图库目录
+  → 用户选择目标 URI（多选导出时以 archiveName 为建议文件名）
+  → ZipOutputStream 流式遍历图库目录（多选导出时按 includeRelPaths 过滤）
   → 保留相对目录结构
   → 写入 index.json
   → 发送 exportProgress
 ```
 
 导出支持取消。返回值包含取消状态、目标 URI、总图片数和已导出数量。
+
+多选导出复用同一个 `exportZip` 方法：`includeRelPaths` 只作为遍历结果的过滤集合，条目仍由遍历图库根得到，传入路径不直接拼接成文件，不会越出图库根。
 
 ## 9. 任务与生命周期
 

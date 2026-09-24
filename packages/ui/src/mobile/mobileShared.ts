@@ -4,13 +4,6 @@
  * 避免双份实现漂移；移动端特有的网格参数/格式化工具在此定义。
  */
 export {
-  windowRowsFor,
-  clampWindow,
-  OVERSCAN_ROWS,
-  type GalleryMetrics,
-} from '../virtualWindow';
-
-export {
   loadPinnedCovers,
   savePinnedCovers,
   loadBlurredImages,
@@ -18,18 +11,100 @@ export {
   isImageBlurred,
   skippedReasonLabel,
   conflictReasonLabel,
-  prefetchOriginal,
 } from '../LibraryBrowser';
 
 import { DEFAULT_ACCENT, isAccentMode, type AccentMode } from '../accents';
 import type { KanitsuAndroidBridge } from '../../../fs-adapter/src/android';
 
-/** 图片网格：3 列方形卡片（相册标准密度），卡片间距。 */
-export const IMAGE_GRID = { cols: 3, gap: 3 } as const;
-/** 文件夹网格：2 列卡片。 */
-export const FOLDER_GRID = { cols: 2, gap: 10 } as const;
-/** 内容区水平内边距（与 mobile CSS 对齐）。 */
-export const CONTENT_PADDING_X = 10;
+/** 图片网格：默认 3 列方形卡片，捏合可在 min..max 之间调整；间距与圆角随列数收紧。 */
+export const IMAGE_GRID = { cols: 3, minCols: 2, maxCols: 6 } as const;
+/** 卡片网格间距（px）：列数越多越紧凑（3 列 ≈ 10px，6 列 ≈ 5px）。 */
+export function imageGridGap(cols: number): number {
+  return Math.round(14 - cols * 1.5);
+}
+/** 文件夹网格：默认 2 列封面卡片，可选 3 列。 */
+export const FOLDER_GRID = { cols: 2, gap: 12 } as const;
+
+function readPref(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writePref(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // ignore
+  }
+}
+
+export function loadImageGridCols(): number {
+  const n = Number(readPref('kanitsu.gridCols'));
+  return Number.isInteger(n) && n >= IMAGE_GRID.minCols && n <= IMAGE_GRID.maxCols ? n : IMAGE_GRID.cols;
+}
+
+export function saveImageGridCols(cols: number): void {
+  writePref('kanitsu.gridCols', String(cols));
+}
+
+export type LibrarySort = 'recent' | 'name' | 'count' | 'size';
+export const LIBRARY_SORT_LABELS: Record<LibrarySort, string> = { recent: '最近导入', name: '名称', count: '图片数', size: '占用' };
+
+export interface LibraryPrefs {
+  sort: LibrarySort;
+  view: 'grid' | 'list';
+  cols: 2 | 3;
+}
+
+export function loadLibraryPrefs(): LibraryPrefs {
+  const sort = readPref('kanitsu.libSort');
+  return {
+    sort: sort === 'name' || sort === 'count' || sort === 'size' ? sort : 'recent',
+    view: readPref('kanitsu.libView') === 'list' ? 'list' : 'grid',
+    cols: readPref('kanitsu.libCols') === '3' ? 3 : 2,
+  };
+}
+
+export function saveLibraryPrefs(prefs: LibraryPrefs): void {
+  writePref('kanitsu.libSort', prefs.sort);
+  writePref('kanitsu.libView', prefs.view);
+  writePref('kanitsu.libCols', String(prefs.cols));
+}
+
+/** RAW 查看：当前页是否在相机内嵌预览之后继续后台完整解码（默认开启）。 */
+export function isRawFullDecodeEnabled(): boolean {
+  return readPref('kanitsu.mobileRawFullDecode') !== '0';
+}
+
+export function setRawFullDecodeEnabled(enabled: boolean): void {
+  writePref('kanitsu.mobileRawFullDecode', enabled ? '1' : '0');
+}
+
+const RECENT_SEARCH_KEY = 'kanitsu.recentSearches';
+
+export function loadRecentSearches(): string[] {
+  try {
+    const list = JSON.parse(readPref(RECENT_SEARCH_KEY) ?? '[]') as unknown;
+    return Array.isArray(list) ? list.filter((v): v is string => typeof v === 'string').slice(0, 8) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function pushRecentSearch(list: readonly string[], query: string): string[] {
+  const q = query.trim();
+  if (!q) return [...list];
+  const next = [q, ...list.filter((v) => v !== q)].slice(0, 8);
+  writePref(RECENT_SEARCH_KEY, JSON.stringify(next));
+  return next;
+}
+
+export function clearRecentSearches(): void {
+  writePref(RECENT_SEARCH_KEY, '[]');
+}
 
 /** 系统是否开启「减少动态效果」。动画/过渡应据此降级（DESIGN.md 8.5）。 */
 export function prefersReducedMotion(): boolean {

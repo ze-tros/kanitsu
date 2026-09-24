@@ -2,17 +2,20 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { ImageEntry } from '../../../core/src/index';
 import type { FileRef, LibraryStore } from '../../../fs-adapter/src/types';
 import { decodeRawToJpeg, extractRawPreviewJpeg, isRawImage } from '../../../raw-decoder/src/index';
+import { isHeifImage } from '../../../core/src/index';
 import { getThumbnailBlob } from '../thumbnailCache';
 import { prefetchOriginal } from '../LibraryBrowser';
 import { acquireObjectUrl, releaseObjectUrl } from '../objectUrlPool';
 import { useExifInfo } from '../exifInfo';
-import { formatBytes, prefersReducedMotion } from './mobileShared';
+import { formatBytes, isRawFullDecodeEnabled, prefersReducedMotion } from './mobileShared';
+import { MobileIcon } from './mobileIcons';
 import { Z_VIEWER } from './zindex';
 
 /**
  * 移动端全屏查看器。
- * 手势：单指左右滑切换（跟手）、单指下滑关闭、双指捏合缩放、双击 适应/放大、
- * 放大后单指平移、单击切换界面显隐。
+ * 手势：单指左右滑切换（跟手）、单指下滑关闭、上滑打开图片信息、双指捏合缩放、
+ * 双击 适应/放大、放大后单指平移、单击切换界面显隐（信息面板打开时单击收起面板）。
+ * 界面：顶栏（返回 / 名称 / 更多），底部胶片条 + 动作栏（信息 / 旋转 / 设为封面 / 模糊 / 删除）。
  * 加载：缩略图占位 → 原图淡入（无黑屏），相邻 ±2 预取。
  */
 
@@ -20,6 +23,10 @@ const MAX_SCALE = 8; // DESIGN.md 8.3：放大上限 8x
 const SWIPE_THRESHOLD = 64;
 const SWIPE_VELOCITY = 0.35; // px/ms
 const CLOSE_THRESHOLD = 110;
+/** 普通图片上滑超过该距离打开图片信息面板。 */
+const INFO_THRESHOLD = 56;
+/** RAW 完整解码完成提示的停留时间。 */
+const RAW_DONE_HINT_MS = 1400;
 const TAP_MAX_DIST = 10;
 const TAP_MAX_MS = 280;
 const DOUBLE_TAP_MS = 300;
@@ -32,8 +39,8 @@ const FULL_FADE_MS = 140;
  *  非当前/相邻页，并释放其缩略图 object URL。 */
 const MAX_PAGES = 64;
 // —— 底部胶片条虚拟化 ——
-const FILM_ITEM_W = 56; // w-14
-const FILM_GAP = 6; // gap-1.5
+const FILM_ITEM_W = 44; // 非当前项宽度（当前项加宽，见 .m-filmstrip-item.is-active）
+const FILM_GAP = 4;
 const FILM_ITEM_STEP = FILM_ITEM_W + FILM_GAP;
 const FILM_WINDOW = 24; // 当前项 ±24 张（共 49 张）足够覆盖可视区
 
@@ -105,16 +112,30 @@ export function MobileViewer({
   images,
   index,
   store,
+  blurredPaths,
+  infoOpen,
+  onInfoOpenChange,
   onClose,
   onNavigate,
   onShowActions,
+  onSetCover,
+  onToggleBlur,
+  onDelete,
 }: {
   images: ImageEntry[];
   index: number;
   store: LibraryStore;
+  /** 隐私预览（模糊）的图片 relPath 集合：查看器中同样遮挡，点按后本次会话内显示。 */
+  blurredPaths: ReadonlySet<string>;
+  /** 图片信息面板由父层持有，硬件返回可先收起面板。 */
+  infoOpen: boolean;
+  onInfoOpenChange: (open: boolean) => void;
   onClose: () => void;
   onNavigate: (id: string) => void;
   onShowActions: (image: ImageEntry) => void;
+  onSetCover: (image: ImageEntry) => void;
+  onToggleBlur: (image: ImageEntry) => void;
+  onDelete: (image: ImageEntry) => void;
 }) {
   const [activeIndex, setActiveIndex] = useState(index);
   const current = images[activeIndex];
@@ -124,7 +145,11 @@ export function MobileViewer({
   const [containerSize, setContainerSize] = useState({ w: 0, h: 0 });
   const [uiVisible, setUiVisible] = useState(true);
   const [rotation, setRotation] = useState(0); // 0/90/180/270
-  const [showInfo, setShowInfo] = useState(false);
+  const showInfo = infoOpen;
+  const setShowInfo = onInfoOpenChange;
+  // 本次查看会话内点按「显示」过的模糊图片。
+  const [revealed, setRevealed] = useState<ReadonlySet<string>>(() => new Set());
+  const rawFullDecode = useMemo(() => isRawFullDecodeEnabled(), []);
   // 图片信息面板里的拍摄参数；面板没开就不读文件。
   const exif = useExifInfo(store, current ?? null, showInfo);
 
@@ -343,8 +368,8 @@ export function MobileViewer({
     }
     // RAW:当前页安排完整解码升级(预览层已在 ensurePage 中先行展示)。
     const cur = images[activeIndex];
-    if (cur && isRawImage(cur.name)) enqueueFullDecode(cur);
-  }, [activeIndex, images, ensurePage, enqueueFullDecode]);
+    if (cur && isRawImage(cur.name) && rawFullDecode) enqueueFullDecode(cur);
+  }, [activeIndex, images, ensurePage, enqueueFullDecode, rawFullDecode]);
 
   useEffect(() => {
     if (!images.length) return;
@@ -609,7 +634,7 @@ export function MobileViewer({
   // —— 手势状态机 ——
   const gestureRef = useRef<{
     pointers: Map<number, { x: number; y: number }>;
-    mode: 'none' | 'decide' | 'swipe' | 'close' | 'pan' | 'pinch';
+    mode: 'none' | 'decide' | 'swipe' | 'close' | 'info' | 'pan' | 'pinch';
     startX: number;
     startY: number;
     startDragX: number;
@@ -695,6 +720,9 @@ export function MobileViewer({
     [activeIndex, animateDragTo, images, containerSize.w, onNavigate, resetTransform],
   );
 
+  const infoOpenRef = useRef(infoOpen);
+  infoOpenRef.current = infoOpen;
+
   const handleTap = useCallback(() => {
     const g = gestureRef.current;
     const now = performance.now();
@@ -715,10 +743,11 @@ export function MobileViewer({
     // 延迟执行单击（等待可能的双击）
     window.setTimeout(() => {
       if (gestureRef.current.lastTapTime === now) {
-        setUiVisible((v) => !v);
+        if (infoOpenRef.current) setShowInfo(false);
+        else setUiVisible((v) => !v);
       }
     }, DOUBLE_TAP_MS);
-  }, [animateTransformTo, zoomTo, fitScale]);
+  }, [animateTransformTo, zoomTo, fitScale, setShowInfo]);
 
   const onPointerDown = (e: React.PointerEvent) => {
     cancelZoomAnimation();
@@ -803,7 +832,7 @@ export function MobileViewer({
         } else if (dy > 0) {
           g.mode = tall ? 'pan' : 'close'; // 长图下拉=平移；普通图下拉=关闭
         } else {
-          g.mode = tall ? 'pan' : 'none'; // 上滑：长图平移；普通图不响应（不误翻页）
+          g.mode = tall ? 'pan' : 'info'; // 上滑：长图平移；普通图打开图片信息
         }
       }
     }
@@ -879,6 +908,14 @@ export function MobileViewer({
       return;
     }
 
+    if (wasMode === 'info') {
+      if (e.clientY - g.startY < -INFO_THRESHOLD) {
+        setUiVisible(true);
+        setShowInfo(true);
+      }
+      return;
+    }
+
     if (wasMode === 'close') {
       const dy = Math.max(0, e.clientY - g.startY);
       const dt = Math.max(1, performance.now() - g.swipeStart);
@@ -902,8 +939,38 @@ export function MobileViewer({
     }
   };
 
+  // RAW 完整解码完成：短暂提示「已完整解码」（预览层 → 完整解码层的切换本身只改透明度）。
+  const [rawDoneHint, setRawDoneHint] = useState<string | null>(null);
+  const prevPreviewRef = useRef<{ id: string; preview: boolean } | null>(null);
+  const currentPreview = current ? !!pages.get(current.id)?.fullFromPreview : false;
+  useEffect(() => {
+    if (!current) return;
+    const prev = prevPreviewRef.current;
+    prevPreviewRef.current = { id: current.id, preview: currentPreview };
+    if (!prev || prev.id !== current.id || !prev.preview || currentPreview) return;
+    setRawDoneHint(current.id);
+    const t = window.setTimeout(() => setRawDoneHint(null), RAW_DONE_HINT_MS);
+    return () => window.clearTimeout(t);
+  }, [current, currentPreview]);
+  const infoDragRef = useRef<number | null>(null);
+
   if (!current) return null;
   const currentPage = pages.get(current.id);
+  const currentBlurred = blurredPaths.has(current.relPath);
+  const currentHidden = currentBlurred && !revealed.has(current.id);
+  const rawUpgrading = isRawImage(current.name) && rawFullDecode && (!currentPage?.fullReady || !!currentPage.fullFromPreview);
+  const dims = currentPage?.naturalW
+    ? `${currentPage.naturalW}×${currentPage.naturalH}`
+    : current.width && current.height
+      ? `${current.width}×${current.height}`
+      : null;
+  const exifHero = HERO_LABELS.map((label) => {
+    const row = exif.rows.find((r) => r.label === label);
+    if (!row) return null;
+    return label === '焦距' ? heroFocal(row.value) : { label, value: row.value.replace(/^ISO\s*/, '') };
+  }).filter((cell): cell is { label: string; value: string } => cell != null);
+  const heroShown = new Set(exifHero.length > 0 ? HERO_LABELS : []);
+  const exifRest = exif.rows.filter((r) => !heroShown.has(r.label));
 
   // 静止时保留前后一页；运动及被下一次手势接管时保留前后两页。
   // 连续翻页会让尚未完全离场的旧页短暂落到 activeIndex ±2，必须等它
@@ -954,7 +1021,7 @@ export function MobileViewer({
               }}
             >
               <div
-                className={`absolute inset-0 ${
+                className={`absolute inset-0 ${blurredPaths.has(img.relPath) && !revealed.has(img.id) ? 'm-viewer-media-hidden' : ''} ${
                   isCurrent && entering && img.id === initialImageIdRef.current && (p?.thumbUrl || p?.fullReady)
                     ? 'm-viewer-media-enter'
                     : ''
@@ -1056,6 +1123,36 @@ export function MobileViewer({
         })}
       </div>
 
+      {/* 模糊（隐私预览）遮挡：点按显示，本次查看会话内有效 */}
+      {currentHidden && (
+        <button
+          className="m-viewer-reveal"
+          onPointerDown={(e) => e.stopPropagation()}
+          onPointerUp={(e) => e.stopPropagation()}
+          onClick={() => setRevealed((prev) => new Set(prev).add(current.id))}
+        >
+          <MobileIcon name="eye-off" className="w-6 h-6" />
+          <span>已设为隐私预览 · 点按显示</span>
+        </button>
+      )}
+
+      {/* RAW：相机内嵌预览先显示，当前页后台完整解码（非阻塞提示） */}
+      {(rawUpgrading || rawDoneHint === current.id) && (
+        <div className={`m-viewer-raw-pill ${uiVisible ? '' : 'is-dim'}`} role="status" aria-live="polite">
+          {rawUpgrading ? (
+            <>
+              <span className="m-viewer-raw-spinner" aria-hidden="true" />
+              RAW · 相机预览，正在完整解码
+            </>
+          ) : (
+            <>
+              <MobileIcon name="check" className="w-3.5 h-3.5" />
+              已完整解码
+            </>
+          )}
+        </div>
+      )}
+
       {/* 顶部栏 */}
       <div
         className={`m-viewer-chrome m-viewer-top absolute top-0 left-0 right-0 z-10 transition-opacity duration-200 ${
@@ -1065,106 +1162,126 @@ export function MobileViewer({
       >
         <div className="m-viewer-toolbar">
           <button className="m-viewer-button" onClick={requestClose} aria-label="返回">
-            <svg viewBox="0 0 24 24" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M15 18l-6-6 6-6" />
-            </svg>
+            <MobileIcon name="back" className="w-[22px] h-[22px]" />
           </button>
           <div className="m-viewer-heading">
             <strong>{current.name}</strong>
             <span className="tabular-nums">
               {activeIndex + 1} / {images.length}
-              {currentPage?.naturalW ? ` · ${currentPage.naturalW}×${currentPage.naturalH}` : ''}
+              {dims ? ` · ${dims}` : ''}
+              {isRawImage(current.name) ? ' · RAW' : isHeifImage(current.name) ? ' · HEIC' : ''}
             </span>
           </div>
-          <button
-            className="m-viewer-button"
-             onClick={() => {
-               cancelZoomAnimation();
-               setTransformTransition('none');
-               const next = (rotation + 90) % 360;
-               setRotation(next);
-             }}
-            aria-label="旋转"
-          >
-            <svg viewBox="0 0 24 24" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 12a9 9 0 1 1-3-6.7" />
-              <path d="M21 3v6h-6" />
-            </svg>
-          </button>
-          <button
-            className={`m-viewer-button ${showInfo ? 'is-active' : ''}`}
-            onClick={() => setShowInfo((v) => !v)}
-            aria-label="图片信息"
-          >
-            <svg viewBox="0 0 24 24" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-              <circle cx="12" cy="12" r="9" />
-              <path d="M12 16v-5" />
-              <path d="M12 8h.01" />
-            </svg>
-          </button>
-          <button
-            className="m-viewer-button"
-            onClick={() => onShowActions(current)}
-            aria-label="更多操作"
-          >
-            <svg viewBox="0 0 24 24" className="w-5 h-5" fill="currentColor">
-              <circle cx="12" cy="5" r="1.8" />
-              <circle cx="12" cy="12" r="1.8" />
-              <circle cx="12" cy="19" r="1.8" />
-            </svg>
+          <button className="m-viewer-button" onClick={() => onShowActions(current)} aria-label="更多操作">
+            <MobileIcon name="more" className="w-[22px] h-[22px]" />
           </button>
         </div>
       </div>
 
-      {/* 图片信息面板 */}
+      {/* 图片信息面板（底部面板；上滑打开，单击舞台 / 下拉把手 / 返回键收起） */}
       {showInfo && current && (
         <div
-          className="m-viewer-info absolute left-3 right-3 z-20"
-          style={{ top: 'calc(env(safe-area-inset-top, 0px) + 72px)' }}
-          // 信息面板浮在舞台上：这里的指针手势是面板自己的（滚动内容），
-          // 不下传到手势层的翻页/平移/捏合。
+          className="m-viewer-info"
+          role="dialog"
+          aria-label="图片信息"
+          // 面板里的指针手势是面板自己的（滚动内容），不下传到手势层的翻页/平移/捏合。
           onPointerDown={(e) => e.stopPropagation()}
           onPointerMove={(e) => e.stopPropagation()}
           onPointerUp={(e) => e.stopPropagation()}
           onPointerCancel={(e) => e.stopPropagation()}
         >
-          <div className="flex items-start justify-between gap-3">
-            <div className="m-viewer-info-title truncate">{current.name}</div>
+          <div
+            className="m-viewer-info-handle"
+            onTouchStart={(e) => {
+              infoDragRef.current = e.touches[0]?.clientY ?? null;
+            }}
+            onTouchEnd={(e) => {
+              const startY = infoDragRef.current;
+              infoDragRef.current = null;
+              const endY = e.changedTouches[0]?.clientY;
+              if (startY != null && endY != null && endY - startY > 50) setShowInfo(false);
+            }}
+          >
+            <span />
+          </div>
+          <div className="m-viewer-info-head">
+            <div className="min-w-0">
+              <div className="m-viewer-info-title truncate">{current.name}</div>
+              <div className="m-viewer-info-path truncate">{current.relPath}</div>
+            </div>
             <button className="m-viewer-info-close shrink-0" onClick={() => setShowInfo(false)} aria-label="关闭信息">
-              ✕
+              <MobileIcon name="close" className="w-4 h-4" />
             </button>
           </div>
+          {exifHero.length > 0 && (
+            <div className="m-viewer-exif-hero tabular-nums">
+              {exifHero.map((cell) => (
+                <div key={cell.label}>
+                  <b>{cell.value}</b>
+                  <small>{cell.label}</small>
+                </div>
+              ))}
+            </div>
+          )}
           <div className="m-viewer-info-grid">
-            <InfoRow
-              label="尺寸"
-              value={
-                currentPage?.naturalW
-                  ? `${currentPage.naturalW}×${currentPage.naturalH}`
-                  : current.width && current.height
-                    ? `${current.width}×${current.height}`
-                    : '—'
-              }
-            />
-            <InfoRow label="大小" value={current.size ? formatBytes(current.size) : '—'} />
-            <InfoRow label="修改时间" value={current.mtime ? new Date(current.mtime).toLocaleString('zh-CN', { hour12: false }) : '—'} />
-            <InfoRow label="路径" value={current.relPath} />
             {exif.status === 'loading' && <InfoRow label="拍摄信息" value="读取中…" />}
             {exif.status === 'ready' && exif.rows.length === 0 && <InfoRow label="拍摄信息" value="无 EXIF 信息" />}
-            {exif.rows.map((row) => (
+            {exifRest.map((row) => (
               <InfoRow key={row.label} label={row.label} value={row.value} />
             ))}
+            <InfoRow label="尺寸" value={dims ?? '—'} />
+            <InfoRow label="大小" value={current.size ? formatBytes(current.size) : '—'} />
+            <InfoRow label="修改时间" value={current.mtime ? new Date(current.mtime).toLocaleString('zh-CN', { hour12: false }) : '—'} />
+            <InfoRow
+              label="格式"
+              value={
+                isRawImage(current.name)
+                  ? `${current.ext.toUpperCase()}（RAW）· ${rawFullDecode ? '查看器为完整解码结果' : '查看器显示相机内嵌预览'}`
+                  : isHeifImage(current.name)
+                    ? `${current.ext.toUpperCase()} · 查看器为原生派生 JPEG`
+                    : current.ext.toUpperCase()
+              }
+            />
           </div>
         </div>
       )}
 
-      {/* 底部胶片条 */}
+      {/* 底部：胶片条 + 动作栏 */}
       <div
         className={`m-viewer-chrome m-viewer-bottom absolute bottom-0 left-0 right-0 z-10 transition-opacity duration-200 ${
-          uiVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'
+          uiVisible && !showInfo ? 'opacity-100' : 'opacity-0 pointer-events-none'
         }`}
-        style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 10px)' }}
+        style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 6px)' }}
       >
-        <Filmstrip images={images} index={activeIndex} store={store} onSelect={(img) => onNavigate(img.id)} />
+        <Filmstrip images={images} index={activeIndex} store={store} blurredPaths={blurredPaths} onSelect={(img) => onNavigate(img.id)} />
+        <div className="m-viewer-actions" role="toolbar" aria-label="图片操作">
+          <button className={showInfo ? 'is-active' : ''} onClick={() => setShowInfo(!showInfo)} aria-pressed={showInfo}>
+            <MobileIcon name="info" className="w-[22px] h-[22px]" />
+            信息
+          </button>
+          <button
+            onClick={() => {
+              cancelZoomAnimation();
+              setTransformTransition('none');
+              setRotation((rotation + 90) % 360);
+            }}
+          >
+            <MobileIcon name="rotate" className="w-[22px] h-[22px]" />
+            旋转
+          </button>
+          <button onClick={() => onSetCover(current)}>
+            <MobileIcon name="image" className="w-[22px] h-[22px]" />
+            设为封面
+          </button>
+          <button className={currentBlurred ? 'is-active' : ''} aria-pressed={currentBlurred} onClick={() => onToggleBlur(current)}>
+            <MobileIcon name={currentBlurred ? 'eye' : 'eye-off'} className="w-[22px] h-[22px]" />
+            {currentBlurred ? '取消模糊' : '模糊'}
+          </button>
+          <button className="is-danger" onClick={() => onDelete(current)}>
+            <MobileIcon name="trash" className="w-[22px] h-[22px]" />
+            删除
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -1174,11 +1291,13 @@ function Filmstrip({
   images,
   index,
   store,
+  blurredPaths,
   onSelect,
 }: {
   images: ImageEntry[];
   index: number;
   store: LibraryStore;
+  blurredPaths: ReadonlySet<string>;
   onSelect: (image: ImageEntry) => void;
 }) {
   const stripRef = useRef<HTMLDivElement>(null);
@@ -1207,10 +1326,12 @@ function Filmstrip({
   return (
     <div
       ref={stripRef}
-      className="m-filmstrip flex gap-1.5 overflow-x-auto"
+      className="m-filmstrip flex items-center overflow-x-auto"
       style={{
-        paddingLeft: start * FILM_ITEM_STEP + 12, // 12 = 原 px-3
-        paddingRight: (images.length - end) * FILM_ITEM_STEP + 12,
+        gap: FILM_GAP,
+        // 两端各留半屏，首尾图片也能滚到正中。
+        paddingLeft: `calc(50% - ${FILM_ITEM_W / 2}px + ${start * FILM_ITEM_STEP}px)`,
+        paddingRight: `calc(50% - ${FILM_ITEM_W / 2}px + ${(images.length - end) * FILM_ITEM_STEP}px)`,
       }}
     >
       {images.slice(start, end).map((img, k) => {
@@ -1218,8 +1339,10 @@ function Filmstrip({
         return (
           <button
             key={img.id}
-            className={`m-filmstrip-item shrink-0 w-14 h-14 overflow-hidden ${i === index ? 'is-active' : ''}`}
+            className={`m-filmstrip-item shrink-0 overflow-hidden ${i === index ? 'is-active' : ''} ${blurredPaths.has(img.relPath) ? 'is-blurred' : ''}`}
             onClick={() => onSelect(img)}
+            aria-label={`第 ${i + 1} 张：${img.name}`}
+            aria-current={i === index ? 'true' : undefined}
           >
             <FilmThumb store={store} image={img} />
           </button>
@@ -1227,6 +1350,15 @@ function Filmstrip({
       })}
     </div>
   );
+}
+
+/** 信息面板顶部四格：焦距 / 光圈 / 快门 / ISO（缺项自动跳过）。 */
+const HERO_LABELS = ['焦距', '光圈', '快门', 'ISO'];
+
+function heroFocal(value: string): { label: string; value: string } {
+  const eq = value.match(/等效\s*([\d.]+)\s*mm/);
+  if (eq) return { label: '等效焦距', value: `${eq[1]}mm` };
+  return { label: '焦距', value: value.replace(/\s+mm/, 'mm') };
 }
 
 function InfoRow({ label, value }: { label: string; value: string }) {

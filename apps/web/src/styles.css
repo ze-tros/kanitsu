@@ -3722,8 +3722,7 @@ body .desktop-library .desktop-settings-action.is-quiet:hover:not(:disabled) {
    移动端 UI（Android WebView 专用组件 packages/ui/src/mobile）
    ══════════════════════════════════════════════════════════════ */
 
-/* 禁止长按弹出系统菜单 / 选中（网格卡片、查看器由 JS 手势接管） */
-.m-gallery-item,
+/* 禁止长按弹出系统菜单 / 选中（查看器由 JS 手势接管；网格卡片见 mobile.css 的 m2-cell） */
 .m-viewer-root {
   -webkit-touch-callout: none;
   -webkit-user-select: none;
@@ -3778,21 +3777,7 @@ body .desktop-library .desktop-settings-action.is-quiet:hover:not(:disabled) {
   to { opacity: 1; transform: none; }
 }
 
-/* —— 底栏 tab 切换（图库/工具平级页面）——
-   图库和工具视为同一个页面：框架与底栏保持不动，仅内容区轻淡入完成切换，
-   不做整页滑动。两个方向用同一动画。 */
-.m-tab-enter {
-  animation: m-tab-in 180ms ease-out both;
-}
-@keyframes m-tab-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-.m-page-in.is-tab-back {
-  animation: m-tab-in 180ms ease-out both;
-}
-
-/* —— 设置三级详情页推入（设置列表 → 分类详情）—— */
+/* —— 全屏页推入（设置 / 任务中心 / 智能整理 / 设置分类详情）—— */
 .m-subpage-enter {
   animation: m-subpage-in 260ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
@@ -3802,55 +3787,22 @@ body .desktop-library .desktop-settings-action.is-quiet:hover:not(:disabled) {
 }
 
 /* —— 页面级返回动画 ——
-   二级/三级页关闭：整页滑出右侧（MobileApp 的 useExitPresence 在退出期间
-   保留挂载，动画播完才卸载）。三级详情返回列表：列表从左侧滑回。 */
+   全屏页关闭：整页滑出右侧（MobileApp 的 useExitPresence 在退出期间
+   保留挂载，动画播完才卸载）。 */
 .m-page-exit-right {
   animation: m-page-exit-right-kf 240ms cubic-bezier(0.32, 0.72, 0.35, 1) both;
 }
 @keyframes m-page-exit-right-kf {
   to { transform: translateX(100%); }
 }
-.m-page-pop-left {
-  animation: m-page-pop-left-kf 260ms cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-@keyframes m-page-pop-left-kf {
-  from { transform: translateX(-100%); }
-  to { transform: none; }
-}
 
-/* —— 抽屉关闭：面板滑出左侧，遮罩淡出 —— */
-.m-drawer-mask.m-exiting {
-  animation: m-mask-out 200ms ease-in both;
-}
-.m-directory-panel.m-exiting {
-  animation: m-drawer-out 220ms cubic-bezier(0.32, 0.72, 0.35, 1) both;
-}
-@keyframes m-drawer-out {
-  to { transform: translateX(-100%); }
-}
-
-/* —— 通用淡出（报告面板 / 全屏弹层 / 对话框关闭）—— */
+/* —— 通用淡出（全屏弹层 / 对话框关闭）—— */
 .m-fade-exit {
   animation: m-fade-out 200ms ease-in both;
 }
 @keyframes m-fade-out {
   from { opacity: 1; }
   to { opacity: 0; }
-}
-.m-sheet-exit .m-sheet-panel {
-  animation: m-sheet-out 200ms ease-in both;
-}
-.m-sheet-exit .m-overlay-scrim {
-  animation: m-mask-out 200ms ease-in both;
-}
-
-/* —— 抽屉面板滑入（遮罩淡入复用 m-mask-in）—— */
-.m-directory-panel {
-  animation: m-drawer-in 240ms cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-@keyframes m-drawer-in {
-  from { transform: translateX(-100%); }
-  to { transform: none; }
 }
 
 /* —— 查看器打开淡入（关闭走已有的 .m-viewer-exit）—— */
@@ -3880,10 +3832,6 @@ body .desktop-library .desktop-settings-action.is-quiet:hover:not(:disabled) {
   filter: blur(10px);
 }
 
-/* —— 侧滑抽屉 —— */
-.m-drawer-mask {
-  animation: m-mask-in 200ms ease-out both;
-}
 /* —— 居中对话框 —— */
 .m-dialog-mask {
   animation: m-mask-in 160ms ease-out both;
@@ -3976,19 +3924,15 @@ body .desktop-library .desktop-settings-action.is-quiet:hover:not(:disabled) {
 @media (prefers-reduced-motion: reduce) {
   .m-sheet-mask,
   .m-sheet-panel,
-  .m-drawer-mask,
   .m-dialog-mask,
   .m-dialog,
   .m-toast,
   .m-viewer-media-enter,
   .m-viewer-exit,
   .m-viewer-root,
-  .m-directory-panel,
   .m-page-in,
-  .m-tab-enter,
   .m-subpage-enter,
   .m-page-exit-right,
-  .m-page-pop-left,
   .m-fade-exit,
   .m-fullscreen .modal-box {
     animation-duration: 1ms !important;

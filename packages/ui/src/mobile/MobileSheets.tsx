@@ -1,6 +1,6 @@
-import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import { MobileIcon, type MobileIconName } from './mobileIcons';
-import { Z_DIALOG, Z_PROGRESS, Z_SHEET, Z_TOAST } from './zindex';
+import { Z_DIALOG, Z_SHEET, Z_TOAST } from './zindex';
 
 const FOCUSABLE_SELECTOR = 'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])';
 
@@ -41,11 +41,17 @@ export interface SheetAction {
 export function MobileActionSheet({
   title,
   subtitle,
+  media,
+  quickActions = [],
   actions,
   onClose,
 }: {
   title?: string;
   subtitle?: string;
+  /** 标题左侧的缩略图（图片/图包封面）。 */
+  media?: ReactNode;
+  /** 顶部四宫格快捷动作（常用操作），其余动作以列表呈现。 */
+  quickActions?: SheetAction[];
   actions: SheetAction[];
   onClose: () => void;
 }) {
@@ -136,9 +142,30 @@ export function MobileActionSheet({
           <span className="m-sheet-handle" />
         </div>
         {(title || subtitle) && (
-          <div className="m-sheet-header">
-            {title && <strong id={titleId}>{title}</strong>}
-            {subtitle && <span id={subtitleId}>{subtitle}</span>}
+          <div className={`m-sheet-header ${media ? 'has-media' : ''}`}>
+            {media && <span className="m-sheet-media" aria-hidden="true">{media}</span>}
+            <span className="m-sheet-heading">
+              {title && <strong id={titleId}>{title}</strong>}
+              {subtitle && <span id={subtitleId}>{subtitle}</span>}
+            </span>
+          </div>
+        )}
+        {quickActions.length > 0 && (
+          <div className="m-sheet-quick" role="group" aria-label="常用操作">
+            {quickActions.map((action, i) => (
+              <button
+                key={i}
+                className={action.danger ? 'is-danger' : ''}
+                disabled={action.disabled}
+                onClick={() => {
+                  if (action.disabled) return;
+                  requestClose(action.onSelect);
+                }}
+              >
+                {action.icon && <MobileIcon name={action.icon} className="w-[22px] h-[22px]" />}
+                <span>{action.label}</span>
+              </button>
+            ))}
           </div>
         )}
         <div className="m-sheet-content">
@@ -332,82 +359,147 @@ export function MobilePromptDialog({
   );
 }
 
-/** 底部 Toast（自动消失由调用方控制）。 */
-export function MobileToast({ text, kind }: { text: string; kind: 'info' | 'success' | 'error' }) {
+export interface ToastAction {
+  label: string;
+  onPress: () => void;
+}
+
+/** 底部 Snackbar（自动消失由调用方控制）。带动作时可点按（如「撤销」「打开」）。 */
+export function MobileToast({
+  text,
+  kind,
+  action,
+  onDismiss,
+  lifted = false,
+}: {
+  text: string;
+  kind: 'info' | 'success' | 'error';
+  action?: ToastAction;
+  onDismiss?: () => void;
+  /** 底部有浮动操作栏/FAB 时上移，避免遮挡。 */
+  lifted?: boolean;
+}) {
   const cls = kind === 'error' ? 'is-error' : kind === 'success' ? 'is-success' : '';
   return (
     <div
-      className="m-toast fixed left-1/2 -translate-x-1/2 pointer-events-none max-w-[86vw]"
-      style={{ bottom: 'calc(env(safe-area-inset-bottom, 0px) + 88px)', zIndex: Z_TOAST }}
+      className={`m-toast fixed left-3 right-3 ${action ? '' : 'pointer-events-none'}`}
+      style={{ bottom: `calc(env(safe-area-inset-bottom, 0px) + ${lifted ? 96 : 20}px)`, zIndex: Z_TOAST }}
       role="status"
       aria-live={kind === 'error' ? 'assertive' : 'polite'}
       aria-atomic="true"
     >
-      <div className={`m-toast-card ${cls}`}>{text}</div>
+      <div className={`m-toast-card ${cls}`}>
+        <span className="m-toast-text">{text}</span>
+        {action && (
+          <button
+            className="m-toast-action"
+            onClick={() => {
+              onDismiss?.();
+              action.onPress();
+            }}
+          >
+            {action.label}
+          </button>
+        )}
+      </div>
     </div>
   );
 }
 
-/** 底部进度卡片（导入 / 导出 / 整理进行中）。 */
-export function MobileProgressCard({
+/**
+ * 通用底部面板：遮罩点击 / 拖动把手下滑 / Esc 关闭，关闭先播放滑出动画再回调。
+ * children 可为渲染函数以拿到带动画的 close（选项点选后需要收起面板时使用）。
+ */
+export function MobileBottomSheet({
   title,
-  detail,
-  done,
-  total,
-  onCancel,
+  subtitle,
+  headerAction,
+  children,
+  onClose,
+  className = '',
 }: {
   title: string;
-  detail?: string;
-  done?: number;
-  total?: number;
-  onCancel?: () => void;
+  subtitle?: string;
+  headerAction?: ReactNode;
+  children: ReactNode | ((close: (after?: () => void) => void) => ReactNode);
+  onClose: () => void;
+  className?: string;
 }) {
-  const hasProgress = typeof done === 'number' && typeof total === 'number' && total > 0;
-  const progressPct = hasProgress ? Math.min(100, Math.max(0, (done / total) * 100)) : 0;
+  const [closing, setClosing] = useState(false);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const closeTimerRef = useRef<number | null>(null);
+  const dragRef = useRef<{ startY: number; dy: number } | null>(null);
+  const titleId = useId();
+  const restoreFocusRef = useRef<HTMLElement | null>(
+    typeof document !== 'undefined' && document.activeElement instanceof HTMLElement ? document.activeElement : null,
+  );
+
+  useEffect(() => {
+    panelRef.current?.focus({ preventScroll: true });
+    return () => {
+      if (closeTimerRef.current != null) window.clearTimeout(closeTimerRef.current);
+      restoreFocusRef.current?.focus({ preventScroll: true });
+    };
+  }, []);
+
+  const requestClose = (after?: () => void) => {
+    if (closing) return;
+    setClosing(true);
+    closeTimerRef.current = window.setTimeout(() => {
+      closeTimerRef.current = null;
+      onClose();
+      after?.();
+    }, 180);
+  };
+
+  const onDragStart = (e: React.TouchEvent) => {
+    dragRef.current = { startY: e.touches[0].clientY, dy: 0 };
+  };
+  const onDragMove = (e: React.TouchEvent) => {
+    const d = dragRef.current;
+    if (!d || !panelRef.current) return;
+    d.dy = Math.max(0, e.touches[0].clientY - d.startY);
+    panelRef.current.style.transition = 'none';
+    panelRef.current.style.transform = `translateY(${d.dy}px)`;
+  };
+  const onDragEnd = () => {
+    const d = dragRef.current;
+    dragRef.current = null;
+    if (!panelRef.current) return;
+    if (d && d.dy > 90) requestClose();
+    else {
+      panelRef.current.style.transition = '';
+      panelRef.current.style.transform = '';
+    }
+  };
+
   return (
-    <div
-      className="fixed left-3 right-3"
-      style={{ bottom: 'calc(env(safe-area-inset-bottom, 0px) + 16px)', zIndex: Z_PROGRESS }}
-      role="status"
-      aria-live="polite"
-      aria-atomic="true"
-    >
-      <div className="m-progress-card">
-        <div className="flex items-center gap-3">
-          <span className="m-progress-spinner" aria-hidden="true" />
-          <div className="flex-1 min-w-0">
-            <div className="m-progress-title">{title}</div>
-            {detail && <div className="m-progress-detail truncate mt-0.5">{detail}</div>}
-          </div>
-          {hasProgress && (
-            <span className="m-progress-count shrink-0 tabular-nums">
-              {done}/{total}
-            </span>
-          )}
-          {onCancel && (
-            <button
-              type="button"
-              className="m-button is-ghost is-danger shrink-0"
-              onClick={onCancel}
-              aria-label="取消"
-            >
-              取消
-            </button>
-          )}
+    <div className={`m-sheet-mask fixed inset-0 ${closing ? 'm-closing' : ''}`} style={{ zIndex: Z_SHEET }}>
+      <div className="m-overlay-scrim absolute inset-0" onClick={() => requestClose()} />
+      <div
+        ref={panelRef}
+        className={`m-sheet-panel absolute left-0 right-0 bottom-0 flex flex-col max-h-[86vh] ${className}`}
+        style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 12px)' }}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') requestClose();
+          trapFocus(e, panelRef.current);
+        }}
+      >
+        <div className="m-sheet-handle-wrap" onTouchStart={onDragStart} onTouchMove={onDragMove} onTouchEnd={onDragEnd}>
+          <span className="m-sheet-handle" />
         </div>
-        {hasProgress && (
-          <div
-            className="m-progress-track"
-            role="progressbar"
-            aria-valuemin={0}
-            aria-valuemax={total}
-            aria-valuenow={Math.min(total, Math.max(0, done))}
-            aria-valuetext={`${done} / ${total}`}
-            aria-label={title}
-          >
-            <span style={{ width: `${progressPct}%` }} />
-          </div>
-        )}
+        <div className="m-sheet-header has-action" onTouchStart={onDragStart} onTouchMove={onDragMove} onTouchEnd={onDragEnd}>
+          <span className="m-sheet-heading">
+            <strong id={titleId}>{title}</strong>
+            {subtitle && <span>{subtitle}</span>}
+          </span>
+          {headerAction}
+        </div>
+        <div className="m-sheet-body">{typeof children === 'function' ? children(requestClose) : children}</div>
       </div>
     </div>
   );

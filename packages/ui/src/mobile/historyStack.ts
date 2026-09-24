@@ -11,6 +11,7 @@
  */
 
 export type OverlayLayer =
+  /** 目录树底部面板（沿用 drawer 名，history.state 快照里的历史值保持兼容）。 */
   | 'drawer'
   | 'sheet'
   | 'viewer'
@@ -18,8 +19,9 @@ export type OverlayLayer =
   | 'organize'
   | 'cover'
   | 'dialog'
-  | 'report'
-  | 'search';
+  | 'search'
+  | 'tasks'
+  | 'display';
 
 export type StackEntry = { type: 'folder'; folderId: string } | { type: 'overlay'; layer: OverlayLayer };
 
