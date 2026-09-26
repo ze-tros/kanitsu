@@ -43,6 +43,13 @@ export interface NativeImportResult {
 /** Reads the user-selected source folder during import. */
 export interface ImportSourcePicker {
   pickFolder(): Promise<FolderRef>;
+  /**
+   * 可选：把拖入窗口的文件夹解析为导入源（桌面端）。主进程会弹出原生确认框，
+   * 用户确认后才授权该目录；用户拒绝时抛出含「取消」的错误；拖入的不是文件夹时抛出说明性错误。
+   * 返回值作为 importFolder 的 options.source 传入，替代 pickFolder。
+   * 未实现的平台 UI 不显示拖入导入。
+   */
+  resolveDroppedFolder?(file: File): Promise<FolderRef>;
   listChildren(folder: FolderRef): AsyncGenerator<FsEntry, void, void>;
   readBlob(file: FileRef): Promise<Blob>;
   /** Releases any platform-side source-folder grant held by this picker. */

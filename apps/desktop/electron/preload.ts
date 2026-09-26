@@ -1,5 +1,5 @@
 // Preload: exposes the desktop bridge to the renderer through contextBridge.
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 
 // 启动底色引导：preload 与页面同源，localStorage 同步可读且早于一切页面
 // 脚本。这里把解析后的主题发给主进程，主进程在窗口显示（ready-to-show）
@@ -44,7 +44,6 @@ type ThumbnailDebugStats = {
   thumbCacheEntries: number;
   thumbCacheBytes: number;
   diskFiles: number;
-  debugEnabled: boolean;
 };
 
 type ClearCacheResult = {
@@ -67,13 +66,25 @@ type DataDirConfirmResult = {
 
 const bridge = {
   platform: 'electron' as const,
-  version: '0.1.0',
+  // 版本号由主进程经 additionalArguments 传入（app.getVersion()，即 apps/desktop/package.json）。
+  version: process.argv.find((arg) => arg.startsWith('--kanitsu-version='))?.slice('--kanitsu-version='.length) ?? '',
   getThumbnailDebugStats: (): Promise<ThumbnailDebugStats> => ipcRenderer.invoke('debug:thumbnailStats'),
-  setDebugEnabled: (enabled: boolean): Promise<void> => ipcRenderer.invoke('debug:setEnabled', enabled),
   setLogLevel: (level: 'debug' | 'info' | 'warn' | 'error'): Promise<void> => ipcRenderer.invoke('debug:setLevel', level),
   readLogs: (maxLines?: number): Promise<string[]> => ipcRenderer.invoke('debug:readLogs', maxLines),
   clearCaches: (): Promise<ClearCacheResult> => ipcRenderer.invoke('cache:clear'),
   pickSourceFolder: (): Promise<DesktopEntry | null> => ipcRenderer.invoke('import:pickFolder'),
+  // 拖入导入：File 对象无法跨 IPC 传给主进程，这里用 webUtils 取绝对路径后交给主进程；
+  // 主进程会弹原生确认框，用户确认后才授权该目录。非 File 或无本地路径时直接拒绝。
+  resolveDroppedFolder: (file: File): Promise<DesktopEntry> => {
+    let droppedPath = '';
+    try {
+      droppedPath = webUtils.getPathForFile(file);
+    } catch {
+      droppedPath = '';
+    }
+    if (!droppedPath) return Promise.reject(new Error('无法识别拖入的项目，请拖入本地文件夹。'));
+    return ipcRenderer.invoke('import:confirmDrop', droppedPath);
+  },
   listSourceChildren: (folder: DesktopEntry): Promise<DesktopEntry[]> =>
     ipcRenderer.invoke('import:listChildren', folder),
   readSourceBlob: (file: DesktopEntry): Promise<Uint8Array> => ipcRenderer.invoke('import:readBlob', file),

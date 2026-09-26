@@ -48,7 +48,6 @@ export interface ThumbnailDebugStats {
   thumbCacheEntries: number;
   thumbCacheBytes: number;
   diskFiles: number;
-  debugEnabled: boolean;
 }
 
 /** 清除缓存的结果。 */
@@ -76,11 +75,13 @@ export interface KanitsuDesktopBridge {
   platform: 'electron';
   version: string;
   getThumbnailDebugStats(): Promise<ThumbnailDebugStats>;
-  setDebugEnabled(enabled: boolean): Promise<void>;
   setLogLevel(level: 'debug' | 'info' | 'warn' | 'error'): Promise<void>;
   readLogs(maxLines?: number): Promise<string[]>;
   clearCaches(): Promise<ClearCacheResult>;
   pickSourceFolder(): Promise<DesktopFsEntry | null>;
+  /** 拖入导入：preload 以 webUtils 取路径，主进程弹原生确认框，确认后授权并返回该目录；
+   *  用户取消抛含「取消」的错误，拖入的不是文件夹时抛说明性错误。 */
+  resolveDroppedFolder(file: File): Promise<DesktopFsEntry>;
   listSourceChildren(folder: DesktopFsEntry): Promise<DesktopFsEntry[]>;
   readSourceBlob(file: DesktopFsEntry): Promise<Uint8Array>;
   importSourceTree(source: DesktopFsEntry, targetTopName: string, cancelToken?: string): Promise<NativeImportResult>;
@@ -171,6 +172,12 @@ export class ElectronImportSourcePicker implements ImportSourcePicker {
   async pickFolder(): Promise<FolderRef> {
     const entry = await requireBridge().pickSourceFolder();
     if (!entry) throw new Error('已取消选择文件夹。');
+    return toFolderRef(entry);
+  }
+
+  async resolveDroppedFolder(file: File): Promise<FolderRef> {
+    const entry = await requireBridge().resolveDroppedFolder(file);
+    if (entry.kind !== 'folder') throw new Error('请拖入文件夹，而不是单个文件。');
     return toFolderRef(entry);
   }
 

@@ -119,7 +119,6 @@ interface ThumbnailDebugStats {
   thumbCacheEntries: number;
   thumbCacheBytes: number;
   diskFiles: number;
-  debugEnabled: boolean;
 }
 
 /** 清除缓存的结果（供设置页反馈）。 */
@@ -1297,6 +1296,60 @@ function registerIpc(): void {
     return entryFor(selected);
   });
 
+  // 拖入窗口的文件夹：路径来自渲染端（webUtils.getPathForFile），不可信。
+  // 必须经原生确认框由用户确认后才授权，防止被攻破的渲染端静默导入任意目录。
+  ipcMain.handle('import:confirmDrop', async (event, droppedPath: unknown): Promise<DesktopFsEntry> => {
+    if (typeof droppedPath !== 'string' || !droppedPath || !path.isAbsolute(droppedPath)) {
+      throw new Error('无法识别拖入的项目，请拖入文件夹。');
+    }
+    const selected = path.resolve(droppedPath);
+    let stat;
+    try {
+      stat = await fs.stat(selected);
+    } catch {
+      throw new Error('拖入的文件夹不存在或无法访问。');
+    }
+    if (!stat.isDirectory()) throw new Error('请拖入文件夹，而不是单个文件。');
+
+    // 不允许把数据目录（含图库）自身或其上级目录作为导入源：会把图库复制进自己。
+    // 比较前解析真实路径，符号链接 / 目录联接不能绕过这项检查。
+    const real = async (p: string): Promise<string> => fs.realpath(p).catch(() => path.resolve(p));
+    const dataDir = await real(getDataDir());
+    const selectedReal = await real(selected);
+    const sameOrInside = (target: string, root: string): boolean => {
+      const t = process.platform === 'win32' ? target.toLowerCase() : target;
+      const r = process.platform === 'win32' ? root.toLowerCase() : root;
+      return t === r || t.startsWith(r.endsWith(path.sep) ? r : r + path.sep);
+    };
+    if (sameOrInside(selectedReal, dataDir)) {
+      throw new Error('不能导入 Kanitsu 数据目录（图库）内的文件夹。');
+    }
+    if (sameOrInside(dataDir, selectedReal)) {
+      throw new Error('该文件夹包含 Kanitsu 数据目录（图库），不能整体导入。');
+    }
+
+    const name = path.basename(selected) || selected;
+    const win = BrowserWindow.fromWebContents(event.sender) ?? mainWindow;
+    const options: Electron.MessageBoxOptions = {
+      type: 'question',
+      buttons: ['导入', '取消'],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true,
+      title: '导入文件夹',
+      message: `导入「${name}」？`,
+      detail: `${selected}\n\n会把其中支持的图片复制到 Kanitsu 图库，源文件夹不会被修改。`,
+    };
+    const { response } = win ? await dialog.showMessageBox(win, options) : await dialog.showMessageBox(options);
+    if (response !== 0) {
+      logger.info('import', '用户取消了拖入导入');
+      throw new Error('已取消导入拖入的文件夹。');
+    }
+    allowedSourceRoot = selected;
+    logger.info('import', `拖入导入已确认：${name}`);
+    return entryFor(selected);
+  });
+
   ipcMain.handle('import:releaseSource', async (): Promise<void> => {
     allowedSourceRoot = null;
   });
@@ -1539,16 +1592,10 @@ function registerIpc(): void {
       thumbCacheEntries: mem.entries,
       thumbCacheBytes: mem.bytes,
       diskFiles,
-      debugEnabled: debugLogging,
     };
   });
 
-  ipcMain.handle('debug:setEnabled', (_event, enabled: boolean): void => {
-    debugLogging = enabled === true;
-    setLogLevel(debugLogging ? 'debug' : 'info'); // 调试开关同步控制主进程日志级别
-  });
-
-  // 日志等级选择（设置页“调试”）：校验后同步主进程日志级别与调试开关。
+  // 日志等级选择（设置页“诊断”）：校验后同步主进程日志级别与调试日志开关。
   ipcMain.handle('debug:setLevel', (_event, level: unknown): void => {
     const lvl = level === 'debug' || level === 'info' || level === 'warn' || level === 'error' ? level : 'info';
     debugLogging = lvl === 'debug';
@@ -1885,6 +1932,8 @@ function createWindow() {
       nodeIntegration: false,
       // 主会话固定落在 <数据目录>/profile（见 appSession）。
       session: appSession(),
+      // 应用版本经启动参数交给 preload（preload 拿不到 app 模块），关于页据此显示。
+      additionalArguments: [`--kanitsu-version=${app.getVersion()}`],
     },
   });
 
