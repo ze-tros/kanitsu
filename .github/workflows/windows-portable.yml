@@ -87,8 +87,7 @@ jobs:
           retention-days: 14
 
   # 构建通过后为 tag 生成 Release，附件与 Actions Artifact 是同一批文件。
-  # 稳定版只创建 draft：人工验收通过后由发布者补齐说明并手动发布；
-  # 预发布版本（如 0.3.0-alpha.1）不经 draft，直接创建 Pre-release。
+  # 稳定版直接创建正式 Release；预发布版本（如 0.3.0-alpha.1）创建带 Pre-release 标记的 Release。
   release:
     name: Create GitHub Release
     needs: build
@@ -100,6 +99,9 @@ jobs:
       actions: read
 
     steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
       - name: Download Portable artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -115,7 +117,7 @@ jobs:
       - name: Create Release with installers and checksum
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # 该作业没有 checkout，gh 无法通过 git 推断仓库，必须显式指定
+          # checkout 的是 tag，为避免 gh 依赖 git remote 推断，显式指定仓库
           GH_REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
           VERSION: ${{ needs.build.outputs.version }}
@@ -129,20 +131,26 @@ jobs:
           fi
           # 合并两种产物的校验文件为一个 SHA256SUMS.txt（行内文件名不同，不会冲突）
           cat release-assets/portable/SHA256SUMS.txt release-assets/setup/SHA256SUMS.txt > release-assets/SHA256SUMS.txt
-          # 稳定版走 draft，人工验收后手动发布；预发布段（如 0.3.0-alpha.1）直接创建 Pre-release
-          notes="$RELEASE_NOTES"
+          # 稳定版直接发布正式 Release；预发布段（如 0.3.0-alpha.1）发布带 Pre-release 标记的 Release
           release_flags=()
           case "$VERSION" in
             *-*) release_flags+=(--prerelease) ;;
-            *)  release_flags+=(--draft)
-                notes="$notes"$'\n'"发布前请按 docs/Windows-Portable-打包与发布指南.md 第 9 节完成验收。" ;;
           esac
+          # 说明正文优先用随发布提交撰写的 docs/release-notes/<tag>.md（约定见发布指南 4.2 节）；
+          # 文件缺失时退回 GitHub 自动生成的变更日志。SmartScreen 提示段落始终附加在末尾。
+          notes_file="docs/release-notes/${TAG}.md"
+          note_args=()
+          if [ -f "$notes_file" ]; then
+            { cat "$notes_file"; printf '\n%s' "$RELEASE_NOTES"; } > release-body.md
+            note_args+=(--notes-file release-body.md)
+          else
+            note_args+=(--notes "$RELEASE_NOTES" --generate-notes)
+          fi
           gh release create "$TAG" \
             "release-assets/portable/Kanitsu-Portable-${VERSION}-x64.exe" \
             "release-assets/setup/Kanitsu-Setup-${VERSION}-x64.exe" \
             "release-assets/SHA256SUMS.txt" \
             --title "Kanitsu $TAG" \
-            --notes "$notes" \
-            --generate-notes \
+            "${note_args[@]}" \
             "${release_flags[@]}" \
             --verify-tag

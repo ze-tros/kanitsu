@@ -37,9 +37,8 @@ Windows 产物不做代码签名——这是既定发布策略（见 §14），�
 完整发布链路为：
 
 ```text
-更新版本 -> 本地预检 -> 提交/合并 -> 创建 tag -> CI 构建（Portable + Setup）
--> 稳定版：draft Release -> 校验与验收 -> 补齐说明并发布 -> 发布后复核
-   预发布版：直接发布 Pre-release -> 发布后复核
+更新版本 -> 本地预检 -> 本地构建与验收 -> 提交/合并 -> 创建 tag -> CI 构建（Portable + Setup）
+-> 自动创建并发布 Release（稳定版正式，预发布版带 Pre-release 标记）-> 发布后复核
 ```
 
 GitHub Actions 工作流位于：
@@ -58,7 +57,7 @@ GitHub Actions 工作流位于：
 6. 使用唯一 staging 目录构建 Windows x64 Portable EXE，校验文件名、文件体积、DOS/PE/COFF 结构和 SHA-256，并再次以只读方式核对 `SHA256SUMS.txt`。
 7. 以同样的方式构建 Windows x64 Setup（NSIS）安装包并校验。
 8. 上传两种产物和各自校验文件为 Actions Artifact，保留 14 天。
-9. tag 构建成功后由 `release` 作业自动创建 Release，附件为 Portable EXE、Setup EXE 与合并的 `SHA256SUMS.txt`，并生成变更日志。稳定版为 draft：对公众不可见，验收通过后由发布者补齐说明并手动发布；预发布版本直接发布并带 Pre-release 标记。手动触发（非 tag）的构建不会创建 Release。
+9. tag 构建成功后由 `release` 作业自动创建并发布 Release，附件为 Portable EXE、Setup EXE 与合并的 `SHA256SUMS.txt`，并生成变更日志。版本号含预发布段（如 `0.3.0-alpha.1`）的 Release 带 Pre-release 标记，其余为正式 Release。手动触发（非 tag）的构建不会创建 Release。
 
 同一 ref 上有新构建启动时，旧的未完成构建会被取消。
 
@@ -68,7 +67,7 @@ GitHub Actions 工作流位于：
 
 发布操作者需要：
 
-- 具有仓库推送 tag 的权限，以及发布（publish）draft Release 的权限。
+- 具有仓库推送 tag 的权限；Release 由 `release` 作业用 `GITHUB_TOKEN` 自动创建并发布，不需要发布者手动操作。
 - 确认仓库已启用 GitHub Actions。
 - 确认 `windows-portable.yml` 已存在于 GitHub 默认分支。
 - 本地预检时使用 Windows x64、Node.js 24 和 npm。
@@ -115,9 +114,21 @@ git diff -- package.json apps/desktop/package.json package-lock.json
 
 SemVer 允许在补丁号后用连字符携带预发布段，例如 `0.3.0-alpha.1`、`0.3.0-beta.2`、`0.3.0-rc.1`。发布步骤与正式版完全一致：同步修改两个 `package.json` 的 `version`，提交后打 `v0.3.0-alpha.1` 形式的 tag 并推送。
 
-tag 或版本号含预发布段时，`Windows Portable` 工作流不经 draft 关口，直接创建带 Pre-release 标记的 Release，在 Releases 页面明确显示为预发布，不与稳定版混淆；稳定版仍走 draft → 人工验收 → 手动发布（第 8 节）。SemVer 排序保证 `0.3.0-alpha.1 < 0.3.0-beta.1 < 0.3.0-rc.1 < 0.3.0`。`Android Release APK` 工作流同样由 `v*` tag 触发，预发布 tag 会产出对应的签名 APK artifact。
+tag 或版本号含预发布段时，`Windows Portable` 工作流直接创建带 Pre-release 标记的 Release，在 Releases 页面明确显示为预发布，不与稳定版混淆；稳定版则直接创建正式 Release（第 10 节）。SemVer 排序保证 `0.3.0-alpha.1 < 0.3.0-beta.1 < 0.3.0-rc.1 < 0.3.0`。`Android Release APK` 工作流同样由 `v*` tag 触发，预发布 tag 会产出对应的签名 APK artifact。
 
-由于预发布 Release 推送 tag 后立即公开，应在推 tag 前完成与第 9 节等价的验收（`npm run release:portable` 加干净环境试跑）。预发布定位是先行体验与内部测试，不作为稳定渠道分发。
+由于 Release 在推送 tag 后立即公开，应在推 tag 前完成第 5 节本地预检与第 9 节等价的验收（`npm run release:portable` 加干净环境试跑）。预发布定位是先行体验与内部测试，不作为稳定渠道分发。
+
+### 4.2 发布说明文件
+
+每次发布在 `docs/release-notes/` 下准备与 tag 同名的说明文件，例如 `v0.3.3.md`。`release` 作业创建 Release 时优先使用该文件作为说明正文（末尾自动附加附件与 SmartScreen 的固定段落），文件缺失时退回 GitHub 自动生成的变更日志。
+
+文件在推 tag 前撰写（由发布者或执行发布的 agent 完成），内容面向用户、用中文，至少覆盖：
+
+- 新功能与体验改进（feat / perf）。
+- 修复的问题（fix）。
+- 已知问题、数据兼容性说明（如索引或缓存格式变更）。
+
+素材来源是上一个 tag 以来的提交历史（`git log <prev-tag>..<tag> --oneline`），按用户视角归纳成条目，不逐条罗列 commit。
 
 ## 5. 本地发布预检
 
@@ -309,7 +320,9 @@ Get-AuthenticodeSignature -LiteralPath .\Kanitsu-Portable-0.2.0-x64.exe |
 
 ## 9. 发布前验收
 
-建议在干净的 Windows 10/11 x64 环境中验收 CI 产物，至少覆盖：
+建议在干净的 Windows 10/11 x64 环境中验收发布产物，至少覆盖：
+
+由于 Release 在 tag 推送后立即发布，本节验收必须在推 tag 前用本地产物（`npm run release:portable` 的输出）完成；发布后再按第 11 节从 Release 页面下载同一批文件复核。
 
 - EXE 可直接启动，主窗口标题正确，Windows 文件属性中的产品名和版本正确。
 - 首次启动和第二次启动均正常。
@@ -325,31 +338,32 @@ Get-AuthenticodeSignature -LiteralPath .\Kanitsu-Portable-0.2.0-x64.exe |
 
 ## 10. 发布 GitHub Release
 
-推送 `v*` tag 后，`release` 作业会在构建成功时自动创建一个 **draft Release**：标题为 `Kanitsu v<version>`，附件是同一批 CI 产物（EXE 与 `SHA256SUMS.txt`），变更日志已自动生成。draft 对公众不可见，所以验收流程不变 —— **验收通过后才发布**。
+推送 `v*` tag 后，`release` 作业会在构建成功时自动创建并发布 Release：标题为 `Kanitsu v<version>`，附件是同一批 CI 产物（Portable EXE、Setup EXE 与合并的 `SHA256SUMS.txt`）。说明正文优先使用随发布提交撰写的 `docs/release-notes/<tag>.md`（见 4.2 节，末尾自动附加 SmartScreen 提示段落）；该文件缺失时由 GitHub 自动生成变更日志。版本号含预发布段（如 `v0.3.0-alpha.1`）的 Release 带 `Pre-release` 标记，其余为正式 Release。
 
-如果 draft 不存在（手动触发构建、`build` 作业失败、或同名 tag 已存在 Release 被跳过），按 10.2 的备用命令手工创建。
+Release 发布即公开，验收关口前移到推 tag 之前（第 5–9 节，使用本地产物）。发布后按第 11 节从 Release 页面重新下载复核；发现问题时按第 13 节回滚处理。
 
-### 10.1 从 draft 发布
+如果 Release 未被创建（手动触发构建、`build` 作业失败、或同名 tag 已存在 Release 被跳过），按 10.2 的备用命令手工创建。
 
-1. 进入仓库的 `Releases`，找到标记为 `Draft` 的那一条。
-2. 核对 tag、标题、附件文件名，并按第 8.3 节校验 SHA-256。
-3. 补齐变更说明：新功能、修复、已知问题、数据兼容性说明。
-4. 预发布版本勾选 `Set as a pre-release`；稳定版本再设为 latest release。
-5. 点击 `Publish release`。
+### 10.1 复核已发布的 Release
 
-不要把 Actions 下载的整个 ZIP 作为唯一附件。Release 中应直接提供 EXE 和校验文件，方便用户下载单文件应用。
+1. 进入仓库的 `Releases`，确认最新一条的 tag、标题、附件文件名正确。
+2. 按 8.3 节校验 SHA-256。
+3. 发现说明遗漏时，先补 `docs/release-notes/<tag>.md`，再同步编辑 Release 说明（新功能、修复、已知问题、数据兼容性说明）。
+4. 确认预发布版本带 `Pre-release` 标记，稳定版本为 latest release。
+
+不要把 Actions 下载的整个 ZIP 作为附件。Release 中应直接提供 EXE 和校验文件，方便用户下载单文件应用。
 
 ### 10.2 GitHub CLI 操作
 
-从 draft 发布：
+复核与补充说明：
 
 ```powershell
 $tag = 'v0.2.0'
 gh release view $tag --web          # 复核附件与说明
-gh release edit $tag --draft=false  # 验收通过后发布
+gh release edit $tag --notes "..."  # 按需补充变更说明
 ```
 
-draft 缺失时手工补建：
+Release 缺失时手工补建（预发布版本追加 `--prerelease` 参数）：
 
 ```powershell
 $tag = 'v0.2.0'
@@ -358,11 +372,10 @@ $sum = '.\release-download\SHA256SUMS.txt'
 
 gh release create $tag $exe $sum `
   --title "Kanitsu $tag" `
-  --generate-notes `
-  --draft
+  --generate-notes
 ```
 
-先创建 draft，在 GitHub 网页完成最后复核后再发布。若该 tag 已有 Release，`gh release create` 会失败，需要先删除旧条目。
+若该 tag 已有 Release，`gh release create` 会失败，需要先删除旧条目。
 
 ## 11. 发布后检查
 
@@ -454,14 +467,12 @@ Windows 产物确定不接入 Authenticode 代码签名，直接分发无签名�
 
 - [ ] 根包与 desktop 版本一致。
 - [ ] 版本变更和 lockfile 已提交。
+- [ ] `docs/release-notes/v<version>.md` 已撰写并随发布 commit 提交（缺失时 Release 退回自动生成的变更日志）。
 - [ ] 本地 `npm run release:portable` 通过。
+- [ ] 本地产物在干净 Windows x64 环境按第 9 节验收通过（SHA-256 与 `NotSigned` 检查一并完成）。
 - [ ] 目标 commit 已推送至远端。
 - [ ] `v<version>` tag 指向正确 commit。
 - [ ] `Windows Portable` workflow 成功。
-- [ ] 已下载 CI 产物并解压（Release 的附件与 Actions Artifact 是同一批文件）。
-- [ ] SHA-256 校验通过（合并后的 `SHA256SUMS.txt` 覆盖两种产物）。
-- [ ] 签名状态为 `NotSigned`（无签名发布策略）。
-- [ ] 干净 Windows x64 环境验收通过。
-- [ ] Release 使用对应 tag，且已附加 Portable EXE、Setup EXE 和合并的 `SHA256SUMS.txt`（工作流自动完成）。
-- [ ] 验收通过后将 draft 发布（`gh release edit <tag> --draft=false`）。
-- [ ] 发布后重新下载并复核。
+- [ ] Release 已由工作流自动发布：使用对应 tag，附加 Portable EXE、Setup EXE 和合并的 `SHA256SUMS.txt`。
+- [ ] 预发布版本带 `Pre-release` 标记，稳定版为 latest。
+- [ ] 发布后从 Release 页面重新下载并复核（第 11 节）。
