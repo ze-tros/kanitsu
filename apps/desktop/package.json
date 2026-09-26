@@ -1,7 +1,7 @@
 {
   "name": "@kanitsu/desktop",
   "private": true,
-  "version": "0.3.2",
+  "version": "0.3.3",
   "productName": "Kanitsu",
   "description": "Kanitsu Viewer - cross-platform image viewer",
   "main": "dist/main.js",
