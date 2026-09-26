@@ -137,18 +137,22 @@ button.dk-sw { padding: 0; }
 .titlebar-no-drag, .dk-menu, .dk-task-pop, .dk-pal, .dk-snack { -webkit-app-region: no-drag; }
 .dk-snack-text { flex: 1; }
 
-/* 窗口按钮：主界面标题栏、查看器顶栏、查看器信息面板共用同一套几何（30×30 圆角、间距 3px、
-   右侧 10px），三处顶栏同高，按钮位置在进出查看器时不跳动。颜色经 --dk-wc-* 变量给出，
-   查看器（始终深色画布）只改变量，不另写一套规则。 */
+/* 窗口按钮：主界面标题栏、查看器顶栏、查看器信息面板共用同一套几何（32×32，与 dk-ib/dk-btn
+   的 32px 控件高度一致，圆角 7px 同图标键、间距 3px、右侧 10px），三处顶栏同高且内容盒等高
+   （各含 1px 边框预留，见 .dk-v-top 注释），按钮位置在进出查看器时不跳动、图标不重采样。
+   颜色经 --dk-wc-* 变量给出，查看器（始终深色画布）只改变量，不另写一套规则。 */
 .dk-wc {
   --dk-wc-fg: var(--desktop-muted);
   --dk-wc-fg-hover: var(--desktop-text);
   --dk-wc-bg-hover: var(--desktop-surface-3);
   display: flex; align-items: center; gap: 3px; flex: none; align-self: center; margin: 0 0 0 6px;
 }
-.dk-wc button { width: 30px; height: 30px; flex: none; display: grid; place-items: center; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--dk-wc-fg); transition: background-color .12s, color .12s; }
+.dk-wc button { width: 32px; height: 32px; flex: none; display: grid; place-items: center; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--dk-wc-fg); transition: background-color .12s, color .12s; }
 .dk-wc button:hover { background: var(--dk-wc-bg-hover); color: var(--dk-wc-fg-hover); }
 .dk-wc button.close:hover { background: #c94a46; color: #fff; }
+/* 字形 = 系统标题栏原字形（Segoe Fluent Icons，Win10 回退 MDL2 Assets），10px 为其原生尺寸；
+   锁 400 防继承出仿粗体。颜色走 currentColor，随顶栏的 --dk-wc-* 变量。 */
+.dk-wc-glyph { font-family: "Segoe Fluent Icons", "Segoe MDL2 Assets"; font-size: 10px; line-height: 1; font-weight: 400; font-style: normal; user-select: none; }
 
 /* ===== 布局 ===== */
 .dk-body { flex: 1; min-height: 0; display: flex; position: relative; }
@@ -645,7 +649,9 @@ html:has(.dk-setup-win), html:has(.dk-setup-win) body, html:has(.dk-setup-win) #
 .dk-v-loading { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; }
 .dk-v-loading .dk-spin { width: 26px; height: 26px; border-width: 3px; border-color: rgba(255,255,255,.18); border-top-color: var(--desktop-accent-fill); }
 .dk-v-top, .dk-v-bottom { position: absolute; left: 0; right: 0; z-index: 5; transition: opacity .25s var(--desktop-ease-standard), transform .25s var(--desktop-ease-standard); }
-.dk-v-top { top: 0; height: var(--desktop-titlebar-height); display: flex; align-items: center; gap: 6px; padding-left: 10px; background: linear-gradient(rgba(0,0,0,.62), transparent); }
+.dk-v-top { top: 0; height: var(--desktop-titlebar-height); display: flex; align-items: center; gap: 6px; padding-left: 10px; border-bottom: 1px solid transparent; background: linear-gradient(rgba(0,0,0,.62), transparent); }
+/* 主标题栏与信息面板头的 1px 分隔线各占掉 1px 内容高（border-box）；这里画一条透明边框等量
+   预留，三处顶栏内容盒同为 45px，窗口键与图标落在同一半像素相位上，进出查看器不重采样。 */
 .dk-v-group { display: flex; align-items: center; gap: 2px; min-width: 0; }
 .dk-v-bottom { bottom: 0; padding: 20px 0 10px; background: linear-gradient(transparent, rgba(0,0,0,.62)); }
 .dk-viewer.idle .dk-v-top { opacity: 0; transform: translateY(-8px); pointer-events: none; -webkit-app-region: no-drag; }
