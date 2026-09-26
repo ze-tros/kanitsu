@@ -70,3 +70,32 @@ export function saveBlurredImages(paths: ReadonlySet<string>): void {
 export function isImageBlurred(relPath: string | undefined, blurred: ReadonlySet<string>): boolean {
   return !!relPath && blurred.has(relPath);
 }
+
+const GIF_THUMB_ANIMATED_KEY = 'kanitsu-gif-thumb-animated';
+let gifThumbAnimated: boolean | null = null;
+
+/**
+ * GIF 网格缩略图是否保持动画（动图 / 静态首帧）。默认开（动图）。
+ * 影响生成路径（桌面 worker / Android 原生），经 readThumbnail 的选项逐请求
+ * 传到生成端，两端缓存键都随模式区分，切换后不会命中旧图。
+ */
+export function loadGifThumbnailAnimated(): boolean {
+  if (gifThumbAnimated === null) {
+    try {
+      const raw = localStorage.getItem(GIF_THUMB_ANIMATED_KEY);
+      gifThumbAnimated = raw === null ? true : raw === '1';
+    } catch {
+      gifThumbAnimated = true;
+    }
+  }
+  return gifThumbAnimated;
+}
+
+export function setGifThumbnailAnimated(value: boolean): void {
+  gifThumbAnimated = value;
+  try {
+    localStorage.setItem(GIF_THUMB_ANIMATED_KEY, value ? '1' : '0');
+  } catch {
+    // ignore storage errors
+  }
+}

@@ -28,9 +28,11 @@ import java.util.concurrent.atomic.AtomicInteger;
 public final class ThumbnailService {
     public static final int MAX_CACHE_BYTES = 512 * 1024 * 1024;
     public static final int GIF_PASSTHROUGH_BYTES = 256 * 1024;
-    /** 超过该字节数的 GIF 不做「整读 + 动画缩略图」，只取静态首帧：避免把数 MB
-     *  源文件整体读进堆内存。快速滚动并发下大 GIF 整读正是 OOM 的主要来源。 */
-    public static final int MAX_ANIMATED_GIF_BYTES = 4 * 1024 * 1024;
+    /** 超过该字节数的 GIF 不做「整读 + 动画缩略图」，只取静态首帧。整读前
+     *  先由 file.length() 判断（绝不先读后拒），解码/编码并发又由信号量封顶
+     *  在 2 路，内存峰值可控；v1 曾设 4MB，导致较大 GIF 全部退化为静态首帧，
+     *  放宽到 16MB。 */
+    public static final int MAX_ANIMATED_GIF_BYTES = 16 * 1024 * 1024;
     /** 同时进行内存密集型解码/编码的通道数。快速滑动 + 各级预取会同时触发大量
      *  缩略图生成，每路都持有解码位图与编码缓冲；无界并发会瞬间打爆 256MB 堆
      *  （OOM 闪退）。固定 2 路：一屏内缩略图仍足够快，且内存安全。 */
@@ -60,8 +62,8 @@ public final class ThumbnailService {
         }
     }
 
-    public Result getOrCreate(File file, int maxSize, int priority) {
-        String key = keyOf(file, maxSize);
+    public Result getOrCreate(File file, int maxSize, int priority, boolean gifAnimated) {
+        String key = keyOf(file, maxSize, gifAnimated);
         Result cached = lookup(key);
         if (cached != null) {
             return cached;
@@ -75,7 +77,7 @@ public final class ThumbnailService {
             }
             inFlight.incrementAndGet();
             try {
-                Result generated = generate(file, maxSize);
+                Result generated = generate(file, maxSize, gifAnimated);
                 store(key, generated);
                 pruneIfNeeded();
                 return generated;
@@ -142,26 +144,26 @@ public final class ThumbnailService {
         }
     }
 
-    private Result generate(File file, int maxSize) {
+    private Result generate(File file, int maxSize, boolean gifAnimated) {
         // 解码/编码是内存密集段：用信号量把同时进行的生成收口到常数，防止
         // 快速滚动时可见卡片 + 预取同时触发几十路生成把 256MB 堆打爆。
         decodeSlots.acquireUninterruptibly();
         try {
-            return doGenerate(file, maxSize);
+            return doGenerate(file, maxSize, gifAnimated);
         } finally {
             decodeSlots.release();
         }
     }
 
-    private Result doGenerate(File file, int maxSize) {
+    private Result doGenerate(File file, int maxSize, boolean gifAnimated) {
         String ext = AlbumLibrary.extOf(file.getName());
-        if ("gif".equals(ext)) {
+        if ("gif".equals(ext) && gifAnimated) {
             long len = file.length();
             // 先看文件大小再决定是否整读（原来先整读后判断，数 MB 的 GIF 会先占
             // 满内存才被拒，并发下正是 OOM 来源）：
             //   ≤256KB  原样透传（动画完美且小）；
-            //   256KB~4MB 抽帧做「可动且小」的动画缩略图；
-            //   >4MB    只取静态首帧，绝不整读到内存。
+            //   256KB~16MB 抽帧做「可动且小」的动画缩略图；
+            //   >16MB   只取静态首帧，绝不整读到内存。
             if (len > 0 && len <= GIF_PASSTHROUGH_BYTES) {
                 byte[] raw = readFile(file);
                 if (raw != null) {
@@ -283,8 +285,12 @@ public final class ThumbnailService {
         }
     }
 
-    private static String keyOf(File file, int maxSize) {
-        return AlbumLibrary.sha1(file.getAbsolutePath() + "|" + file.lastModified() + "|" + file.length() + "|" + maxSize + "|v1");
+    private static String keyOf(File file, int maxSize, boolean gifAnimated) {
+        // v2：GIF 动画缩略图上限放宽（v1 的大 GIF 静态首帧缓存整体失效重生成）。
+        // 动画/静态是不同输出，键随模式区分；非 GIF 两模式等价，不区分。
+        boolean isGif = "gif".equals(AlbumLibrary.extOf(file.getName()));
+        String variant = isGif ? ("|ga" + (gifAnimated ? "1" : "0")) : "";
+        return AlbumLibrary.sha1(file.getAbsolutePath() + "|" + file.lastModified() + "|" + file.length() + "|" + maxSize + variant + "|v2");
     }
 
     private static byte[] readFile(File file) {

@@ -3,6 +3,8 @@ import type { CustomOrganizeRule } from '../../../organizer/src/index';
 import type { KanitsuAndroidBridge } from '../../../fs-adapter/src/android';
 import { OrganizeRulesManager } from '../OrganizeRulesModal';
 import { getRendererThumbnailStats, clearThumbnailCache, type RendererThumbnailStats } from '../thumbnailCache';
+import { clearBlurPreviewCaches } from '../blurPreview';
+import { loadGifThumbnailAnimated, setGifThumbnailAnimated } from '../libraryPrefs';
 import {
   clearDebugLogs,
   getDebugLogs,
@@ -233,8 +235,24 @@ function StorageInline({ onOpenDetail }: { onOpenDetail: () => void }) {
 function BrowseInline() {
   const [prefetch, setPrefetch] = useState<boolean>(() => isPrefetchEnabled());
   const [rawFull, setRawFull] = useState<boolean>(() => isRawFullDecodeEnabled());
+  const [gifAnimated, setGifAnimated] = useState<boolean>(() => loadGifThumbnailAnimated());
   return (
     <>
+      <SettingsItem
+        icon="images"
+        title="GIF 动图预览"
+        subtitle="网格中的 GIF 播放动画；关闭显示静态首帧，更省内存与电量"
+        trailing={
+          <Switch
+            checked={gifAnimated}
+            label="GIF 动图预览"
+            onChange={(v) => {
+              setGifAnimated(v);
+              setGifThumbnailAnimated(v);
+            }}
+          />
+        }
+      />
       <SettingsItem
         icon="gauge"
         title="后台预取"
@@ -408,6 +426,7 @@ function CacheCard() {
   const handleClearRenderer = (): void => {
     const before = getRendererThumbnailStats();
     clearThumbnailCache();
+    clearBlurPreviewCaches();
     setClearResult(`内存缓存已清空（此前 ${before.entries} 条 / ${formatBytes(before.bytes)}）`);
   };
 

@@ -115,8 +115,8 @@ const bridge = {
   // 原始文件字节区间（元数据解析用；readBlob 是重编码后的展示图）。
   readLibrarySlice: (file: DesktopEntry, offset: number, length: number): Promise<Uint8Array> =>
     ipcRenderer.invoke('library:readSlice', file, offset, length),
-  readLibraryThumbnail: (file: DesktopEntry, maxSize: number, priority?: number): Promise<Uint8Array> =>
-    ipcRenderer.invoke('library:readThumbnail', file, maxSize, priority ?? 0),
+  readLibraryThumbnail: (file: DesktopEntry, maxSize: number, priority?: number, gifAnimated?: boolean): Promise<Uint8Array> =>
+    ipcRenderer.invoke('library:readThumbnail', file, maxSize, priority ?? 0, gifAnimated !== false),
   // RAW 查看派生图:主进程按渲染端传入的查看模式(缺省用持久值)解码后返回
   // 派生 JPEG 的 kanitsu-file URL。
   ensureRawDerivative: (file: DesktopEntry, viewMode?: 'camera' | 'developed'): Promise<string> =>

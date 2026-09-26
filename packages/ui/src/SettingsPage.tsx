@@ -41,6 +41,8 @@ import {
 } from './settingsTabs';
 import { DESKTOP_SHORTCUTS } from './desktopShortcuts';
 import { getRendererThumbnailStats, clearThumbnailCache, type RendererThumbnailStats } from './thumbnailCache';
+import { clearBlurPreviewCaches } from './blurPreview';
+import { loadGifThumbnailAnimated, setGifThumbnailAnimated } from './libraryPrefs';
 import { startFpsMonitor, stopFpsMonitor, resetFpsMonitor, type FpsStats } from './fpsMonitor';
 import {
   clearDebugLogs,
@@ -723,6 +725,11 @@ function CachePanel() {
   const [renderer, setRenderer] = useState<RendererThumbnailStats>(() => getRendererThumbnailStats());
   const mainStats = useMainThumbnailStats();
   const [clearResult, setClearResult] = useState('');
+  const [gifAnimated, setGifAnimated] = useState<boolean>(() => loadGifThumbnailAnimated());
+
+  useEffect(() => {
+    setGifThumbnailAnimated(gifAnimated);
+  }, [gifAnimated]);
 
   useEffect(() => {
     const refresh = (): void => setRenderer(getRendererThumbnailStats());
@@ -734,6 +741,7 @@ function CachePanel() {
   const handleClearRendererCache = (): void => {
     const before = getRendererThumbnailStats();
     clearThumbnailCache();
+    clearBlurPreviewCaches();
     setRenderer(getRendererThumbnailStats());
     setClearResult(
       `渲染端内存缓存已清空（此前 ${before.entries} 条 / ${formatBytes(before.bytes)}）；` +
@@ -759,6 +767,12 @@ function CachePanel() {
     <>
       <section className="dk-set-card">
         <h3 className="dk-set-card-title">渲染端缩略图缓存</h3>
+        <SettingRow
+          label="GIF 缩略图动画"
+          description="网格中的 GIF 播放动画（重新进图包后按新设置重新生成）；关闭显示静态首帧，更快更省内存"
+        >
+          <Switch checked={gifAnimated} onChange={setGifAnimated} label="GIF 缩略图动画" />
+        </SettingRow>
         <SettingRow
           label="内存缓存"
           description={`会话级 LRU · 上限 ${formatBytes(renderer.maxBytes)} · 命中率 ${hitRate}%`}

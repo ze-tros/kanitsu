@@ -85,8 +85,9 @@ export interface LibraryStore {
    * Android 端整读大图会撑爆 base64 字节桥。越过文件尾返回更短片段。
    */
   readSlice(file: FileRef, offset: number, length: number): Promise<Uint8Array>;
-  /** Small thumbnail for grids/folder covers. Implementations should avoid loading the full image. */
-  readThumbnail(file: FileRef, maxSize?: number, options?: { priority?: number }): Promise<Blob>;
+  /** Small thumbnail for grids/folder covers. Implementations should avoid loading the full image.
+   *  gifAnimated 仅对 GIF 有意义：true 生成动画缩略图，false 静态首帧（其余格式忽略）。 */
+  readThumbnail(file: FileRef, maxSize?: number, options?: { priority?: number; gifAnimated?: boolean }): Promise<Blob>;
   /** Original-resolution viewable URL for an `<img>` (streamed for Electron). */
   getViewerUrl(file: FileRef): Promise<string>;
   /** Releases resources held by a viewer URL (no-op for protocol-backed URLs). */

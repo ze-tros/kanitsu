@@ -70,7 +70,7 @@ interface KanitsuPluginNative {
   listLibraryChildren(opts: { folder: AndroidFsEntry }): Promise<{ entries: AndroidFsEntry[] }>;
   readLibraryBlob(opts: { file: AndroidFsEntry }): Promise<AndroidBinaryPayload>;
   readLibrarySlice(opts: { file: AndroidFsEntry; offset: number; length: number }): Promise<AndroidBinaryPayload>;
-  readLibraryThumbnail(opts: { file: AndroidFsEntry; maxSize: number; priority?: number }): Promise<AndroidBinaryPayload>;
+  readLibraryThumbnail(opts: { file: AndroidFsEntry; maxSize: number; priority?: number; gifAnimated?: boolean }): Promise<AndroidBinaryPayload>;
   moveLibraryEntry(opts: { entry: AndroidFsEntry; toFolder: AndroidFsEntry; newName?: string }): Promise<AndroidFsEntry>;
   removeLibraryEntry(opts: { entry: AndroidFsEntry }): Promise<void>;
   getLibraryFingerprint(): Promise<{ fingerprint: string }>;
@@ -103,7 +103,7 @@ export interface KanitsuAndroidBridge {
   listLibraryChildren(folder: AndroidFsEntry): Promise<AndroidFsEntry[]>;
   readLibraryBlob(file: AndroidFsEntry): Promise<{ data: Uint8Array; mime?: string }>;
   readLibrarySlice(file: AndroidFsEntry, offset: number, length: number): Promise<Uint8Array>;
-  readLibraryThumbnail(file: AndroidFsEntry, maxSize: number, priority?: number): Promise<{ data: Uint8Array; mime?: string }>;
+  readLibraryThumbnail(file: AndroidFsEntry, maxSize: number, priority?: number, gifAnimated?: boolean): Promise<{ data: Uint8Array; mime?: string }>;
   moveLibraryEntry(entry: AndroidFsEntry, toFolder: AndroidFsEntry, newName?: string): Promise<AndroidFsEntry>;
   removeLibraryEntry(entry: AndroidFsEntry): Promise<void>;
   getLibraryFingerprint(): Promise<string>;
@@ -237,8 +237,8 @@ function requireBridge(): Promise<KanitsuAndroidBridge> {
         readLibrarySlice: async (file, offset, length) => {
           return b64ToBytes((await p.readLibrarySlice({ file, offset, length })).data);
         },
-        readLibraryThumbnail: async (file, maxSize, priority) => {
-          const payload = await p.readLibraryThumbnail({ file, maxSize, priority: priority ?? 0 });
+        readLibraryThumbnail: async (file, maxSize, priority, gifAnimated) => {
+          const payload = await p.readLibraryThumbnail({ file, maxSize, priority: priority ?? 0, gifAnimated: gifAnimated !== false });
           return { data: b64ToBytes(payload.data), mime: payload.mime };
         },
         moveLibraryEntry: (entry, toFolder, newName) => p.moveLibraryEntry({ entry, toFolder, newName }),
@@ -335,7 +335,7 @@ export class AndroidLibraryStore implements LibraryStore {
     return (await requireBridge()).readLibrarySlice(toEntry(file), offset, length);
   }
 
-  async readThumbnail(file: FileRef, maxSize = 512, options?: { priority?: number }): Promise<Blob> {
+  async readThumbnail(file: FileRef, maxSize = 512, options?: { priority?: number; gifAnimated?: boolean }): Promise<Blob> {
     // RAW 不进原生 ThumbnailService(BitmapFactory/ImageDecoder 解不了),
     // 在 WebView 内提取内嵌预览(或回退 halfSize 完整解码),结果仅进渲染端
     // 内存缓存(thumbnailCache 的 256MB LRU)。
@@ -346,7 +346,7 @@ export class AndroidLibraryStore implements LibraryStore {
       });
       return blob;
     }
-    const { data, mime } = await (await requireBridge()).readLibraryThumbnail(toEntry(file), maxSize, options?.priority ?? 0);
+    const { data, mime } = await (await requireBridge()).readLibraryThumbnail(toEntry(file), maxSize, options?.priority ?? 0, options?.gifAnimated !== false);
     return new Blob([data as BlobPart], mime ? { type: mime } : undefined);
   }
 

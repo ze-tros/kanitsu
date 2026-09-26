@@ -306,9 +306,10 @@ public class KanitsuPlugin extends Plugin {
         AndroidEntry file = AndroidEntry.fromJS(call.getObject("file"));
         int maxSize = call.getInt("maxSize", 512);
         int priority = call.getInt("priority", 0);
+        boolean gifAnimated = call.getBoolean("gifAnimated", true);
         executor.execute(() -> {
             try {
-                ThumbnailService.Result r = thumbnails.getOrCreate(albums.fileForId(file.id), maxSize, priority);
+                ThumbnailService.Result r = thumbnails.getOrCreate(albums.fileForId(file.id), maxSize, priority, gifAnimated);
                 JSObject out = new JSObject();
                 out.put("data", Base64.encodeToString(r.data, Base64.NO_WRAP));
                 out.put("mime", r.mime);

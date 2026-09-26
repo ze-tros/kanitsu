@@ -103,7 +103,7 @@ export interface KanitsuDesktopBridge {
   readLibraryBlob(file: DesktopFsEntry): Promise<Uint8Array>;
   /** 原始文件字节区间（元数据解析用；readLibraryBlob 是重编码后的展示图）。 */
   readLibrarySlice(file: DesktopFsEntry, offset: number, length: number): Promise<Uint8Array>;
-  readLibraryThumbnail(file: DesktopFsEntry, maxSize: number, priority?: number): Promise<Uint8Array>;
+  readLibraryThumbnail(file: DesktopFsEntry, maxSize: number, priority?: number, gifAnimated?: boolean): Promise<Uint8Array>;
   /** RAW 专用:确保解码派生图存在,返回其查看 URL(非 RAW 不应调用)。
    *  渲染端随调用传入当前查看模式(localStorage 镜像,同步可读,切换模式后
    *  立即生效,无 IPC 时序竞态);缺省时主进程用其持久值。 */
@@ -252,8 +252,8 @@ export class ElectronLibraryStore implements LibraryStore {
     }
   }
 
-  async readThumbnail(file: FileRef, maxSize = 512, options?: { priority?: number }): Promise<Blob> {
-    const data = await requireBridge().readLibraryThumbnail(toEntry(file), maxSize, options?.priority ?? 0);
+  async readThumbnail(file: FileRef, maxSize = 512, options?: { priority?: number; gifAnimated?: boolean }): Promise<Blob> {
+    const data = await requireBridge().readLibraryThumbnail(toEntry(file), maxSize, options?.priority ?? 0, options?.gifAnimated !== false);
     return new Blob([data as BlobPart]);
   }
 

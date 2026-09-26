@@ -1,4 +1,5 @@
 import type { FileRef, LibraryStore } from '../../fs-adapter/src/types';
+import { loadGifThumbnailAnimated } from './libraryPrefs';
 
 /**
  * 缩略图请求优先级（与主进程多级优先级队列对齐，见 apps/desktop/electron/main.ts）：
@@ -169,7 +170,7 @@ function finishReadJob(job: ReadJob): void {
 function startReadJob(job: ReadJob): void {
   job.state = 'running';
   Promise.resolve()
-    .then(() => job.store.readThumbnail(job.file, job.maxSize, { priority: job.priority }))
+    .then(() => job.store.readThumbnail(job.file, job.maxSize, { priority: job.priority, gifAnimated: loadGifThumbnailAnimated() }))
     .then(
       (blob) => {
         const entry = job.entry;
@@ -248,7 +249,12 @@ export function clearThumbnailCache(): void {
 }
 
 function keyOf(file: FileRef, maxSize: number): string {
-  return `${file.id}\u0000${file.mtime ?? ''}\u0000${file.size ?? ''}\u0000${maxSize}`;
+  // GIF 网格缩略图随「动画/静态首帧」设置走不同生成路径，键须随模式区分，
+  // 切换设置后不会命中旧模式的缓存（非 GIF 两种模式输出相同，不区分）。
+  const gifMode = /\.gif$/i.test(file.name)
+    ? `\u0000${loadGifThumbnailAnimated() ? 'ga' : 'gs'}`
+    : '';
+  return `${file.id}\u0000${file.mtime ?? ''}\u0000${file.size ?? ''}\u0000${maxSize}${gifMode}`;
 }
 
 /** 仅按总字节数淘汰（无条数上限）：字节超限时从最久未用开始移除。 */

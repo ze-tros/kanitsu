@@ -3,7 +3,8 @@
 // 线程，主进程只做缓存与调度。主路径是 sharp（libvips，Node-API 原生库，与
 // Electron ABI 兼容），支持 jpeg/png/webp/avif/bmp；sharp 解析失败的少见文件
 // 由主进程 nativeImage 兜底（见 main.ts，文件会进黑名单避免反复尝试）。
-// GIF 网格缩略图也走 sharp 的单帧输出；原始动画只在查看器中播放。
+// GIF 网格缩略图优先生成「可动且小」的动画 GIF（omggif 抽帧重编码，见下）；
+// 超大源或编码失败回退 sharp 静态首帧。原始高清动画只在查看器中播放。
 // RAW 走 libraw 内嵌预览提取，HEIF/HEIC 优先解容器内嵌缩略图 item（毫秒级，
 // 无合格 item 时回退主图完整解码；sharp 的 libvips 预编译不含 HEVC 解码器）。
 import { parentPort } from 'node:worker_threads';
@@ -20,6 +21,8 @@ export interface ThumbnailJob {
   requestId: number;
   filePath: string;
   targetSize: number;
+  /** 仅 GIF 有意义：动画 / 静态首帧（其余格式忽略）。 */
+  gifAnimated?: boolean;
 }
 
 export function extOf(name: string): string {
@@ -27,13 +30,16 @@ export function extOf(name: string): string {
   return idx < 0 ? '' : name.slice(idx + 1).toLowerCase();
 }
 
-/** sharp 流水线：解码 → 等比缩小（最长边 ≤ targetSize）→ JPEG 80。
+export async function generateThumbnailWithSharp(filePath: string, targetSize: number): Promise<Uint8Array> {
+  return generateThumbnailFromBuffer(await readFile(filePath), targetSize);
+}
+
+/** sharp 流水线（Buffer 输入）：解码 → 等比缩小（最长边 ≤ targetSize）→ JPEG 80。
  *  输入先整份读进内存再交给 libvips：libvips 按路径打开文件时不带共享删除语义，
  *  解码期间该文件在 Windows 上删不掉也改不了名（整库预热/网格刷新一旦与删除撞在
  *  同一张图上就 EPERM）。经 Buffer 输入的句柄是 libuv 的（允许共享删除），解不解
  *  码都不再挡住用户操作；与 RAW/HEIF 分支的读取方式也保持一致。 */
-export async function generateThumbnailWithSharp(filePath: string, targetSize: number): Promise<Uint8Array> {
-  const input = await readFile(filePath);
+export async function generateThumbnailFromBuffer(input: Buffer, targetSize: number): Promise<Uint8Array> {
   const image = sharp(input, { failOn: 'none' });
   const meta = await image.metadata();
   const width = meta.width ?? 0;
@@ -52,11 +58,14 @@ export async function generateThumbnailWithSharp(filePath: string, targetSize: n
 }
 
 // —— 动画 GIF 缩略图（omggif，纯 JS）——
-// 大 GIF 不再整包透传（体积可达数 MB，还会挤垮内存/磁盘缓存）：抽帧 → 缩放 →
-// 重编码为“可动且小”的 GIF。帧数采样封顶控制单张耗时（基准：20 帧约 0.47s，
-// 封顶后典型约 0.1~0.3s，且只发生一次并落盘缓存）。
+// 网格里的 GIF 目标是「可动且小」：抽帧 → 缩放 → 重编码为小体积动画 GIF，
+// 输出典型几百 KB，远小于原始文件（更早的方案曾原样透传原始文件，数 MB 的
+// 大字节会挤垮内存/磁盘缓存）。帧数采样封顶控制单张耗时（基准：20 帧约
+// 0.47s，封顶后典型约 0.1~0.3s，且只发生一次并落盘缓存）。
 // 色彩：使用自适应调色板（median-cut，≤255 色）保留原图真实颜色，避免固定
 // web 安全色板导致的大幅色偏；gif 编码显式 loop:0 保证无限循环播放。
+// 超大源不做抽帧：逐帧合成解码的耗时/内存随帧数与尺寸增长，容易拖垮
+// worker，直接回退静态首帧；动画编码失败同样回退，网格上不出坏图。
 const GIF_MAX_FRAMES = 16;
 const GIF_MAX_OUTPUT_BYTES = 1536 * 1024; // 超出则降帧重编码一次
 const GifTransparentIndex = 255;
@@ -335,8 +344,7 @@ function encodeFrames(frames: Uint8Array[], delays: number[], width: number, hei
 }
 
 /** 动画 GIF 缩略图（可动 + 小）；超限时降帧重编码一次。 */
-export async function generateAnimatedGifThumb(filePath: string, targetSize: number): Promise<Uint8Array> {
-  const buf = await readFile(filePath);
+export async function generateAnimatedGifThumb(buf: Buffer, targetSize: number): Promise<Uint8Array> {
   let { frames, delays, width, height } = decodeGifFrames(buf, targetSize, GIF_MAX_FRAMES);
   let out = encodeFrames(frames, delays, width, height);
   if (out.byteLength > GIF_MAX_OUTPUT_BYTES) {
@@ -431,8 +439,32 @@ async function generateRawThumbnail(filePath: string, targetSize: number): Promi
   }
 }
 
-/** 完整流水线：所有格式均输出单帧 JPEG 缩略图。 */
-export async function generateThumbnailFromFile(filePath: string, targetSize: number): Promise<Uint8Array> {
+/** 超过该字节数的 GIF 不做抽帧动画：逐帧合成解码的耗时/内存随帧数与尺寸
+ *  增长，超大源（罕见）直接走静态首帧，别让个别文件拖垮 worker 线程。 */
+const GIF_ANIMATED_SOURCE_MAX_BYTES = 24 * 1024 * 1024;
+
+/** GIF 网格缩略图：动画模式优先（抽帧重编码），静态模式 / 超大源 / 编码失败回退静态首帧。 */
+export async function generateGifThumbnail(filePath: string, targetSize: number, animated: boolean): Promise<Uint8Array> {
+  const buf = await readFile(filePath);
+  if (animated && buf.byteLength <= GIF_ANIMATED_SOURCE_MAX_BYTES) {
+    try {
+      return await generateAnimatedGifThumb(buf, targetSize);
+    } catch {
+      // 动画编码失败：回退静态首帧，网格上不出坏图。
+    }
+  }
+  return generateThumbnailFromBuffer(buf, targetSize);
+}
+
+/** 完整流水线（GIF 按模式走动画/静态分支，其余格式均输出单帧 JPEG 缩略图）。 */
+export async function generateThumbnailFromFile(
+  filePath: string,
+  targetSize: number,
+  gifAnimated = true,
+): Promise<Uint8Array> {
+  if (extOf(filePath) === 'gif') {
+    return generateGifThumbnail(filePath, targetSize, gifAnimated);
+  }
   if (isRawImage(filePath)) {
     return generateRawThumbnail(filePath, targetSize);
   }
@@ -464,7 +496,7 @@ if (parentPort) {
   parentPort.on('message', (job: ThumbnailJob) => {
     void (async () => {
       try {
-        const data = await generateThumbnailFromFile(job.filePath, job.targetSize);
+        const data = await generateThumbnailFromFile(job.filePath, job.targetSize, job.gifAnimated !== false);
         parentPort?.postMessage({ requestId: job.requestId, ok: true, data });
       } catch (err) {
         parentPort?.postMessage({ requestId: job.requestId, ok: false, error: String((err as Error)?.message ?? err) });

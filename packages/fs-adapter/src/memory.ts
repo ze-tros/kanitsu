@@ -246,7 +246,7 @@ export class MemoryLibraryStore implements LibraryStore {
     return new Uint8Array(await blob.slice(start, end).arrayBuffer());
   }
 
-  async readThumbnail(file: FileRef, _maxSize?: number, _options?: { priority?: number }): Promise<Blob> {
+  async readThumbnail(file: FileRef, _maxSize?: number, _options?: { priority?: number; gifAnimated?: boolean }): Promise<Blob> {
     return this.readBlob(file);
   }
 

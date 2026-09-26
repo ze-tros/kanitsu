@@ -693,16 +693,18 @@ const thumbCache = createByteLruCache(512 * 1024 * 1024);
 /** 单条内存缓存上限。普通缩略图通常只有数十 KB，4MB 仅作异常输出兜底；
  *  总量仍由 512MB LRU 上限控制。 */
 const MAX_MEM_CACHE_ENTRY_BYTES = 4 * 1024 * 1024;
-// 缩略图输出策略版本。v2 将 GIF 网格预览改为静态首帧 JPEG，
-// 避免大量卡片同时动画解码和合成。
-const THUMB_CACHE_VERSION = 2;
+// 缩略图输出策略版本。v3 恢复网格动画 GIF 缩略图（v2 曾改为静态首帧 JPEG
+// 以避免大量卡片同时动画解码和合成；恢复后动画输出典型几百 KB/张并落盘
+// 缓存，配合虚拟化挂载只有可见卡片参与动画）。版本变化使旧缓存整体失效。
+const THUMB_CACHE_VERSION = 3;
 
 function putThumbCache(cacheKey: string, data: Uint8Array): void {
   if (data.byteLength <= MAX_MEM_CACHE_ENTRY_BYTES) thumbCache.put(cacheKey, data);
 }
 
-function thumbCacheKey(file: DesktopFsEntry, targetSize: number): string {
-  return `${file.id}\u0000${file.mtime ?? 0}\u0000${file.size ?? 0}\u0000${targetSize}\u0000v${THUMB_CACHE_VERSION}`;
+/** variant 只对 GIF 非空（'\u0000ga'/'\u0000gs'）：动画/静态首帧是不同的输出，键须区分。 */
+function thumbCacheKey(file: DesktopFsEntry, targetSize: number, variant: string): string {
+  return `${file.id}\u0000${file.mtime ?? 0}\u0000${file.size ?? 0}\u0000${targetSize}\u0000v${THUMB_CACHE_VERSION}${variant}`;
 }
 
 // —— 缩略图磁盘持久化缓存 ——
@@ -719,8 +721,8 @@ function thumbCacheDir(): string {
   return path.join(getLibraryRoot(), LIBRARY_CACHE_DIR, 'thumbcache');
 }
 
-function thumbDiskKey(file: DesktopFsEntry, targetSize: number): string {
-  const raw = `${file.id}\u0000${file.mtime ?? 0}\u0000${file.size ?? 0}\u0000${targetSize}\u0000v${THUMB_CACHE_VERSION}`;
+function thumbDiskKey(file: DesktopFsEntry, targetSize: number, variant: string): string {
+  const raw = `${file.id}\u0000${file.mtime ?? 0}\u0000${file.size ?? 0}\u0000${targetSize}\u0000v${THUMB_CACHE_VERSION}${variant}`;
   return createHash('sha1').update(raw).digest('hex');
 }
 
@@ -789,6 +791,8 @@ interface ThumbnailRequest {
   file: DesktopFsEntry;
   targetSize: number;
   priority: number;
+  /** 仅 GIF 有意义：动画 / 静态首帧（其余格式两值等价）。 */
+  gifAnimated: boolean;
   promise: Promise<Uint8Array>;
   resolve: (data: Uint8Array) => void;
   reject: (err: Error) => void;
@@ -856,7 +860,7 @@ function pumpThumbnailQueue(): void {
       pumpThumbnailQueue();
     }, isRawJob ? THUMB_RAW_JOB_TIMEOUT_MS : THUMB_JOB_TIMEOUT_MS);
     inFlightJobs.set(requestId, { worker, resolve: request.resolve, reject: request.reject, timer });
-    worker.postMessage({ requestId, filePath: request.file.id, targetSize: request.targetSize });
+      worker.postMessage({ requestId, filePath: request.file.id, targetSize: request.targetSize, gifAnimated: request.gifAnimated });
   }
 }
 
@@ -910,8 +914,14 @@ function terminateWorkerAt(index: number): void {
   }
 }
 
-function enqueueThumbnail(file: DesktopFsEntry, targetSize: number, priority: number): Promise<Uint8Array> {
-  const cacheKey = thumbCacheKey(file, targetSize);
+function enqueueThumbnail(
+  file: DesktopFsEntry,
+  targetSize: number,
+  priority: number,
+  variant: string,
+  gifAnimated: boolean,
+): Promise<Uint8Array> {
+  const cacheKey = thumbCacheKey(file, targetSize, variant);
   const cached = thumbCache.get(cacheKey);
   if (cached) return Promise.resolve(cached);
   const level = Math.max(0, Math.min(THUMB_PRIORITIES - 1, priority));
@@ -942,6 +952,7 @@ function enqueueThumbnail(file: DesktopFsEntry, targetSize: number, priority: nu
     file,
     targetSize,
     priority: level,
+    gifAnimated,
     promise,
     resolve: (data) => {
       if (pendingThumbnailRequests.get(cacheKey) === request) pendingThumbnailRequests.delete(cacheKey);
@@ -1511,17 +1522,22 @@ function registerIpc(): void {
     }
   });
 
-  ipcMain.handle('library:readThumbnail', async (_event, file: DesktopFsEntry, maxSize: number, priority: number): Promise<Uint8Array> => {
+  ipcMain.handle('library:readThumbnail', async (_event, file: DesktopFsEntry, maxSize: number, priority: number, gifAnimated: boolean | undefined): Promise<Uint8Array> => {
     assertInsideLibrary(file.id);
     // 优先级：0 可见 > 1 当前目录 > 2 子文件夹 > 3 全库预热/无关。
     const level = Math.max(0, Math.min(THUMB_PRIORITIES - 1, priority || 0));
     const targetSize = Math.max(64, Math.min(maxSize || 512, 1024));
-    const cacheKey = thumbCacheKey(file, targetSize);
+    // GIF 网格缩略图随「动画/静态首帧」设置走不同生成路径，缓存键随模式区分；
+    // 其余格式两种模式输出相同，键不区分。
+    const ext = path.extname(file.id).toLowerCase().slice(1);
+    const isGif = ext === 'gif';
+    const variant = isGif ? (gifAnimated === false ? '\u0000gs' : '\u0000ga') : '';
+    const cacheKey = thumbCacheKey(file, targetSize, variant);
     const cached = thumbCache.get(cacheKey);
     if (cached) return cached;
 
     // 磁盘持久化缓存：重启后/内存淘汰后直接读盘，免去重新解码。
-    const diskKey = thumbDiskKey(file, targetSize);
+    const diskKey = thumbDiskKey(file, targetSize, variant);
     const diskHit = await readThumbFromDisk(diskKey);
     if (diskHit) {
       if (debugLogging) logger.debug('thumb', `磁盘命中 ${path.basename(file.id)} p=${level}`);
@@ -1533,12 +1549,12 @@ function registerIpc(): void {
       logger.debug('thumb', `队列状态 ${JSON.stringify(thumbnailQueues.map((q) => q.length))}`);
     }
 
-    const ext = path.extname(file.id).toLowerCase().slice(1);
-    // GIF 在网格中只生成静态首帧 JPEG。同时解码数十个动画会占用渲染线程并
-    // 放大 GC；打开查看器时仍读取原文件，不影响 GIF 播放。
-    if (ext === 'gif') {
+    // GIF 网格缩略图：worker 优先生成「可动且小」的动画 GIF（抽帧重编码，
+    // 典型几百 KB，一次性成本并落盘缓存）；静态模式 / 超大源 / 失败回退
+    // 静态首帧。打开查看器时仍读取原文件，不影响 GIF 播放。
+    if (isGif) {
       try {
-        const data = await enqueueThumbnail(file, targetSize, level);
+        const data = await enqueueThumbnail(file, targetSize, level, variant, gifAnimated !== false);
         putThumbCache(cacheKey, data);
         void writeThumbToDisk(diskKey, data);
         return data;
@@ -1557,7 +1573,7 @@ function registerIpc(): void {
     // 高优先级插队在前；黑名单文件直接跳过 worker。
     if (THUMB_WORKER_FORMATS.has(ext) && !failedWorkerPaths.has(file.id)) {
       try {
-        const data = await enqueueThumbnail(file, targetSize, level);
+        const data = await enqueueThumbnail(file, targetSize, level, variant, true);
         thumbCache.put(cacheKey, data);
         void writeThumbToDisk(diskKey, data);
         return data;
