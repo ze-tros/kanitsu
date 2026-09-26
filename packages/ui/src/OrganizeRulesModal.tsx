@@ -48,12 +48,10 @@ function createRuleId(): string {
 }
 
 /**
- * 整理规则面板：内置规则（只读参考）+ 自定义规则（增删改）+ 规则编辑器。
+ * 整理规则面板（移动端设置页）：内置规则（只读参考）+ 自定义规则（增删改）+ 规则编辑器。
  *
- * 桌面设置页与移动端设置页共用这一份 DOM，样式各自收口：桌面在 styles.css 的
- * `.desktop-settings-main .organize-*` 下，移动端在 mobile.css 的 `.m-settings-rules` 下。
- * 因此这里的类名（organize-rule-card / organize-rule-score / organize-rule-fields …）是
- * 两端共用的契约，改动前先确认两边都跟得上。
+ * 样式在 mobile.css 的 `.m-settings-rules` 下收口。桌面设置页用的是 desktop/RulesPanel，
+ * 两端只共享这里的 loadCustomRules / saveCustomRules 与 organizer 的匹配逻辑。
  */
 export function OrganizeRulesManager({
   rules,
@@ -195,7 +193,7 @@ export function OrganizeRulesManager({
       )}
 
       <section className="organize-rules-section is-builtin">
-        <header className="organize-rules-heading desktop-settings-section-heading">
+        <header className="organize-rules-heading">
           <h2 className="organize-rules-subtitle">内置规则</h2>
           <p className="organize-rules-hint">
             固定生效、不可编辑；按下列顺序在自定义规则之后依次尝试，未被匹配的文件保持原位。
@@ -215,7 +213,7 @@ export function OrganizeRulesManager({
       </section>
 
       <section className="organize-rules-section is-custom">
-        <header className="organize-rules-heading desktop-settings-section-heading">
+        <header className="organize-rules-heading">
           <h2 className="organize-rules-subtitle">自定义规则</h2>
           <p className="organize-rules-hint">
             按列表顺序优先匹配；取消勾选可临时停用某条规则而不删除。
@@ -283,7 +281,7 @@ export function OrganizeRulesManager({
       </section>
 
       <section className="organize-rules-section is-editor">
-        <header className="organize-rules-heading desktop-settings-section-heading">
+        <header className="organize-rules-heading">
           <h2 className="organize-rules-subtitle">{editing ? '编辑规则' : '添加规则'}</h2>
           <p className="organize-rules-hint">
             {editing

@@ -27,14 +27,24 @@ export function DesktopWindowControls() {
   };
 
   return (
-    <div className="desktop-window-controls titlebar-no-drag" role="group" aria-label="窗口控制">
+    <div className="dk-wc titlebar-no-drag" role="group" aria-label="窗口控制">
       <button type="button" aria-label="最小化" title="最小化" onClick={() => void bridge?.minimizeWindow?.()}>
         <Minus size={14} weight="bold" />
       </button>
       <button type="button" aria-label={maximized ? '还原' : '最大化'} title={maximized ? '还原' : '最大化'} onClick={toggleMaximize}>
-        {maximized ? <span className="desktop-restore-icon" aria-hidden="true" /> : <span className="desktop-maximize-icon" aria-hidden="true" />}
+        {/* 线框图标用 SVG 画，不靠背景色遮挡，在标题栏和查看器的半透明顶栏上都一致。 */}
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1" aria-hidden="true">
+          {maximized ? (
+            <>
+              <rect x="0.5" y="2.5" width="7" height="7" />
+              <path d="M2.5 2.5V0.5h7v7h-2" />
+            </>
+          ) : (
+            <rect x="0.5" y="0.5" width="9" height="9" />
+          )}
+        </svg>
       </button>
-      <button type="button" className="is-close" aria-label="关闭" title="关闭" onClick={() => void bridge?.closeWindow?.()}>
+      <button type="button" className="close" aria-label="关闭" title="关闭" onClick={() => void bridge?.closeWindow?.()}>
         <X size={14} />
       </button>
     </div>

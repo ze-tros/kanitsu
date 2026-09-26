@@ -1,0 +1,836 @@
+/* ==========================================================================
+   桌面端设置页（packages/ui/src/SettingsPage.tsx）
+   对应设计稿 docs/kanitsu-desktop-redesign-demo.html 的「设置」部分。
+
+   - 所有类名以 dk-set- 开头：应用同时加载 Tailwind + daisyUI，.card / .btn /
+     .badge 这类通用名会互相覆盖。
+   - 本文件不进任何 @layer：styles.css 里的 Tailwind / daisyUI / 组件样式全部
+     在层内，未分层的规则天然优先，因此这里不需要 !important。
+   - 颜色一律取 styles/theme.css 的 --desktop-* token，深浅色随 html[data-theme] 切换。
+   ========================================================================== */
+
+
+.dk-set-page {
+  --dk-set-nav-width: 244px;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: var(--dk-set-nav-width) minmax(0, 1fr);
+  overflow: hidden;
+  background: var(--desktop-canvas);
+  color: var(--desktop-text);
+  font-family: var(--desktop-font-sans);
+  font-size: 13px;
+}
+
+/* ---------- 左栏：返回 / 搜索 / 标签页 ---------- */
+
+.dk-set-nav {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 8px;
+  overflow-y: auto;
+  border-right: 1px solid var(--desktop-line);
+  background: var(--desktop-app);
+  scrollbar-width: thin;
+}
+
+.dk-set-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dk-set-nav-item {
+  width: 100%;
+  height: 32px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--desktop-text-soft);
+  font-size: 13.5px;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.dk-set-nav-item > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dk-set-nav-item > svg {
+  flex: none;
+}
+
+.dk-set-nav-item:hover {
+  background: var(--desktop-surface-2);
+  color: var(--desktop-text);
+}
+
+.dk-set-nav-item.is-active {
+  background: var(--desktop-accent-soft);
+  color: var(--desktop-accent-text);
+}
+
+.dk-set-search {
+  height: 32px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 2px 8px;
+  padding: 0 10px;
+  border: 1px solid var(--desktop-line-strong);
+  border-radius: 8px;
+  background: var(--desktop-canvas);
+  color: var(--desktop-muted);
+  cursor: text;
+}
+
+.dk-set-search:focus-within {
+  border-color: var(--desktop-accent-fill);
+  box-shadow: 0 0 0 3px var(--desktop-accent-soft);
+}
+
+.dk-set-search input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: none;
+  color: var(--desktop-text);
+  font-size: 13px;
+}
+
+/* 外框已经是唯一的聚焦信号，输入框本身不再画描边。 */
+.dk-set-search input:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.dk-set-search input::placeholder {
+  color: var(--desktop-faint);
+}
+
+.dk-set-search input::-webkit-search-cancel-button {
+  cursor: pointer;
+}
+
+/* 搜索空状态：常驻挂载以便 role="status" 能播报，无匹配时才占位。 */
+.dk-set-empty {
+  margin: 6px 10px 0;
+  color: var(--desktop-faint);
+  font-size: 12px;
+}
+
+.dk-set-empty:empty {
+  height: 0;
+  margin: 0;
+  overflow: hidden;
+}
+
+/* ---------- 右侧正文 ---------- */
+
+.dk-set-scroll {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  background: var(--desktop-canvas);
+  scrollbar-gutter: stable;
+}
+
+.dk-set-main {
+  max-width: 780px;
+  padding: 28px 40px 60px;
+}
+
+.dk-set-title {
+  margin: 0 0 4px;
+  color: var(--desktop-text);
+  font: 700 26px/1.25 var(--desktop-font-display);
+  letter-spacing: -.01em;
+}
+
+.dk-set-lead {
+  margin: 0 0 20px;
+  color: var(--desktop-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+/* ---------- 卡片与设置行 ---------- */
+
+.dk-set-card {
+  margin: 0 0 16px;
+  border: 1px solid var(--desktop-line);
+  border-radius: var(--desktop-radius-panel);
+  background: var(--desktop-surface-1);
+  overflow: hidden;
+}
+
+.dk-set-card-title {
+  margin: 0;
+  padding: 14px 18px 0;
+  color: var(--desktop-faint);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .04em;
+}
+
+.dk-set-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px 0 0;
+}
+
+.dk-set-card-head > .dk-set-card-title {
+  padding-top: 4px;
+}
+
+.dk-set-actions {
+  display: flex;
+  gap: 6px;
+  flex: none;
+}
+
+.dk-set-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--desktop-line);
+}
+
+.dk-set-row:last-child {
+  border-bottom: 0;
+}
+
+.dk-set-row-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.dk-set-row-label b {
+  display: block;
+  color: var(--desktop-text);
+  font-size: 13.5px;
+  font-weight: 500;
+}
+
+.dk-set-row-label small {
+  display: block;
+  margin-top: 1px;
+  color: var(--desktop-muted);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.dk-set-row-label small .dk-set-code {
+  display: inline-block;
+  max-width: 100%;
+  margin-top: 5px;
+}
+
+.dk-set-row-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  max-width: 60%;
+}
+
+.dk-set-value {
+  color: var(--desktop-text-soft);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.dk-set-code {
+  padding: 3px 7px;
+  border-radius: var(--desktop-radius-tight);
+  background: var(--desktop-surface-2);
+  color: var(--desktop-text-soft);
+  font-family: var(--desktop-font-mono);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.dk-set-code.is-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+}
+
+.dk-set-note {
+  margin: 0;
+  padding: 10px 18px 14px;
+  color: var(--desktop-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.dk-set-result {
+  margin: -4px 2px 16px;
+  color: var(--desktop-text-soft);
+  font-size: 12.5px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.dk-set-ok {
+  color: var(--desktop-accent-text);
+}
+
+/* ---------- 控件 ----------
+   按钮、分段选择、开关、快捷键键帽用 desktop.css 的 dk-btn / dk-seg / dk-sw / dk-kbd。 */
+
+.dk-set-row-control .dk-seg button {
+  padding: 0 10px;
+}
+
+/* ---------- 外观：主题预览卡 + 主题色 ---------- */
+
+.dk-set-theme-cards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--desktop-line);
+}
+
+.dk-set-theme-card {
+  display: block;
+  padding: 8px;
+  border: 1px solid var(--desktop-line-strong);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--desktop-text);
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.dk-set-theme-card:hover {
+  background: var(--desktop-surface-2);
+}
+
+.dk-set-theme-card.is-active {
+  border-color: var(--desktop-accent-fill);
+  box-shadow: 0 0 0 1px var(--desktop-accent-fill);
+}
+
+/* 预览色固定为两套主题的真实底色，不随当前主题变化。 */
+.dk-set-theme-preview {
+  height: 64px;
+  display: grid;
+  grid-template-columns: 26% 1fr;
+  margin-bottom: 7px;
+  overflow: hidden;
+  border-radius: 7px;
+  box-shadow: inset 0 0 0 1px var(--desktop-line);
+}
+
+.dk-set-theme-preview > span:last-child {
+  margin: 9px;
+  border-radius: 5px;
+  background: repeating-linear-gradient(90deg, rgb(128 128 128 / 28%) 0 30%, transparent 30% 35%);
+}
+
+.dk-set-theme-preview.is-dark {
+  background: #18181a;
+}
+
+.dk-set-theme-preview.is-dark > span:first-child {
+  background: #111112;
+}
+
+.dk-set-theme-preview.is-light {
+  background: #f1f3f5;
+}
+
+.dk-set-theme-preview.is-light > span:first-child {
+  background: #e3e6ea;
+}
+
+.dk-set-theme-preview.is-system {
+  background: linear-gradient(90deg, #18181a 50%, #f1f3f5 50%);
+}
+
+.dk-set-swatches {
+  display: flex;
+  gap: 10px;
+}
+
+.dk-set-swatch {
+  width: 22px;
+  height: 22px;
+  flex: none;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 12%);
+}
+
+.dk-set-swatch.is-active {
+  box-shadow:
+    0 0 0 2px var(--desktop-surface-1),
+    0 0 0 4px var(--desktop-text);
+}
+
+/* 色块取各主题下真实的强调色，所见即所得。 */
+.dk-set-swatch.is-coral { background: #ff785e; }
+.dk-set-swatch.is-cobalt { background: #8aa4e8; }
+.dk-set-swatch.is-amber { background: #e2ad55; }
+.dk-set-swatch.is-graphite { background: #c2c9d0; }
+
+html[data-theme="light"] .dk-set-swatch.is-coral { background: #c45444; }
+html[data-theme="light"] .dk-set-swatch.is-cobalt { background: #4568ae; }
+html[data-theme="light"] .dk-set-swatch.is-amber { background: #94620e; }
+html[data-theme="light"] .dk-set-swatch.is-graphite { background: #505a65; }
+
+/* ---------- 图库占用 / 帧率折线 ---------- */
+
+.dk-set-usage {
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--desktop-line);
+}
+
+.dk-set-usage:last-child {
+  border-bottom: 0;
+}
+
+.dk-set-usage-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12.5px;
+}
+
+.dk-set-usage-head b {
+  color: var(--desktop-text);
+  font-weight: 600;
+}
+
+.dk-set-usage-head span {
+  color: var(--desktop-muted);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.dk-set-usage > small {
+  display: block;
+  margin-top: 2px;
+  color: var(--desktop-muted);
+  font-size: 12px;
+}
+
+.dk-set-spark {
+  height: 42px;
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  margin-top: 10px;
+  border-bottom: 1px solid var(--desktop-line);
+}
+
+.dk-set-spark i {
+  flex: 1;
+  max-width: 10px;
+  border-radius: 1px;
+  background: var(--desktop-accent-fill);
+  opacity: .75;
+}
+
+.dk-set-spark i.is-low {
+  background: var(--desktop-danger);
+  opacity: 1;
+}
+
+/* ---------- 统计格 ---------- */
+
+.dk-set-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 1px;
+  border-bottom: 1px solid var(--desktop-line);
+  background: var(--desktop-line);
+}
+
+.dk-set-stats:last-child {
+  border-bottom: 0;
+}
+
+.dk-set-stat {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 18px;
+  background: var(--desktop-surface-1);
+}
+
+.dk-set-stat span {
+  color: var(--desktop-muted);
+  font-size: 11.5px;
+}
+
+.dk-set-stat b {
+  overflow: hidden;
+  color: var(--desktop-text);
+  font-size: 15px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dk-set-stat.is-accent b {
+  color: var(--desktop-accent-text);
+}
+
+.dk-set-stat.is-danger b {
+  color: var(--desktop-danger);
+}
+
+/* ---------- 日志 ---------- */
+
+.dk-set-log-box {
+  max-height: 288px;
+  margin: 0 18px 14px;
+  overflow-y: auto;
+  border: 1px solid var(--desktop-line);
+  border-radius: var(--desktop-radius-control);
+  background: var(--desktop-canvas);
+}
+
+.dk-set-card-head + .dk-set-log-box {
+  margin-top: 12px;
+}
+
+.dk-set-log-box.is-short {
+  max-height: 192px;
+}
+
+.dk-set-log-empty {
+  padding: 10px 12px;
+  color: var(--desktop-muted);
+  font-size: 12.5px;
+}
+
+.dk-set-log-pre {
+  margin: 0;
+  padding: 10px 12px;
+  color: var(--desktop-text-soft);
+  font-family: var(--desktop-font-mono);
+  font-size: 11px;
+  line-height: 16px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.dk-set-log-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.dk-set-log-table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--desktop-line);
+  vertical-align: top;
+}
+
+.dk-set-log-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.dk-set-log-table td.is-time {
+  width: 1%;
+  color: var(--desktop-faint);
+  font-family: var(--desktop-font-mono);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+
+.dk-set-log-table td.is-message {
+  color: var(--desktop-text-soft);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.dk-set-tag {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--desktop-surface-3);
+  color: var(--desktop-text-soft);
+  font-family: var(--desktop-font-mono);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+
+.dk-set-tag.is-warn {
+  background: color-mix(in srgb, var(--desktop-warn) 18%, transparent);
+  color: var(--desktop-warn);
+}
+
+.dk-set-tag.is-error {
+  background: var(--desktop-danger-soft);
+  color: var(--desktop-danger);
+}
+
+/* ---------- 快捷键速查 ---------- */
+
+.dk-set-keys {
+  margin: 6px 0 0;
+  padding: 0;
+}
+
+.dk-set-keys-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 8px 18px;
+  border-bottom: 1px solid var(--desktop-line);
+}
+
+.dk-set-keys-row:last-child {
+  border-bottom: 0;
+  padding-bottom: 12px;
+}
+
+.dk-set-keys-row dt {
+  min-width: 0;
+  color: var(--desktop-text-soft);
+  font-size: 13px;
+}
+
+.dk-set-keys-row dd {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+  margin: 0;
+  flex: none;
+}
+
+.dk-set-keys .dk-kbd {
+  min-width: 22px;
+  padding: 3px 6px;
+  text-align: center;
+}
+
+/* ---------- 整理规则（desktop/RulesPanel） ---------- */
+
+.dk-set-rules-t {
+  width: 100%;
+  margin-top: 6px;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 12.5px;
+}
+
+.dk-set-rules-t th,
+.dk-set-rules-t td {
+  padding: 9px 18px;
+  border-bottom: 1px solid var(--desktop-line);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.dk-set-rules-t th {
+  color: var(--desktop-faint);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.dk-set-rules-t th:nth-child(1) { width: 24%; }
+.dk-set-rules-t th:nth-child(3) { width: 24%; }
+.dk-set-rules-t th:nth-child(4) { width: 96px; }
+
+.dk-set-rules-t td {
+  overflow: hidden;
+  color: var(--desktop-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dk-set-rules-t code,
+.dk-set-rules-result code {
+  color: var(--desktop-text-soft);
+  font-family: var(--desktop-font-mono);
+  font-size: 11.5px;
+}
+
+.dk-set-rules-t td.is-act {
+  padding-top: 4px;
+  padding-bottom: 4px;
+  text-align: right;
+}
+
+.dk-set-rules-t td.is-act > * {
+  vertical-align: middle;
+}
+
+.dk-set-rules-t td.is-act .dk-sw {
+  margin-right: 6px;
+}
+
+.dk-set-rules-t td.is-act .dk-ib {
+  display: inline-grid;
+  width: 28px;
+  height: 28px;
+}
+
+.dk-set-rules-t tr.is-off td:not(.is-act) {
+  opacity: .5;
+}
+
+.dk-set-rules-t td.is-empty {
+  padding: 16px 18px;
+  color: var(--desktop-muted);
+  white-space: normal;
+}
+
+.dk-set-rules-test {
+  gap: 12px;
+}
+
+.dk-set-rules-test .dk-field {
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+}
+
+.dk-set-rules-test .dk-field input {
+  font-family: var(--desktop-font-mono);
+  font-size: 12px;
+}
+
+.dk-set-rules-result {
+  min-width: 0;
+  max-width: 45%;
+  overflow: hidden;
+  color: var(--desktop-muted);
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dk-set-rules-result small {
+  margin-left: 8px;
+  color: var(--desktop-faint);
+  font-size: 11.5px;
+}
+
+/* ---------- 收起左栏 / 窄窗口 ---------- */
+
+/* 标题栏的「侧栏」开关同时作用于设置页左栏；visibility 把折叠后的按钮移出
+   焦点顺序与无障碍树。 */
+.dk-set-page.is-nav-hidden {
+  grid-template-columns: 0 minmax(0, 1fr);
+}
+
+.dk-set-page.is-nav-hidden .dk-set-nav {
+  padding-inline: 0;
+  border-right: 0;
+  overflow: hidden;
+  visibility: hidden;
+}
+
+@media (max-width: 900px) {
+  .dk-set-main {
+    padding: 24px 24px 48px;
+  }
+
+}
+
+/* ≤680px：左栏变成顶部横向标签条。 */
+@media (max-width: 680px) {
+  .dk-set-page,
+  .dk-set-page.is-nav-hidden {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .dk-set-nav {
+    flex-direction: row;
+    align-items: center;
+    gap: 3px;
+    padding: 7px 8px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    border-right: 0;
+    border-bottom: 1px solid var(--desktop-line);
+    scrollbar-width: none;
+  }
+
+  .dk-set-nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .dk-set-page.is-nav-hidden .dk-set-nav {
+    display: none;
+  }
+
+  .dk-set-page.is-nav-hidden {
+    grid-template-rows: minmax(0, 1fr);
+  }
+
+  .dk-set-tabs {
+    flex-direction: row;
+    gap: 3px;
+  }
+
+  .dk-set-nav-item {
+    width: auto;
+  }
+
+  .dk-set-search {
+    min-width: 150px;
+    margin: 0 4px;
+  }
+
+  .dk-set-empty {
+    margin: 0 6px;
+    white-space: nowrap;
+  }
+
+  .dk-set-main {
+    padding: 20px 12px 36px;
+  }
+
+  .dk-set-row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .dk-set-row-control {
+    max-width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .dk-set-theme-cards {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

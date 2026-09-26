@@ -1,17 +1,17 @@
 /**
- * 移动端智能整理的两步流程（选规则 → 预览分组）所需的纯逻辑。
+ * 智能整理两步流程（选规则 → 预览分组）的纯逻辑，桌面与移动端共用。
  *
  * 解析仍由 organizer.parseImageName 完成（自定义规则优先），这里只做：
  * - 按命中规则统计每条规则能整理多少张（低于落盘阈值的不计，与 applyOrganize 一致）；
  * - 只保留所选规则命中的绑定（其余图片保持原位）；
  * - 按目标目录把绑定聚成预览分组，并支持重命名分组。
  */
-import type { ImageEntry, OrganizeBinding } from '../../../core/src/index';
+import type { ImageEntry, OrganizeBinding } from '../../core/src/index';
 import {
   BUILTIN_ORGANIZE_RULES,
   parseImageName,
   type CustomOrganizeRule,
-} from '../../../organizer/src/index';
+} from '../../organizer/src/index';
 
 /** 与 applyOrganize 默认 confidenceThreshold 一致：低于它的绑定不会落盘。 */
 export const ORGANIZE_CONFIDENCE_THRESHOLD = 0.5;
@@ -85,6 +85,16 @@ export function ruleOptions(bindings: readonly PlannedBinding[], customRules: Cu
   ];
 }
 
+/** 默认选中的规则：命中最多的单条规则（同数取靠前的）；都没有命中时退回自动。 */
+export function defaultRuleId(options: readonly RuleOption[]): string {
+  let best: RuleOption | null = null;
+  for (const option of options) {
+    if (option.kind === 'auto' || option.hitCount === 0) continue;
+    if (!best || option.hitCount > best.hitCount) best = option;
+  }
+  return best?.id ?? AUTO_RULE_ID;
+}
+
 /** 所选规则下会移动的绑定；其余图片保持原位。 */
 export function bindingsForRule(bindings: readonly PlannedBinding[], ruleId: string): PlannedBinding[] {
   return bindings.filter((b) => isApplicable(b) && (ruleId === AUTO_RULE_ID || b.rule === ruleId));
@@ -126,4 +136,45 @@ export function renameGroup(bindings: readonly PlannedBinding[], from: string, t
     if (b.virtualPath.startsWith(from + '/')) return { ...b, virtualPath: target + b.virtualPath.slice(from.length) };
     return b;
   });
+}
+
+/** 预览阶段能看到的已有目录：目录是否存在、其中直属文件的文件名。 */
+export interface ExistingDir {
+  names: ReadonlySet<string>;
+}
+
+export interface PlanConflicts {
+  /** 目标目录已存在（整理会合并进去）的分组。 */
+  mergeDirs: ReadonlySet<string>;
+  /** 因目标位置已有同名文件、落盘时会被跳过的图片 id。 */
+  conflictIds: ReadonlySet<string>;
+}
+
+/**
+ * 预估落盘冲突，口径与 applyOrganize 的默认 skip 模式一致：目标目录里已有同名文件、
+ * 或本次有两张图落到同一路径时，后到的一张被跳过；已经在目标位置的图不算冲突。
+ * existingDir(dir) 按「相对整理容器的目录」返回已有目录，不存在时返回 undefined。
+ */
+export function planConflicts(
+  groups: readonly PreviewGroup[],
+  existingDir: (dir: string) => ExistingDir | undefined,
+  currentPathOf: (imageId: string) => string | undefined,
+  containerRelPath: string,
+): PlanConflicts {
+  const mergeDirs = new Set<string>();
+  const conflictIds = new Set<string>();
+  const prefix = containerRelPath ? `${containerRelPath}/` : '';
+  for (const group of groups) {
+    const existing = existingDir(group.dir);
+    if (existing) mergeDirs.add(group.dir);
+    const taken = new Set(existing?.names ?? []);
+    for (const binding of group.bindings) {
+      const name = binding.virtualPath.slice(binding.virtualPath.lastIndexOf('/') + 1);
+      const target = prefix + binding.virtualPath;
+      if (currentPathOf(binding.imageId) === target) continue;
+      if (taken.has(name)) conflictIds.add(binding.imageId);
+      else taken.add(name);
+    }
+  }
+  return { mergeDirs, conflictIds };
 }

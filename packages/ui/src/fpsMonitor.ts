@@ -6,7 +6,7 @@
  *  - 平均 / p95 / 最大帧间隔；
  *  - 掉帧：帧间隔 > 33.3ms（连 30fps 都保不住）；
  *  - 卡顿帧：> 50ms（超出长任务红线一半，几乎必然可感知）；
- *  - 滚动回调耗时：LibraryBrowser 在 onScroll 的 rAF 里用 recordScrollFrame 上报，
+ *  - 滚动回调耗时：desktop/VirtualSurface 在滚动的 rAF 里用 recordScrollFrame 上报，
  *    用于区分“JS 调度开销”与“渲染/绘画开销”（后者以 DevTools Performance 为准）。
  */
 export interface FpsStats {
@@ -28,8 +28,6 @@ export interface FpsStats {
   totalDropped: number;
   /** 最近 1s 的滚动回调样本数。 */
   scrollSamples: number;
-  /** 最近 1s 的 scrollTop 写入次数（默认 writeIntervalMs 8.3ms，约 120Hz 上限）。 */
-  scrollWrites: number;
   /** 最近 1s 的滚动回调平均耗时（ms）。 */
   scrollAvgMs: number;
   /** 最近 1s 的滚动回调最大耗时（ms）。 */
@@ -46,7 +44,6 @@ const MAX_SCROLL_SAMPLES = 200;
 /** 最近 1s 的帧间隔样本（t=结束时间戳，gap=间隔 ms）。 */
 const samples: { t: number; gap: number }[] = [];
 const scrollMs: { t: number; ms: number }[] = [];
-const scrollWriteTs: number[] = [];
 
 let rafId = 0;
 let running = false;
@@ -83,7 +80,6 @@ function compute(now: number): FpsStats {
     scrollAvgMs: scrollVals.length > 0 ? scrollVals.reduce((a, b) => a + b, 0) / scrollVals.length : 0,
     scrollMaxMs: scrollSorted.length > 0 ? scrollSorted[scrollSorted.length - 1]! : 0,
     scrollP95Ms: percentile(scrollSorted, 95),
-    scrollWrites: scrollWriteTs.filter((t) => now - t <= WINDOW_MS).length,
   };
 }
 
@@ -128,29 +124,15 @@ export function stopFpsMonitor(): void {
 export function resetFpsMonitor(): void {
   samples.length = 0;
   scrollMs.length = 0;
-  scrollWriteTs.length = 0;
   totalFrames = 0;
   totalDropped = 0;
   lastTime = 0;
 }
 
-/** 单次获取当前统计。 */
-export function getFpsStats(): FpsStats {
-  return compute(performance.now());
-}
-
-/** 记录一次滚动回调耗时（LibraryBrowser 的 onScroll rAF 内上报）。 */
+/** 记录一次滚动回调耗时（VirtualSurface 的滚动 rAF 内上报）。 */
 export function recordScrollFrame(ms: number): void {
   const now = performance.now();
   scrollMs.push({ t: now, ms });
   while (scrollMs.length > MAX_SCROLL_SAMPLES) scrollMs.shift();
   while (scrollMs.length > 0 && scrollMs[0]!.t < now - WINDOW_MS) scrollMs.shift();
-}
-
-/** 记录一次 scrollTop 写入（smoothScroll 每帧写入时上报，观测写入频率）。 */
-export function recordScrollWrite(): void {
-  scrollWriteTs.push(performance.now());
-  while (scrollWriteTs.length > 0 && scrollWriteTs[0]! < performance.now() - WINDOW_MS) {
-    scrollWriteTs.shift();
-  }
 }

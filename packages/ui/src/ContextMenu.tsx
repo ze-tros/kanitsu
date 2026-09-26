@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Check } from '@phosphor-icons/react';
 
@@ -108,7 +108,7 @@ export function ContextMenu({
   return createPortal(
     <div
       ref={ref}
-      className="context-menu"
+      className="dk-menu"
       style={{
         left: placement.left,
         top: placement.top,
@@ -137,8 +137,8 @@ export function ContextMenu({
       }}
     >
       {menu.items.map((item, index) => (
-        <div key={`${item.label}-${index}`} className="contents">
-          {item.separator && <div className="context-menu-separator" role="separator" />}
+        <Fragment key={`${item.label}-${index}`}>
+          {item.separator && <div className="dk-menu-sep" role="separator" />}
           <button
             type="button"
             role={item.checked === undefined ? 'menuitem' : 'menuitemcheckbox'}
@@ -148,7 +148,7 @@ export function ContextMenu({
             }}
             data-menu-index={index}
             tabIndex={item.disabled ? -1 : index === menu.items.findIndex((entry) => !entry.disabled) ? 0 : -1}
-            className={`context-menu-item${item.danger ? ' context-menu-item-danger' : ''}`}
+            className={`dk-menu-item${item.danger ? ' danger' : ''}`}
             disabled={item.disabled}
             onClick={() => {
               if (item.disabled) return;
@@ -156,15 +156,15 @@ export function ContextMenu({
               onClose();
             }}
           >
-            {item.icon != null && <span className="context-menu-icon">{item.icon}</span>}
-            <span className="context-menu-label">{item.label}</span>
+            {item.icon != null && <span className="dk-menu-icon">{item.icon}</span>}
+            <span className="dk-menu-label">{item.label}</span>
             {item.checked != null && (
-              <span className="context-menu-check" aria-hidden="true">
+              <span className="dk-menu-check" aria-hidden="true">
                 {item.checked && <Check size={13} weight="bold" />}
               </span>
             )}
           </button>
-        </div>
+        </Fragment>
       ))}
     </div>,
     portalTarget,

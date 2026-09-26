@@ -29,6 +29,7 @@ import { Switch } from './MobileDisplaySheets';
 import { Z_SETTINGS } from './zindex';
 import { useExitPresence } from './useExitPresence';
 import { MobileConfirmDialog } from './MobileSheets';
+import { formatLogTime } from '../../../core/src/index';
 
 const LEVEL_LABELS: ReadonlyArray<[LogLevel, string]> = [
   ['debug', '调试'],
@@ -523,7 +524,6 @@ function LogCard() {
     setShowLogs(true);
   };
 
-  const fmtTime = (t: number): string => new Date(t).toLocaleTimeString('zh-CN', { hour12: false });
 
   return (
     <div className="m-settings-card">
@@ -577,7 +577,7 @@ function LogCard() {
           ) : (
             logs.slice(-80).map((entry, i) => (
               <div key={i} className={`m-log-line is-${entry.level}`}>
-                <span>{fmtTime(entry.time)} </span>
+                <span>{formatLogTime(entry.time)} </span>
                 <b>[{entry.tag}]</b>{' '}
                 {entry.message}
               </div>

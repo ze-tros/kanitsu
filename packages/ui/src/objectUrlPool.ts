@@ -97,15 +97,3 @@ export function releaseObjectUrl(url: string): void {
   entries.set(url, entry);
   evict();
 }
-
-/** 仅调试用：清空池并撤销全部 URL。 */
-export function clearObjectUrlPool(): void {
-  for (const url of [...entries.keys()]) drop(url);
-}
-
-/** 调试统计：观察池大小与空闲条目数（滚动/目录切换后的 URL 复用情况）。 */
-export function getObjectUrlPoolStats(): { total: number; idle: number; bytes: number } {
-  let idle = 0;
-  for (const entry of entries.values()) if (entry.refs === 0) idle++;
-  return { total: entries.size, idle, bytes: totalBytes };
-}

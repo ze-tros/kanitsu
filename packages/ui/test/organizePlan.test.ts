@@ -4,11 +4,13 @@ import type { ImageEntry } from '../../core/src/index';
 import {
   AUTO_RULE_ID,
   bindingsForRule,
+  defaultRuleId,
   planBindings,
+  planConflicts,
   previewGroups,
   renameGroup,
   ruleOptions,
-} from '../src/mobile/organizePlan';
+} from '../src/organizePlan';
 
 const img = (name: string): ImageEntry => ({ id: name, folderId: 'f', name, relPath: `F/${name}`, ext: 'jpg', size: 1, mtime: 1 });
 
@@ -51,4 +53,33 @@ test('预览按目标目录分组并可重命名', () => {
   const renamed = renameGroup(plan, '佐仓', ' 樱 / 佐仓 ');
   assert.deepEqual(previewGroups(renamed).map((g) => g.dir), ['2025/07/14', '樱/佐仓']);
   assert.equal(renameGroup(plan, '佐仓', '../x')[0]!.virtualPath, plan[0]!.virtualPath);
+});
+
+test('默认规则取命中最多的单条规则，全无命中时为自动', () => {
+  const plan = planBindings(images, []);
+  assert.equal(defaultRuleId(ruleOptions(plan, [])), 'author');
+  const none = planBindings([img('cover.png')], []);
+  assert.equal(defaultRuleId(ruleOptions(none, [])), AUTO_RULE_ID);
+});
+
+test('冲突预估：已有目录记为合并，同名文件与本次重复路径记为冲突，已在原位的不算', () => {
+  const plan = bindingsForRule(planBindings([img('[佐仓] 标题A.jpg'), img('[佐仓] 标题B.jpg')], []), 'author');
+  const groups = previewGroups(plan);
+  assert.equal(groups.length, 1);
+  const dir = groups[0]!.dir;
+  const target = (id: string) => plan.find((b) => b.imageId === id)!.virtualPath.split('/').pop()!;
+  const existing = new Map([[dir, { names: new Set([target('[佐仓] 标题A.jpg')]) }]]);
+  const result = planConflicts(groups, (d) => existing.get(d), (id) => `F/${id}`, 'F');
+  assert.deepEqual([...result.mergeDirs], [dir]);
+  assert.deepEqual([...result.conflictIds], ['[佐仓] 标题A.jpg']);
+
+  // 同一路径两张图：后到的冲突。
+  const dup = [{ ...plan[0]!, imageId: 'x' }, { ...plan[0]!, imageId: 'y' }];
+  const dupResult = planConflicts(previewGroups(dup), () => undefined, () => undefined, 'F');
+  assert.deepEqual([...dupResult.conflictIds], ['y']);
+  assert.equal(dupResult.mergeDirs.size, 0);
+
+  // 已经在目标位置：不算冲突。
+  const inPlace = planConflicts(groups, (d) => existing.get(d), (id) => `F/${plan.find((b) => b.imageId === id)!.virtualPath}`, 'F');
+  assert.equal(inPlace.conflictIds.size, 0);
 });

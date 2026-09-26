@@ -6,8 +6,17 @@
  * 不再依赖一份和 UI 脱节的硬编码字符串。
  */
 import { ACCENT_OPTIONS } from './accents';
+import { DESKTOP_SHORTCUTS } from './desktopShortcuts';
 
-export type SettingsTabId = 'general' | 'organize' | 'debug' | 'cache';
+export type SettingsTabId =
+  | 'appearance'
+  | 'library'
+  | 'viewer'
+  | 'rules'
+  | 'cache'
+  | 'diagnostics'
+  | 'shortcuts'
+  | 'about';
 
 export interface SettingsTab {
   id: SettingsTabId;
@@ -21,44 +30,78 @@ export interface SettingsTab {
 
 export const SETTINGS_TABS: ReadonlyArray<SettingsTab> = [
   {
-    id: 'general',
-    label: '通用',
-    title: '界面与主题',
+    id: 'appearance',
+    label: '外观',
+    title: '外观',
     keywords: [
-      '界面与主题', '外观', '界面模式', '深色', '浅色', '跟随系统', '主题色',
+      '主题', '界面模式', '深色', '浅色', '跟随系统', '主题色', '强调色',
       // 主题色的显示名直接取自共享清单，避免改名后搜索失效。
       ...ACCENT_OPTIONS.map((option) => option.label),
-      'RAW 显示', 'RAW 观感', '内嵌预览', '完整解码', 'raw', 'arw', 'cr3', 'nef',
-      '应用', '运行环境', '图库占用', '自定义整理规则',
-      '数据目录', '保存位置', '保存路径', '复制一份', 'albums',
     ],
   },
   {
-    id: 'organize',
+    id: 'library',
+    label: '图库与数据',
+    title: '图库与数据',
+    keywords: [
+      '数据目录', '保存位置', '保存路径', '复制一份', 'albums',
+      '图库占用', '文件数', '运行环境', '自定义整理规则',
+    ],
+  },
+  {
+    id: 'viewer',
+    label: '查看器',
+    title: '查看器',
+    keywords: [
+      'RAW 显示', 'RAW 观感', '显影', '直出', '内嵌预览', '完整解码', '相机直出',
+      'raw', 'arw', 'cr3', 'nef', '原图',
+    ],
+  },
+  {
+    id: 'rules',
     label: '整理规则',
     title: '整理规则',
     keywords: [
-      '整理规则', '自定义整理规则', '规则', '智能整理',
+      '自定义整理规则', '规则', '智能整理',
       '内置规则', '自定义规则', '正则表达式', '置信度', '目标目录模板', '测试文件名',
-    ],
-  },
-  {
-    id: 'debug',
-    label: '调试',
-    title: '运行诊断',
-    keywords: [
-      '运行诊断', '帧率', '帧间隔', 'fps', '掉帧', '卡顿', '滚动', '滚动回调', '调试选项',
-      '日志', '日志等级', '缩略图缓存', '队列积压', '解码', 'worker', '主进程缓存',
-      '磁盘缓存', '样本',
     ],
   },
   {
     id: 'cache',
     label: '缓存',
-    title: '缓存管理',
+    title: '缓存',
     keywords: [
-      '缓存管理', '缩略图缓存', '内存缓存', '磁盘缓存', '清理缓存', '命中率', '未命中',
-      '缓存条目', '容量上限', '预取',
+      '缓存管理', '缩略图缓存', '渲染端', '内存缓存', '主进程缓存', '磁盘缓存', '清理缓存',
+      '命中率', '未命中', '缓存条目', '容量上限', '预取已排', '预取完成', '预取失败',
+    ],
+  },
+  {
+    id: 'diagnostics',
+    label: '诊断',
+    title: '诊断',
+    keywords: [
+      '运行诊断', '帧率', '帧间隔', 'fps', '掉帧', '卡顿', '滚动', '滚动回调', '样本',
+      '缩略图队列', '队列积压', '解码', 'worker',
+      '调试选项', '日志', '日志等级', '后台预取', '主进程日志', '渲染端日志',
+    ],
+  },
+  {
+    id: 'shortcuts',
+    label: '快捷键',
+    title: '快捷键',
+    keywords: [
+      '键盘', '快捷键', '按键',
+      // 速查表里的分组名与动作名都能搜到。
+      ...DESKTOP_SHORTCUTS.flatMap((group) => [group.title, ...group.items.map((item) => item.label)]),
+    ],
+  },
+  {
+    id: 'about',
+    label: '关于',
+    title: '关于',
+    keywords: [
+      'Kanitsu', '版本', '运行环境', '隐私', '离线', '不联网', '不上传', '遥测',
+      '副本隔离', '源文件夹',
     ],
   },
 ];

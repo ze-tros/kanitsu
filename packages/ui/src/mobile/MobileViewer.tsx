@@ -4,7 +4,7 @@ import type { FileRef, LibraryStore } from '../../../fs-adapter/src/types';
 import { decodeRawToJpeg, extractRawPreviewJpeg, isRawImage } from '../../../raw-decoder/src/index';
 import { isHeifImage } from '../../../core/src/index';
 import { getThumbnailBlob } from '../thumbnailCache';
-import { prefetchOriginal } from '../LibraryBrowser';
+import { prefetchOriginal } from '../originalPrefetch';
 import { acquireObjectUrl, releaseObjectUrl } from '../objectUrlPool';
 import { useExifInfo } from '../exifInfo';
 import { formatBytes, isRawFullDecodeEnabled, prefersReducedMotion } from './mobileShared';

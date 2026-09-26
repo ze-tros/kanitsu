@@ -95,7 +95,7 @@ import {
   saveRecentBrowse,
   type ImportedAtMap,
   type RecentBrowseEntry,
-} from './browseHistory';
+} from '../browseHistory';
 import { closeOverlayEntries, reconcilePop, type OverlayLayer, type StackEntry } from './historyStack';
 
 const MOBILE_SCROLL_PRELOAD_RESUME_MS = 180;

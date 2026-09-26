@@ -1,7 +1,7 @@
 /**
  * 移动端 UI 共享工具与常量。
- * 纯逻辑函数直接复用桌面端实现（LibraryBrowser 中导出），此处仅 re-export，
- * 避免双份实现漂移；移动端特有的网格参数/格式化工具在此定义。
+ * 两端共用的偏好与文案来自 ../libraryPrefs，此处仅 re-export，避免双份实现漂移；
+ * 移动端特有的网格参数/格式化工具在此定义。
  */
 export {
   loadPinnedCovers,
@@ -11,7 +11,7 @@ export {
   isImageBlurred,
   skippedReasonLabel,
   conflictReasonLabel,
-} from '../LibraryBrowser';
+} from '../libraryPrefs';
 
 import { DEFAULT_ACCENT, isAccentMode, type AccentMode } from '../accents';
 import type { KanitsuAndroidBridge } from '../../../fs-adapter/src/android';

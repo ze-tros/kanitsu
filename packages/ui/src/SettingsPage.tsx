@@ -1,30 +1,45 @@
 import {
   useEffect,
+  useRef,
   useState,
-  type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
 } from 'react';
-import { ArrowLeft, Bug, Database, MagicWand, MagnifyingGlass, Palette } from '@phosphor-icons/react';
+import {
+  ArrowLeft,
+  CheckCircle,
+  Database,
+  Gauge,
+  HardDrives,
+  Image as ImageIcon,
+  Info,
+  Keyboard,
+  MagicWand,
+  MagnifyingGlass,
+  Palette,
+} from '@phosphor-icons/react';
 import type { CustomOrganizeRule } from '../../organizer/src/index';
 import type { ThumbnailDebugStats, ClearCacheResult, DesktopRawViewMode } from '../../fs-adapter/src/electron';
-import { OrganizeRulesManager } from './OrganizeRulesModal';
-import { SidebarResizeHandle } from './SidebarResizeHandle';
+import { formatLogTime } from '../../core/src/index';
+import { handleRadioNavigation, Segmented, Switch } from './desktop/controls';
+import { RulesPanel } from './desktop/RulesPanel';
+import { formatBytes, formatCount } from './desktop/shared';
 import {
   fetchDataDir,
   supportsDataDir,
 } from './dataDir';
 import {
   ACCENT_OPTIONS,
-  DEFAULT_ACCENT,
-  isAccentMode,
   type AccentMode,
 } from './accents';
 import {
   filterSettingsTabs,
   hasSettingsTabMatches,
+  settingsTabMatches,
   SETTINGS_TABS,
   type SettingsTabId,
 } from './settingsTabs';
+import { DESKTOP_SHORTCUTS } from './desktopShortcuts';
 import { getRendererThumbnailStats, clearThumbnailCache, type RendererThumbnailStats } from './thumbnailCache';
 import { startFpsMonitor, stopFpsMonitor, resetFpsMonitor, type FpsStats } from './fpsMonitor';
 import {
@@ -43,56 +58,46 @@ export type AccentOption = AccentMode;
 
 /** 标签页图标只属于视图层，留在组件里，纯数据模块保持无 React 依赖。 */
 const TAB_ICONS: Record<SettingsTabId, typeof Palette> = {
-  general: Palette,
-  organize: MagicWand,
-  debug: Bug,
-  cache: Database,
+  appearance: Palette,
+  library: Database,
+  viewer: ImageIcon,
+  rules: MagicWand,
+  cache: HardDrives,
+  diagnostics: Gauge,
+  shortcuts: Keyboard,
+  about: Info,
 };
 
-function handleRadioNavigation<T extends string>(
-  event: ReactKeyboardEvent<HTMLButtonElement>,
-  options: readonly T[],
-  current: T,
-  onChange: (value: T) => void,
-): void {
-  const currentIndex = Math.max(0, options.indexOf(current));
-  let nextIndex: number | null = null;
-  if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
-    nextIndex = (currentIndex + 1) % options.length;
-  } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
-    nextIndex = (currentIndex - 1 + options.length) % options.length;
-  } else if (event.key === 'Home') {
-    nextIndex = 0;
-  } else if (event.key === 'End') {
-    nextIndex = options.length - 1;
-  }
-  if (nextIndex == null) return;
+/** 页标题下的一句说明；只写当前实现真实成立的事实。 */
+const TAB_LEADS: Record<SettingsTabId, string> = {
+  appearance: '界面模式与主题色，修改后立即生效并保存在本机。',
+  library: '导入时图片会复制到数据目录里的图库副本；之后的整理、重命名、删除只作用于这份副本。',
+  viewer: '原图与 RAW 文件在查看器里的显示方式。',
+  rules: '内置规则按顺序匹配；自定义规则用正则表达式捕获目标目录，先于内置规则生效，保存在本机。',
+  cache: '缓存可随时清理，重新浏览时会按需重新生成。',
+  diagnostics: '只在本机记录，用于排查滚动卡顿与缩略图加载问题。',
+  shortcuts: '桌面端常用的键盘操作速查。',
+  about: '本地优先的图片管理与查看应用。',
+};
 
-  event.preventDefault();
-  const next = options[nextIndex];
-  if (!next) return;
-  onChange(next);
-  const radios = event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="radio"]');
-  radios?.[nextIndex]?.focus();
-}
-
-type SettingsPageProps = {
+export type SettingsPageProps = {
   rules: CustomOrganizeRule[];
   onChange: (rules: CustomOrganizeRule[]) => void;
   onBack: () => void;
   runtimeLabel?: string;
   libraryBytes: number;
   libraryFileCount: number;
-  sidebarWidth: number;
-  onSidebarWidthChange: (width: number) => void;
+  /** 标题栏「侧栏」开关：收起时设置页左栏一并隐藏。 */
   sidebarHidden?: boolean;
   theme: ThemeOption;
   accent: AccentOption;
   onThemeChange: (theme: ThemeOption) => void;
   onAccentChange: (accent: AccentOption) => void;
-  /** RAW 查看模式(仅 Electron 有可切换项;Web/Android 平台固定不渲染)。 */
+  /** RAW 查看模式(仅 Electron 有可切换项;Web/Android 平台固定)。 */
   rawViewMode: DesktopRawViewMode;
   onRawViewModeChange: (mode: DesktopRawViewMode) => void;
+  /** 打开设置页时默认显示的标签页（变化时跟随切换）。 */
+  initialTab?: SettingsTabId;
 };
 
 export function SettingsPage({
@@ -102,8 +107,6 @@ export function SettingsPage({
   runtimeLabel,
   libraryBytes,
   libraryFileCount,
-  sidebarWidth,
-  onSidebarWidthChange,
   sidebarHidden = false,
   theme,
   accent,
@@ -111,185 +114,259 @@ export function SettingsPage({
   onAccentChange,
   rawViewMode,
   onRawViewModeChange,
+  initialTab,
 }: SettingsPageProps) {
-  const [activeTab, setActiveTab] = useState<SettingsTabId>('general');
+  const [activeTab, setActiveTab] = useState<SettingsTabId>(initialTab ?? 'appearance');
   const [searchQuery, setSearchQuery] = useState('');
+  const scrollRef = useRef<HTMLElement>(null);
   const pageTitle = SETTINGS_TABS.find((tab) => tab.id === activeTab)?.title ?? '';
   // 当前标签页始终保留在导航里（见 filterSettingsTabs），避免正文与导航割裂。
   const navTabs = filterSettingsTabs(searchQuery, activeTab);
   const hasMatches = hasSettingsTabMatches(searchQuery);
 
+  useEffect(() => {
+    if (initialTab) setActiveTab(initialTab);
+  }, [initialTab]);
+
+  // 切换标签页时正文回到顶部，不沿用上一页的滚动位置。
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: 0 });
+  }, [activeTab]);
+
+  const handleSearchKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>): void => {
+    if (event.key === 'Enter') {
+      // 回车跳到第一个命中的标签页（当前页也命中时保持不动）。
+      if (!searchQuery.trim()) return;
+      const matched = SETTINGS_TABS.filter((tab) => settingsTabMatches(tab, searchQuery));
+      const target = matched.find((tab) => tab.id === activeTab) ?? matched[0];
+      if (target) {
+        event.preventDefault();
+        setActiveTab(target.id);
+      }
+    } else if (event.key === 'Escape' && searchQuery) {
+      event.preventDefault();
+      event.stopPropagation();
+      setSearchQuery('');
+    }
+  };
+
   return (
-    <div className={`desktop-settings-page titlebar-no-drag${sidebarHidden ? ' is-sidebar-hidden' : ''}`}>
-      <div
-        className="desktop-settings-body"
-        style={{ '--desktop-settings-sidebar-width': `${Math.min(sidebarWidth, 360)}px` } as CSSProperties}
-      >
-        <aside className="desktop-settings-sidebar">
-          <SidebarResizeHandle width={sidebarWidth} onResize={onSidebarWidthChange} max={360} />
-          <button type="button" className="desktop-settings-back" onClick={onBack}>
-            <ArrowLeft size={16} aria-hidden="true" />
-            <span>返回图库</span>
-          </button>
-          <label className="desktop-settings-search">
-            <MagnifyingGlass size={15} aria-hidden="true" />
-            <input
-              type="search"
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder="搜索设置…"
-              aria-label="搜索设置"
+    <div className={`dk-set-page titlebar-no-drag${sidebarHidden ? ' is-nav-hidden' : ''}`}>
+      <aside className="dk-set-nav" aria-label="设置导航">
+        <button type="button" className="dk-set-nav-item" onClick={onBack}>
+          <ArrowLeft size={16} aria-hidden="true" />
+          <span>返回图库</span>
+        </button>
+        <label className="dk-set-search">
+          <MagnifyingGlass size={14} aria-hidden="true" />
+          <input
+            type="search"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            onKeyDown={handleSearchKeyDown}
+            placeholder="搜索设置"
+            aria-label="搜索设置"
+          />
+        </label>
+        <nav className="dk-set-tabs" aria-label="设置项">
+          {navTabs.map((tab) => {
+            const Icon = TAB_ICONS[tab.id];
+            const isActive = tab.id === activeTab;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                className={`dk-set-nav-item${isActive ? ' is-active' : ''}`}
+                aria-current={isActive ? 'page' : undefined}
+                onClick={() => setActiveTab(tab.id)}
+              >
+                <Icon size={16} aria-hidden="true" /><span>{tab.label}</span>
+              </button>
+            );
+          })}
+        </nav>
+        {/* 空状态常驻挂载、用 role="status" 播报，避免只靠视觉提示。 */}
+        <p className="dk-set-empty" role="status">
+          {hasMatches ? '' : '没有匹配的设置项'}
+        </p>
+      </aside>
+
+      <main className="dk-set-scroll" ref={scrollRef}>
+        <div className="dk-set-main">
+          <h1 className="dk-set-title">{pageTitle}</h1>
+          <p className="dk-set-lead">{TAB_LEADS[activeTab]}</p>
+
+          {activeTab === 'appearance' && (
+            <AppearancePanel
+              theme={theme}
+              accent={accent}
+              onThemeChange={onThemeChange}
+              onAccentChange={onAccentChange}
             />
-          </label>
-          <div className="desktop-panel-label">设置项</div>
-          <nav className="desktop-settings-nav" aria-label="设置项">
-            {navTabs.map((tab) => {
-              const Icon = TAB_ICONS[tab.id];
-              const isActive = tab.id === activeTab;
-              return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  className={isActive ? 'is-active' : ''}
-                  aria-current={isActive ? 'page' : undefined}
-                  onClick={() => setActiveTab(tab.id)}
-                >
-                  <Icon size={17} /><span>{tab.label}</span>
-                </button>
-              );
-            })}
-          </nav>
-          {/* 空状态常驻挂载、用 role="status" 播报，避免只靠视觉提示。
-              注意它仍在 .desktop-settings-sidebar 内，≤680px 该容器会变成横向标签条，
-              此时提示文字位于标签条末尾（窄屏可能要横向滚动才看得到），屏幕阅读器不受影响。 */}
-          <p className="desktop-settings-empty" role="status">
-            {hasMatches ? '' : '没有匹配的设置项'}
-          </p>
-        </aside>
-
-        <main className="desktop-settings-main">
-          <div className="desktop-settings-content">
-            <h1 className="desktop-settings-page-title">{pageTitle}</h1>
-            {activeTab === 'general' && (
-              <>
-                <section className="desktop-settings-section">
-                  <header className="desktop-settings-section-heading"><h2>外观</h2></header>
-                  <div className="desktop-settings-row">
-                    <div><strong>界面模式</strong><span>浅色、深色或跟随系统</span></div>
-                    <div className="desktop-settings-mode-control" role="radiogroup" aria-label="界面模式">
-                      {([['dark', '深色'], ['light', '浅色'], ['system', '跟随系统']] as const).map(([value, label]) => (
-                        <button
-                          key={value}
-                          type="button"
-                          role="radio"
-                          aria-checked={theme === value}
-                          tabIndex={theme === value ? 0 : -1}
-                          className={theme === value ? 'is-active' : ''}
-                          onClick={() => onThemeChange(value)}
-                          onKeyDown={(event) => handleRadioNavigation(
-                            event,
-                            ['dark', 'light', 'system'],
-                            theme,
-                            onThemeChange,
-                          )}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="desktop-settings-row">
-                    <div><strong>主题色</strong><span>选中状态与关键操作</span></div>
-                  </div>
-                  <div className="desktop-settings-accent-grid" role="radiogroup" aria-label="主题色">
-                    {ACCENT_OPTIONS.map((option) => {
-                      const selected = accent === option.value;
-                      return (
-                        <button
-                          key={option.value}
-                          type="button"
-                          role="radio"
-                          aria-checked={selected}
-                          tabIndex={selected ? 0 : -1}
-                          className={`desktop-settings-accent-option ${selected ? 'is-active' : ''}`}
-                          onClick={() => onAccentChange(option.value)}
-                          onKeyDown={(event) => handleRadioNavigation(
-                            event,
-                            ACCENT_OPTIONS.map((item) => item.value),
-                            accent,
-                            onAccentChange,
-                          )}
-                        >
-                          <span className={`desktop-settings-swatch is-${option.value}`} aria-hidden="true" />
-                          <span>{option.label}</span>
-                          <span className="is-check" aria-hidden="true" />
-                        </button>
-                      );
-                    })}
-                  </div>
-                </section>
-
-                {/* RAW 查看模式:仅 Electron 桥存在时可切换(Web/Android 平台固定)。 */}
-                {typeof window !== 'undefined' && window.kanitsuDesktop && (
-                  <section className="desktop-settings-section">
-                    <header className="desktop-settings-section-heading"><h2>RAW 显示</h2></header>
-                    <div className="desktop-settings-row">
-                      <div>
-                        <strong>RAW 观感</strong>
-                        <span>相机内嵌预览或完整解码渲染</span>
-                      </div>
-                      <div className="desktop-settings-mode-control" role="radiogroup" aria-label="RAW 观感">
-                        {([['developed', '完整解码'], ['camera', '相机直出']] as const).map(([value, label]) => (
-                          <button
-                            key={value}
-                            type="button"
-                            role="radio"
-                            aria-checked={rawViewMode === value}
-                            tabIndex={rawViewMode === value ? 0 : -1}
-                            className={rawViewMode === value ? 'is-active' : ''}
-                            onClick={() => onRawViewModeChange(value)}
-                            onKeyDown={(event) => handleRadioNavigation(
-                              event,
-                              ['developed', 'camera'],
-                              rawViewMode,
-                              onRawViewModeChange,
-                            )}
-                          >
-                            {label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </section>
-                )}
-
-                <section className="desktop-settings-section">
-                  <header className="desktop-settings-section-heading"><h2>应用</h2></header>
-                  <DataDirRow />
-                  <div className="desktop-settings-row"><div><strong>运行环境</strong></div><strong>{runtimeLabel ?? '—'}</strong></div>
-                  <div className="desktop-settings-row"><div><strong>图库占用</strong><span>已索引的本地文件总量</span></div><strong>{fmtBytes(libraryBytes)} · {libraryFileCount.toLocaleString('zh-CN')} 个文件</strong></div>
-                  <div className="desktop-settings-row"><div><strong>自定义整理规则</strong></div><strong>{rules.length} 条</strong></div>
-                </section>
-              </>
-            )}
-            {/* 整理规则面板自带三张卡片（内置规则 / 自定义规则 / 编辑器），
-                所以这里不再套 .desktop-settings-section，避免卡片套卡片。 */}
-            {activeTab === 'organize' && (
-              <OrganizeRulesManager rules={rules} onChange={onChange} />
-            )}
-            {activeTab === 'debug' && <DebugPanel />}
-            {activeTab === 'cache' && <CachePanel />}
-          </div>
-        </main>
-      </div>
+          )}
+          {activeTab === 'library' && (
+            <LibraryPanel
+              runtimeLabel={runtimeLabel}
+              libraryBytes={libraryBytes}
+              libraryFileCount={libraryFileCount}
+              ruleCount={rules.length}
+              onOpenRules={() => setActiveTab('rules')}
+            />
+          )}
+          {activeTab === 'viewer' && (
+            <ViewerPanel rawViewMode={rawViewMode} onRawViewModeChange={onRawViewModeChange} />
+          )}
+          {activeTab === 'rules' && <RulesPanel rules={rules} onChange={onChange} />}
+          {activeTab === 'cache' && <CachePanel />}
+          {activeTab === 'diagnostics' && <DebugPanel />}
+          {activeTab === 'shortcuts' && <ShortcutsPanel />}
+          {activeTab === 'about' && <AboutPanel runtimeLabel={runtimeLabel} />}
+        </div>
+      </main>
     </div>
   );
 }
 
-function fmtBytes(n: number): string {
-  if (n >= 1048576) return `${(n / 1048576).toFixed(1)} MB`;
-  if (n >= 1024) return `${(n / 1024).toFixed(0)} KB`;
-  return `${n} B`;
+/** 设置行：左侧标题 + 说明，右侧控件。 */
+function SettingRow({
+  label,
+  description,
+  children,
+}: {
+  label: ReactNode;
+  description?: ReactNode;
+  children?: ReactNode;
+}) {
+  return (
+    <div className="dk-set-row">
+      <div className="dk-set-row-label">
+        <b>{label}</b>
+        {description != null && description !== '' && <small>{description}</small>}
+      </div>
+      {children != null && <div className="dk-set-row-control">{children}</div>}
+    </div>
+  );
+}
+
+/* ===== 外观 ===== */
+
+const THEME_CHOICES: ReadonlyArray<readonly [ThemeOption, string]> = [
+  ['dark', '深色'],
+  ['light', '浅色'],
+  ['system', '跟随系统'],
+];
+
+function AppearancePanel({
+  theme,
+  accent,
+  onThemeChange,
+  onAccentChange,
+}: {
+  theme: ThemeOption;
+  accent: AccentOption;
+  onThemeChange: (theme: ThemeOption) => void;
+  onAccentChange: (accent: AccentOption) => void;
+}) {
+  const accentLabel = ACCENT_OPTIONS.find((option) => option.value === accent)?.label ?? '';
+  return (
+    <section className="dk-set-card">
+      <h3 className="dk-set-card-title">界面模式</h3>
+      <div className="dk-set-theme-cards" role="radiogroup" aria-label="界面模式">
+        {THEME_CHOICES.map(([value, label]) => {
+          const selected = theme === value;
+          return (
+            <button
+              key={value}
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              tabIndex={selected ? 0 : -1}
+              className={`dk-set-theme-card${selected ? ' is-active' : ''}`}
+              onClick={() => onThemeChange(value)}
+              onKeyDown={(event) => handleRadioNavigation(
+                event,
+                THEME_CHOICES.map(([v]) => v),
+                theme,
+                onThemeChange,
+              )}
+            >
+              <span className={`dk-set-theme-preview is-${value}`} aria-hidden="true">
+                <span />
+                <span />
+              </span>
+              <span>{label}</span>
+            </button>
+          );
+        })}
+      </div>
+      <SettingRow label="主题色" description={`选中状态与关键操作 · 当前：${accentLabel}`}>
+        <div className="dk-set-swatches" role="radiogroup" aria-label="主题色">
+          {ACCENT_OPTIONS.map((option) => {
+            const selected = accent === option.value;
+            return (
+              <button
+                key={option.value}
+                type="button"
+                role="radio"
+                aria-checked={selected}
+                aria-label={option.label}
+                title={option.label}
+                tabIndex={selected ? 0 : -1}
+                className={`dk-set-swatch is-${option.value}${selected ? ' is-active' : ''}`}
+                onClick={() => onAccentChange(option.value)}
+                onKeyDown={(event) => handleRadioNavigation(
+                  event,
+                  ACCENT_OPTIONS.map((item) => item.value),
+                  accent,
+                  onAccentChange,
+                )}
+              />
+            );
+          })}
+        </div>
+      </SettingRow>
+    </section>
+  );
+}
+
+/* ===== 图库与数据 ===== */
+
+function LibraryPanel({
+  runtimeLabel,
+  libraryBytes,
+  libraryFileCount,
+  ruleCount,
+  onOpenRules,
+}: {
+  runtimeLabel?: string;
+  libraryBytes: number;
+  libraryFileCount: number;
+  ruleCount: number;
+  onOpenRules: () => void;
+}) {
+  return (
+    <>
+      <section className="dk-set-card">
+        <DataDirRow />
+        <div className="dk-set-usage">
+          <div className="dk-set-usage-head">
+            <b>图库占用 {formatBytes(libraryBytes)}</b>
+            <span>{formatCount(libraryFileCount)} 个文件</span>
+          </div>
+          <small>已索引的本地文件总量</small>
+        </div>
+      </section>
+      <section className="dk-set-card">
+        <SettingRow label="运行环境">
+          <code className="dk-set-code">{runtimeLabel ?? '—'}</code>
+        </SettingRow>
+        <SettingRow label="自定义整理规则" description="用于智能整理的本机规则">
+          <span className="dk-set-value">{ruleCount} 条</span>
+          <button type="button" className="dk-btn sm" onClick={onOpenRules}>管理</button>
+        </SettingRow>
+      </section>
+    </>
+  );
 }
 
 /**
@@ -315,37 +392,142 @@ function DataDirRow() {
   if (!supported) return null;
 
   return (
-    <div className="desktop-settings-row">
-      <div>
-        <strong>数据目录</strong>
-      </div>
-      <div className="desktop-settings-location">
-        <div className="desktop-settings-location-main">
-          <code className="desktop-settings-path">{dir ?? '读取中…'}</code>
-        </div>
-      </div>
-    </div>
+    <SettingRow
+      label="数据目录"
+      description={<code className="dk-set-code is-path" title={dir ?? undefined}>{dir ?? '读取中…'}</code>}
+    />
   );
 }
 
-const LEVEL_LABELS: ReadonlyArray<[LogLevel, string]> = [
-  ['debug', '调试（最详细）'],
+/* ===== 查看器 ===== */
+
+function ViewerPanel({
+  rawViewMode,
+  onRawViewModeChange,
+}: {
+  rawViewMode: DesktopRawViewMode;
+  onRawViewModeChange: (mode: DesktopRawViewMode) => void;
+}) {
+  // RAW 查看模式:仅 Electron 桥存在时可切换(Web/Android 平台固定)。
+  const canSwitchRaw = typeof window !== 'undefined' && Boolean(window.kanitsuDesktop);
+  return (
+    <section className="dk-set-card">
+      <h3 className="dk-set-card-title">RAW 显示</h3>
+      {canSwitchRaw ? (
+        <SettingRow label="RAW 观感" description="显影 = 完整解码渲染；直出 = 相机内嵌预览">
+          <Segmented<DesktopRawViewMode>
+            label="RAW 观感"
+            options={[{ value: 'developed', content: '显影' }, { value: 'camera', content: '直出' }]}
+            value={rawViewMode}
+            onChange={onRawViewModeChange}
+          />
+        </SettingRow>
+      ) : (
+        <SettingRow label="RAW 观感" description="仅桌面端可切换；当前平台使用固定的显示方式。" />
+      )}
+    </section>
+  );
+}
+
+/* ===== 快捷键 ===== */
+
+function ShortcutsPanel() {
+  return (
+    <>
+      {DESKTOP_SHORTCUTS.map((group) => (
+        <section key={group.title} className="dk-set-card">
+          <h3 className="dk-set-card-title">{group.title}</h3>
+          <dl className="dk-set-keys">
+            {group.items.map((item) => (
+              <div key={item.label} className="dk-set-keys-row">
+                <dt>{item.label}</dt>
+                <dd>
+                  {item.keys.map((key) => (
+                    <kbd key={key} className="dk-kbd">{key}</kbd>
+                  ))}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+      ))}
+    </>
+  );
+}
+
+/* ===== 关于 ===== */
+
+function AboutPanel({ runtimeLabel }: { runtimeLabel?: string }) {
+  const version = window.kanitsuDesktop?.version;
+  return (
+    <section className="dk-set-card">
+      <SettingRow label="Kanitsu" description={runtimeLabel === 'Electron' ? '本地图片管理与查看 · Windows 版' : '本地图片管理与查看'} />
+      <SettingRow label="版本">
+        <code className="dk-set-code">{version ? `v${version}` : '—'}</code>
+      </SettingRow>
+      <SettingRow label="运行环境">
+        <code className="dk-set-code">{runtimeLabel ?? '—'}</code>
+      </SettingRow>
+      <SettingRow label="离线" description="默认不联网、不上传、不遥测图片内容">
+        <CheckCircle size={18} weight="fill" className="dk-set-ok" role="img" aria-label="已启用" />
+      </SettingRow>
+      <SettingRow label="副本隔离" description="导入后不修改源文件夹">
+        <CheckCircle size={18} weight="fill" className="dk-set-ok" role="img" aria-label="已启用" />
+      </SettingRow>
+    </section>
+  );
+}
+
+/* ===== 诊断 ===== */
+
+const LEVEL_LABELS: ReadonlyArray<readonly [LogLevel, string]> = [
+  ['debug', '调试'],
   ['info', '信息'],
   ['warn', '警告'],
   ['error', '仅错误'],
 ];
 
-/** 调试面板：选项（日志等级 / 预取开关）+ 主进程日志 + 渲染端日志。 */
+/** 主进程多级队列的档位名，与 thumbnailCache.ts 的 THUMB_PRIORITY_* 一一对应。 */
+const QUEUE_PRIORITY_LABELS = ['可见', '滚动方向', '当前目录', '子文件夹', '预热'];
+
+/** 帧率折线保留的样本数：监测器约 500ms 回调一次，60 个 ≈ 最近 30 秒。 */
+const FPS_HISTORY = 60;
+
+/** 主进程缩略图统计（仅 Electron）：打开期间每秒刷新，面板卸载即停止。 */
+function useMainThumbnailStats(): ThumbnailDebugStats | null {
+  const [mainStats, setMainStats] = useState<ThumbnailDebugStats | null>(null);
+  useEffect(() => {
+    const refresh = (): void => {
+      void window.kanitsuDesktop
+        ?.getThumbnailDebugStats?.()
+        .then((stats) => setMainStats(stats))
+        .catch(() => setMainStats(null));
+    };
+    refresh();
+    const timer = setInterval(refresh, 1000);
+    return () => clearInterval(timer);
+  }, []);
+  return mainStats;
+}
+
+/** 诊断面板：帧率 + 缩略图队列 + 调试选项（日志等级 / 预取开关）+ 主进程日志 + 渲染端日志。 */
 function DebugPanel() {
   const [level, setLevel] = useState<LogLevel>(() => getLogLevelPref());
   const [prefetch, setPrefetch] = useState<boolean>(() => isPrefetchEnabled());
   const [logs, setLogs] = useState<readonly LogEntry[]>(() => getDebugLogs());
   const [mainLogs, setMainLogs] = useState<string[]>([]);
   const [fps, setFps] = useState<FpsStats | null>(null);
+  const [fpsHistory, setFpsHistory] = useState<number[]>([]);
+  const mainStats = useMainThumbnailStats();
 
-  // 调试面板打开期间运行帧率监测（关闭自动停止，避免常驻开销）。
+  // 诊断面板打开期间运行帧率监测（关闭自动停止，避免常驻开销）。
   useEffect(() => {
-    startFpsMonitor(setFps);
+    startFpsMonitor((stats) => {
+      setFps(stats);
+      if (stats.totalFrames > 0) {
+        setFpsHistory((prev) => [...prev.slice(-(FPS_HISTORY - 1)), stats.fps]);
+      }
+    });
     return () => stopFpsMonitor();
   }, []);
 
@@ -378,120 +560,132 @@ function DebugPanel() {
     setMainLogs(lines);
   };
 
-  const fmtTime = (t: number): string => new Date(t).toLocaleTimeString('zh-CN', { hour12: false });
+  const handleResetFps = (): void => {
+    resetFpsMonitor();
+    setFpsHistory([]);
+  };
+
+  // 折线高度以 60fps 为基准，高刷屏按实测最大值放大，避免柱子顶格。
+  const sparkMax = Math.max(60, ...fpsHistory);
 
   return (
-    <div className="flex flex-col gap-4">
-      <section className="rounded-box border border-base-300 bg-base-200/50 p-5">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-semibold">帧率与滚动性能</h3>
-          <button className="btn btn-ghost btn-xs shrink-0" onClick={resetFpsMonitor}>重置</button>
+    <>
+      <section className="dk-set-card">
+        <div className="dk-set-card-head">
+          <h3 className="dk-set-card-title">帧率与滚动性能</h3>
+          <button type="button" className="dk-btn sm ghost" onClick={handleResetFps}>重置</button>
         </div>
-        <p className="text-xs opacity-60 mb-2">
-          rAF 帧间隔统计（最近 1s）：掉帧 &gt;33.3ms、卡顿帧 &gt;50ms。滚动回调耗时为 JS
-          调度侧开销（窗口计算/状态更新）；渲染/绘画细账以 DevTools Performance 为准。
-        </p>
-        {fps && fps.totalFrames > 0 ? (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-sm">
-            <div className="stat"><span className="stat-title">当前帧率</span><span className="stat-value text-lg text-primary">{fps.fps.toFixed(0)} fps</span></div>
-            <div className="stat"><span className="stat-title">平均帧间隔</span><span className="stat-value text-lg">{fps.avgFrameMs.toFixed(1)} ms</span></div>
-            <div className="stat"><span className="stat-title">p95 帧间隔</span><span className="stat-value text-lg">{fps.p95FrameMs.toFixed(1)} ms</span></div>
-            <div className="stat"><span className="stat-title">最大帧间隔</span><span className="stat-value text-lg">{fps.maxFrameMs.toFixed(0)} ms</span></div>
-            <div className="stat"><span className="stat-title">掉帧(1s)</span><span className={`stat-value text-lg ${fps.dropped > 0 ? 'text-error' : ''}`}>{fps.dropped}</span></div>
-            <div className="stat"><span className="stat-title">卡顿帧(1s)</span><span className={`stat-value text-lg ${fps.jankFrames > 0 ? 'text-error' : ''}`}>{fps.jankFrames}</span></div>
-            <div className="stat"><span className="stat-title">累计掉帧</span><span className="stat-value text-lg">{fps.totalDropped}</span></div>
-            <div className="stat"><span className="stat-title">滚动回调</span><span className="stat-value text-lg">{fps.scrollSamples > 0 ? `${fps.scrollAvgMs.toFixed(1)} ms` : '—'}</span></div>
-            <div className="stat"><span className="stat-title">滚动写入/秒</span><span className="stat-value text-lg">{fps.scrollWrites}</span></div>
+        <div className="dk-set-usage">
+          <div className="dk-set-usage-head">
+            <b>帧率 · 最近 30 秒</b>
+            <span>
+              {fps && fps.totalFrames > 0
+                ? `当前 ${fps.fps.toFixed(0)} fps · 累计掉帧 ${fps.totalDropped}`
+                : '采集第一帧中…（滚动几下后查看）'}
+            </span>
+          </div>
+          <div className="dk-set-spark" aria-hidden="true">
+            {fpsHistory.map((value, i) => (
+              <i
+                key={i}
+                className={value < 30 ? 'is-low' : undefined}
+                style={{ height: `${Math.max(2, Math.min(100, (value / sparkMax) * 100))}%` }}
+              />
+            ))}
+          </div>
+        </div>
+        {fps && fps.totalFrames > 0 && (
+          <div className="dk-set-stats">
+            <Stat label="当前帧率" value={`${fps.fps.toFixed(0)} fps`} accent />
+            <Stat label="平均帧间隔" value={`${fps.avgFrameMs.toFixed(1)} ms`} />
+            <Stat label="p95 帧间隔" value={`${fps.p95FrameMs.toFixed(1)} ms`} />
+            <Stat label="最大帧间隔" value={`${fps.maxFrameMs.toFixed(0)} ms`} />
+            <Stat label="掉帧(1s)" value={fps.dropped} danger={fps.dropped > 0} />
+            <Stat label="卡顿帧(1s)" value={fps.jankFrames} danger={fps.jankFrames > 0} />
+            <Stat label="累计掉帧" value={fps.totalDropped} />
+            <Stat label="滚动回调" value={fps.scrollSamples > 0 ? `${fps.scrollAvgMs.toFixed(1)} ms` : '—'} />
             {fps.scrollSamples > 0 && (
               <>
-                <div className="stat"><span className="stat-title">滚动回调 p95</span><span className="stat-value text-lg">{fps.scrollP95Ms.toFixed(1)} ms</span></div>
-                <div className="stat"><span className="stat-title">滚动回调峰值</span><span className="stat-value text-lg">{fps.scrollMaxMs.toFixed(1)} ms</span></div>
-                <div className="stat"><span className="stat-title">样本</span><span className="stat-value text-lg">{fps.scrollSamples}</span></div>
+                <Stat label="滚动回调 p95" value={`${fps.scrollP95Ms.toFixed(1)} ms`} />
+                <Stat label="滚动回调峰值" value={`${fps.scrollMaxMs.toFixed(1)} ms`} />
+                <Stat label="样本" value={fps.scrollSamples} />
               </>
             )}
           </div>
-        ) : (
-          <div className="text-sm opacity-60">采集第一帧中…（滚动几下后查看）</div>
         )}
+        <p className="dk-set-note">
+          rAF 帧间隔统计（最近 1s）：掉帧 &gt;33.3ms、卡顿帧 &gt;50ms。滚动回调耗时为 JS
+          调度侧开销（窗口计算/状态更新）；渲染/绘画细账以 DevTools Performance 为准。
+        </p>
       </section>
 
-      <section className="rounded-box border border-base-300 bg-base-200/50 p-5">
-        <h2 className="text-base font-semibold mb-3">调试选项</h2>
-        <div className="flex flex-col gap-3 text-sm">
-          <label className="flex items-center justify-between gap-3">
-            <span>
-              日志等级
-              <span className="block text-xs opacity-60">控制台与主进程日志的详细程度（含缩略图命中/未命中/队列状态）。</span>
-            </span>
-            <select
-              className="select select-sm select-bordered shrink-0"
-              value={level}
-              onChange={(e) => setLevel(e.target.value as LogLevel)}
-            >
-              {LEVEL_LABELS.map(([v, label]) => (
-                <option key={v} value={v}>{label}</option>
-              ))}
-            </select>
-          </label>
-          <label className="flex items-center justify-between gap-3">
-              <span>
-                后台预取
-                <span className="block text-xs opacity-60">
-                  空闲时生成全库缩略图，并预取下一屏与少量子图包；滚动期间自动暂停后台任务。
-                </span>
-            </span>
-            <input
-              type="checkbox"
-              className="toggle toggle-sm shrink-0"
-              checked={prefetch}
-              onChange={(e) => setPrefetch(e.target.checked)}
-            />
-          </label>
-        </div>
+      <section className="dk-set-card">
+        <SettingRow
+          label="缩略图队列"
+          description={mainStats
+            ? `队列积压（按优先级）：${mainStats.queuedByPriority
+              .map((count, i) => `${QUEUE_PRIORITY_LABELS[i] ?? `P${i}`} ${count}`)
+              .join(' · ')}`
+            : 'Web/演示模式无主进程数据；Electron 模式请确认应用已重启加载最新构建。'}
+        >
+          {mainStats && (
+            <code className="dk-set-code">解码中 {mainStats.inFlight} · worker {mainStats.workers}</code>
+          )}
+        </SettingRow>
       </section>
 
-      <section className="rounded-box border border-base-300 bg-base-200/50 p-5">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-semibold">主进程日志（UTF-8 文件，含时间/等级）</h3>
-          <button className="btn btn-ghost btn-xs shrink-0" onClick={() => void refreshMainLogs()}>
-            读取
-          </button>
+      <section className="dk-set-card">
+        <h3 className="dk-set-card-title">调试选项</h3>
+        <SettingRow
+          label="日志等级"
+          description="控制台与主进程日志的详细程度（调试最详细，含缩略图命中/未命中/队列状态）。"
+        >
+          <Segmented<LogLevel> label="日志等级" options={LEVEL_LABELS.map(([value, content]) => ({ value, content }))} value={level} onChange={setLevel} />
+        </SettingRow>
+        <SettingRow
+          label="后台预取"
+          description="空闲时生成全库缩略图，并预取下一屏与少量子图包；滚动期间自动暂停后台任务。"
+        >
+          <Switch checked={prefetch} onChange={setPrefetch} label="后台预取" />
+        </SettingRow>
+      </section>
+
+      <section className="dk-set-card">
+        <div className="dk-set-card-head">
+          <h3 className="dk-set-card-title">主进程日志（UTF-8 文件，含时间/等级）</h3>
+          <button type="button" className="dk-btn sm" onClick={() => void refreshMainLogs()}>读取</button>
         </div>
-        <p className="text-xs opacity-60 mb-2">位于 userData/logs/kanitsu-日期.log；乱码时以此为准（控制台可能受系统代码页影响）。</p>
-        <div className="max-h-48 overflow-y-auto">
+        <p className="dk-set-note">位于 userData/logs/kanitsu-日期.log；乱码时以此为准（控制台可能受系统代码页影响）。</p>
+        <div className="dk-set-log-box is-short">
           {mainLogs.length === 0 ? (
-            <div className="text-sm opacity-60 py-2">暂无主进程日志。</div>
+            <div className="dk-set-log-empty">暂无主进程日志。</div>
           ) : (
-            <pre className="text-[11px] font-mono whitespace-pre-wrap break-all leading-4">{mainLogs.join('\n')}</pre>
+            <pre className="dk-set-log-pre">{mainLogs.join('\n')}</pre>
           )}
         </div>
       </section>
 
-      <section className="rounded-box border border-base-300 bg-base-200/50 p-5">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-semibold">最近日志（渲染端，{logs.length}）</h3>
-          <div className="flex gap-2 shrink-0">
-            <button className="btn btn-ghost btn-xs" onClick={() => void copyLogs()}>复制</button>
-            <button className="btn btn-ghost btn-xs" onClick={() => clearDebugLogs()}>
-              清空
-            </button>
+      <section className="dk-set-card">
+        <div className="dk-set-card-head">
+          <h3 className="dk-set-card-title">最近日志（渲染端，{logs.length}）</h3>
+          <div className="dk-set-actions">
+            <button type="button" className="dk-btn sm" onClick={() => void copyLogs()}>复制</button>
+            <button type="button" className="dk-btn sm" onClick={() => clearDebugLogs()}>清空</button>
           </div>
         </div>
-        <div className="max-h-72 overflow-y-auto">
+        <div className="dk-set-log-box">
           {logs.length === 0 ? (
-            <div className="text-sm opacity-60 py-2">暂无日志；切换文件夹/打开大目录后会有目录切换与预取事件。</div>
+            <div className="dk-set-log-empty">暂无日志；切换文件夹/打开大目录后会有目录切换与预取事件。</div>
           ) : (
-            <table className="table table-sm">
+            <table className="dk-set-log-table">
               <tbody>
                 {[...logs].slice(-100).map((entry, i) => (
-                  <tr key={i} className="align-top">
-                    <td className="text-[10px] opacity-50 whitespace-nowrap font-mono">{fmtTime(entry.time)}</td>
-                    <td className="text-[10px] font-mono">
-                      <span className={`badge badge-sm ${entry.level === 'error' ? 'badge-error' : entry.level === 'warn' ? 'badge-warning' : 'badge-ghost'}`}>
-                        {entry.tag}
-                      </span>
+                  <tr key={i}>
+                    <td className="is-time">{formatLogTime(entry.time)}</td>
+                    <td>
+                      <span className={`dk-set-tag is-${entry.level}`}>{entry.tag}</span>
                     </td>
-                    <td className="text-xs whitespace-pre-wrap break-all">{entry.message}</td>
+                    <td className="is-message">{entry.message}</td>
                   </tr>
                 ))}
               </tbody>
@@ -499,24 +693,39 @@ function DebugPanel() {
           )}
         </div>
       </section>
+    </>
+  );
+}
+
+function Stat({
+  label,
+  value,
+  accent = false,
+  danger = false,
+}: {
+  label: string;
+  value: ReactNode;
+  accent?: boolean;
+  danger?: boolean;
+}) {
+  return (
+    <div className={`dk-set-stat${accent ? ' is-accent' : ''}${danger ? ' is-danger' : ''}`}>
+      <span>{label}</span>
+      <b>{value}</b>
     </div>
   );
 }
 
-/** 缓存面板：缓存统计（渲染端/主进程/磁盘）+ 清除缓存。 */
+/* ===== 缓存 ===== */
+
+/** 缓存面板：渲染端内存缓存 + 主进程内存/磁盘缓存 + 清除缓存。 */
 function CachePanel() {
   const [renderer, setRenderer] = useState<RendererThumbnailStats>(() => getRendererThumbnailStats());
-  const [mainStats, setMainStats] = useState<ThumbnailDebugStats | null>(null);
+  const mainStats = useMainThumbnailStats();
   const [clearResult, setClearResult] = useState('');
 
   useEffect(() => {
-    const refresh = (): void => {
-      setRenderer(getRendererThumbnailStats());
-      void window.kanitsuDesktop
-        ?.getThumbnailDebugStats?.()
-        .then((stats) => setMainStats(stats))
-        .catch(() => setMainStats(null));
-    };
+    const refresh = (): void => setRenderer(getRendererThumbnailStats());
     refresh();
     const timer = setInterval(refresh, 1000);
     return () => clearInterval(timer);
@@ -525,8 +734,9 @@ function CachePanel() {
   const handleClearRendererCache = (): void => {
     const before = getRendererThumbnailStats();
     clearThumbnailCache();
+    setRenderer(getRendererThumbnailStats());
     setClearResult(
-      `渲染端内存缓存已清空（此前 ${before.entries} 条 / ${fmtBytes(before.bytes)}）；` +
+      `渲染端内存缓存已清空（此前 ${before.entries} 条 / ${formatBytes(before.bytes)}）；` +
         '重新浏览时将重新生成（磁盘缓存仍在则直接读盘）。',
     );
   };
@@ -538,7 +748,7 @@ function CachePanel() {
       return;
     }
     setClearResult(
-      `主进程缓存已清空：内存 ${result.memoryEntries} 条 / ${fmtBytes(result.memoryBytes)}；磁盘 ${result.diskFiles} 个文件 / ${fmtBytes(result.diskBytes)}。`,
+      `主进程缓存已清空：内存 ${result.memoryEntries} 条 / ${formatBytes(result.memoryBytes)}；磁盘 ${result.diskFiles} 个文件 / ${formatBytes(result.diskBytes)}。`,
     );
   };
 
@@ -546,48 +756,54 @@ function CachePanel() {
     renderer.requests > 0 ? Math.round((renderer.cacheHits / renderer.requests) * 100) : 0;
 
   return (
-    <div className="flex flex-col gap-4">
-      <section className="rounded-box border border-base-300 bg-base-200/50 p-5">
-        <h3 className="text-sm font-semibold mb-3">渲染端缩略图缓存</h3>
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-sm">
-          <div className="stat"><span className="stat-title">条目</span><span className="stat-value text-lg">{renderer.entries}</span></div>
-          <div className="stat"><span className="stat-title">占用</span><span className="stat-value text-lg">{fmtBytes(renderer.bytes)}</span></div>
-          <div className="stat"><span className="stat-title">容量上限</span><span className="stat-value text-lg">{fmtBytes(renderer.maxBytes)}</span></div>
-          <div className="stat"><span className="stat-title">请求 / 命中</span><span className="stat-value text-lg">{renderer.requests} / {renderer.cacheHits}</span></div>
-          <div className="stat"><span className="stat-title">命中率</span><span className="stat-value text-lg">{hitRate}%</span></div>
-          <div className="stat"><span className="stat-title">未命中</span><span className="stat-value text-lg">{renderer.cacheMisses}</span></div>
-          <div className="stat"><span className="stat-title">预取已排</span><span className="stat-value text-lg">{renderer.prefetchScheduled}</span></div>
-          <div className="stat"><span className="stat-title">预取完成</span><span className="stat-value text-lg">{renderer.prefetchCompleted}</span></div>
-          <div className="stat"><span className="stat-title">预取失败</span><span className="stat-value text-lg">{renderer.prefetchFailed}</span></div>
+    <>
+      <section className="dk-set-card">
+        <h3 className="dk-set-card-title">渲染端缩略图缓存</h3>
+        <SettingRow
+          label="内存缓存"
+          description={`会话级 LRU · 上限 ${formatBytes(renderer.maxBytes)} · 命中率 ${hitRate}%`}
+        >
+          <code className="dk-set-code">{formatBytes(renderer.bytes)}</code>
+          <button type="button" className="dk-btn sm" onClick={handleClearRendererCache}>清除渲染端</button>
+        </SettingRow>
+        <div className="dk-set-stats">
+          <Stat label="条目" value={renderer.entries} />
+          <Stat label="占用" value={formatBytes(renderer.bytes)} />
+          <Stat label="容量上限" value={formatBytes(renderer.maxBytes)} />
+          <Stat label="请求 / 命中" value={`${renderer.requests} / ${renderer.cacheHits}`} />
+          <Stat label="命中率" value={`${hitRate}%`} />
+          <Stat label="未命中" value={renderer.cacheMisses} />
+          <Stat label="预取已排" value={renderer.prefetchScheduled} />
+          <Stat label="预取完成" value={renderer.prefetchCompleted} />
+          <Stat label="预取失败" value={renderer.prefetchFailed} />
         </div>
       </section>
 
-      <section className="rounded-box border border-base-300 bg-base-200/50 p-5">
-        <h3 className="text-sm font-semibold mb-3">主进程缩略图表（Electron）</h3>
+      <section className="dk-set-card">
+        <h3 className="dk-set-card-title">主进程缩略图缓存（Electron）</h3>
         {mainStats ? (
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-sm">
-            <div className="stat"><span className="stat-title">队列积压(按优先级)</span><span className="stat-value text-lg">{mainStats.queuedByPriority.join(' / ')}</span></div>
-            <div className="stat"><span className="stat-title">解码中</span><span className="stat-value text-lg">{mainStats.inFlight}</span></div>
-            <div className="stat"><span className="stat-title">worker 数</span><span className="stat-value text-lg">{mainStats.workers}</span></div>
-            <div className="stat"><span className="stat-title">主进程缓存条目</span><span className="stat-value text-lg">{mainStats.thumbCacheEntries}</span></div>
-            <div className="stat"><span className="stat-title">主进程缓存</span><span className="stat-value text-lg">{fmtBytes(mainStats.thumbCacheBytes)}</span></div>
-            <div className="stat"><span className="stat-title">磁盘缓存文件</span><span className="stat-value text-lg">{mainStats.diskFiles}</span></div>
-          </div>
+          <>
+            <SettingRow label="主进程内存缓存" description={`${mainStats.thumbCacheEntries} 个缓存条目`}>
+              <code className="dk-set-code">{formatBytes(mainStats.thumbCacheBytes)}</code>
+            </SettingRow>
+            <SettingRow label="磁盘缓存" description="缩略图磁盘缓存文件数">
+              <code className="dk-set-code">{mainStats.diskFiles} 个文件</code>
+            </SettingRow>
+          </>
         ) : (
-          <div className="text-sm opacity-60">Web/演示模式无主进程数据；Electron 模式请确认应用已重启加载最新构建。</div>
+          <SettingRow
+            label="主进程缓存"
+            description="Web/演示模式无主进程数据；Electron 模式请确认应用已重启加载最新构建。"
+          />
         )}
+        <SettingRow label="清除主进程缓存" description="内存 + 磁盘；重新浏览时会重新生成（测试用）">
+          <button type="button" className="dk-btn sm" onClick={() => void handleClearMainCache()}>
+            清除主进程（内存+磁盘）
+          </button>
+        </SettingRow>
       </section>
 
-      <section className="rounded-box border border-base-300 bg-base-200/50 p-5">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-semibold">清除缓存（测试用）</h3>
-          <div className="flex gap-2 shrink-0">
-            <button className="btn btn-ghost btn-xs" onClick={handleClearRendererCache}>清除渲染端</button>
-            <button className="btn btn-ghost btn-xs" onClick={() => void handleClearMainCache()}>清除主进程（内存+磁盘）</button>
-          </div>
-        </div>
-        {clearResult && <p className="text-xs opacity-70 break-all">{clearResult}</p>}
-      </section>
-    </div>
+      {clearResult && <p className="dk-set-result" role="status">{clearResult}</p>}
+    </>
   );
 }

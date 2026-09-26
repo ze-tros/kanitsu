@@ -49,13 +49,6 @@ export function setPrefetchEnabled(enabled: boolean): void {
   }
 }
 
-/** 可插拔外部 sink（移动端落盘/上报用）；有则每条日志同步投递。 */
-let externalSink: ((entry: LogEntry) => void) | null = null;
-
-export function setDebugLogSink(fn: ((entry: LogEntry) => void) | null): void {
-  externalSink = fn;
-}
-
 export function logDebug(tag: string, message: string, level: LogLevel = 'info'): void {
   const entry: LogEntry = { time: Date.now(), level, tag, message };
   logs.push(entry);
@@ -65,7 +58,6 @@ export function logDebug(tag: string, message: string, level: LogLevel = 'info')
     // eslint-disable-next-line no-console
     console.debug(formatLogLine(level, tag, message));
   }
-  externalSink?.(entry);
 }
 
 export function getDebugLogs(): readonly LogEntry[] {

@@ -18,7 +18,7 @@ import {
   renameGroup,
   ruleOptions,
   type PlannedBinding,
-} from './organizePlan';
+} from '../organizePlan';
 import { Z_SETTINGS } from './zindex';
 
 const RULE_ICONS: Record<string, MobileIconName> = {

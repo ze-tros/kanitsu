@@ -95,40 +95,6 @@ export function useExifInfo(store: LibraryStore, image: ImageEntry | null, enabl
   return state;
 }
 
-/**
- * EXIF 拍摄参数行。行结构 `<div><span /><strong /></div>` 与
- * `.desktop-data-list` / `.viewer-info` 的数据行一致，可直接当子节点用。
- */
-export function ExifRows({ state }: { state: ExifState }): JSX.Element | null {
-  if (state.status === 'idle') return null;
-  if (state.status === 'loading') {
-    return (
-      <div>
-        <span />
-        <strong>读取中…</strong>
-      </div>
-    );
-  }
-  if (state.rows.length === 0) {
-    return (
-      <div>
-        <span />
-        <strong>无 EXIF 信息</strong>
-      </div>
-    );
-  }
-  return (
-    <>
-      {state.rows.map((row) => (
-        <div key={row.label}>
-          <span>{row.label}</span>
-          <strong title={row.value}>{row.value}</strong>
-        </div>
-      ))}
-    </>
-  );
-}
-
 /** 全部 EXIF 标签（检查器展开查看用）。 */
 export function ExifFieldList({ fields }: { fields: ExifField[] }): JSX.Element {
   return (

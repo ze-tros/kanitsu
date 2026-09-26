@@ -8,7 +8,7 @@ import {
   pruneImportedAt,
   recordRecentBrowse,
   resolveContinueItems,
-} from '../src/mobile/browseHistory';
+} from '../src/browseHistory';
 
 function folder(id: string, parentId: string | null, relPath: string): FolderNode {
   return { id, parentId, name: relPath.split('/').pop() || '图库', relPath, imageCount: 0, directImageCount: 0, childCount: 0 };

@@ -9,7 +9,7 @@ import { useState } from 'react';
 import type { ImportTask, OrganizeConflict } from '../../../core/src/index';
 import { MobileIcon, type MobileIconName } from './mobileIcons';
 import { conflictReasonLabel, skippedReasonLabel } from './mobileShared';
-import { formatRelativeTime } from './browseHistory';
+import { formatRelativeTime } from '../browseHistory';
 import { Z_SETTINGS } from './zindex';
 
 export type MobileTaskKind = 'import' | 'organize' | 'export' | 'delete' | 'move';

@@ -1,30 +1,27 @@
 /* ============================================================================
-   Kanitsu studio design tokens — single source of truth.
+   Kanitsu 设计 token（颜色、圆角、字体、阴影）的唯一来源。
 
-   styles.css imports this file into the `kanitsu-tokens` layer, which is
-   declared after Tailwind's and daisyUI's layers, so these values win over
-   the daisyUI theme variables on the same element while remaining pure
-   token definitions.
+   styles.css 把本文件导入 kanitsu-tokens 层，该层排在 Tailwind 与 daisyUI 之后，
+   同一元素上这里的值优先于 daisyUI 主题变量。
 
-   Layout of this file:
-     1. :root                      — dark (default) studio palette + daisyUI bridge
-     2. html[data-theme="light"]   — warm paper palette
-     3. html[data-accent=...]      — accent palettes (coral is the base, no block needed)
-     4. light × accent             — per-accent light overrides
+   文件结构：
+     1. :root                      —— 深色（默认）配色 + daisyUI 桥接
+     2. html[data-theme="light"]   —— 浅色（暖纸）配色
+     3. html[data-accent=...]      —— 强调色（coral 为基准，无需单独一段）
+     4. 浅色 × 强调色              —— 各强调色的浅色覆盖
 
-   The `--color-*` variables at the end of :root are a BRIDGE for the daisyUI
-   components still in use (modal/drawer/btn/input): they resolve to the studio
-   palette document-wide, including React portals mounted outside
-   .desktop-library. `.mobile-studio` re-bridges the same variables to --m-*.
+   :root 末尾的 --color-* 是给 daisyUI 组件的桥接（桌面端已不用 daisyUI 组件，
+   目前只有移动端封面选择的 modal 等还在用），`.mobile-studio` 会把它们重新桥接到 --m-*。
    =========================================================================== */
 
 :root {
   --desktop-font-sans: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif;
   --desktop-font-display: "Segoe UI Variable Display", "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif;
+  --desktop-font-mono: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
   --desktop-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --desktop-ease-standard: cubic-bezier(0.2, 0, 0, 1);
 
-  /* Ink black + warm paper + single coral accent. */
+  /* 墨黑底 + 暖纸面 + 单一珊瑚强调色。 */
   --desktop-app: #111112;
   --desktop-canvas: #121213;
   --desktop-surface-1: #18181a;
@@ -41,7 +38,7 @@
   --desktop-radius-control: 9px;
   --desktop-radius-tight: 6px;
   --desktop-titlebar-height: 46px;
-  --desktop-inspector-width: 280px;
+  --desktop-inspector-width: 300px;
   --desktop-accent-fill: #ff785e;
   --desktop-accent-ink: #241411;
   --desktop-accent-text: #ff9b89;
@@ -49,10 +46,15 @@
   --desktop-accent-line: rgba(255, 120, 94, .42);
   --desktop-danger: #ff8f82;
   --desktop-danger-soft: rgba(255, 105, 92, .13);
+  --desktop-danger-ink: #241411;
+  --desktop-warn: #e2ad55;
   --desktop-shadow-raised: 0 18px 45px rgba(0, 0, 0, .23);
   --desktop-shadow-dialog: 0 30px 90px rgba(0, 0, 0, .5);
+  --desktop-shadow-pop: 0 14px 38px rgba(0, 0, 0, .45), 0 0 0 1px var(--desktop-line-strong);
+  --desktop-scrim: rgba(0, 0, 0, .5);
+  --desktop-ok: #7fcf9a;
 
-  /* daisyUI bridge — desktop values; .mobile-studio overrides with --m-*. */
+  /* daisyUI 桥接：桌面取值；.mobile-studio 用 --m-* 覆盖。 */
   --color-primary: var(--desktop-accent-fill);
   --color-primary-content: var(--desktop-accent-ink);
   --color-base-100: var(--desktop-surface-1);
@@ -60,12 +62,10 @@
   --color-base-300: var(--desktop-surface-3);
   --color-base-content: var(--desktop-text);
   --color-error: var(--desktop-danger);
-  --color-error-content: #241411;
+  --color-error-content: var(--desktop-danger-ink);
 }
 
-/* Warm paper. danger/shadow intentionally stay at the dark-theme values:
-   that is what the library surface resolves today; revisit as a design
-   change, not inside a token refactor. */
+/* 浅色（暖纸）主题。危险色单独加深：深色主题的 #ff8f82 在浅底上对比度只有约 2:1。 */
 html[data-theme="light"] {
   --desktop-app: #e9ebee;
   --desktop-canvas: #f1f3f5;
@@ -84,6 +84,13 @@ html[data-theme="light"] {
   --desktop-accent-text: #a84437;
   --desktop-accent-soft: rgba(196, 84, 68, .12);
   --desktop-accent-line: rgba(196, 84, 68, .35);
+  --desktop-shadow-pop: 0 14px 38px rgba(30, 36, 46, .18), 0 0 0 1px var(--desktop-line-strong);
+  --desktop-scrim: rgba(20, 24, 30, .32);
+  --desktop-ok: #2f8a52;
+  --desktop-danger: #c23b2f;
+  --desktop-danger-soft: rgba(194, 59, 47, .1);
+  --desktop-danger-ink: #fff;
+  --desktop-warn: #94620e;
 }
 
 html[data-accent="cobalt"] {

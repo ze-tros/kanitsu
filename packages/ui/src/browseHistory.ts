@@ -1,5 +1,5 @@
 /**
- * 移动端本机浏览记录（纯逻辑 + localStorage 持久化，不上传）。
+ * 本机浏览记录，桌面与移动端共用（纯逻辑 + localStorage 持久化，不上传）。
  *
  * - 继续浏览：每个图包记住上次在查看器里停留的图片 id。位置按图片 id 而不是序号
  *   记录，图片被删除、整理到别处后自动失效，不会把用户带到错误的图上。
@@ -8,8 +8,8 @@
  * 键使用 folderId（由 relPath 派生，重扫稳定）；图包被重命名/删除后记录自然失效，
  * 由 prune* 在快照更新时清理。
  */
-import type { LibrarySnapshot } from '../../../core/src/index';
-import { imagesOf } from '../../../core/src/index';
+import type { LibrarySnapshot } from '../../core/src/index';
+import { imagesOf } from '../../core/src/index';
 
 export interface RecentBrowseEntry {
   folderId: string;
