@@ -190,7 +190,10 @@ button.dk-sw { padding: 0; }
 .dk-store .dk-row b { color: var(--desktop-text-soft); font-weight: 600; }
 
 .dk-main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--desktop-canvas); position: relative; }
-.dk-main-scroll { flex: 1; min-height: 0; position: relative; outline: 0; }
+/* 列布局：末尾的图包/图片区（.dk-grid-area flex:1 0 auto）吸收视口剩余空间——内容不满
+   一屏时正好填满、不出滚动条；超出一屏时各段不收缩（> * 禁 shrink）、正常滚动。 */
+.dk-main-scroll { flex: 1; min-height: 0; position: relative; outline: 0; display: flex; flex-direction: column; }
+.dk-main-scroll > * { flex-shrink: 0; }
 .dk-status { height: 30px; flex: none; display: flex; align-items: center; gap: 14px; padding: 0 10px 0 18px; border-top: 1px solid var(--desktop-line); font-size: 12px; color: var(--desktop-muted); background: var(--desktop-canvas); white-space: nowrap; }
 .dk-status .dk-sep { width: 1px; height: 14px; background: var(--desktop-line-strong); }
 .dk-status .dk-sel-text { color: var(--desktop-accent-text); }
@@ -308,7 +311,10 @@ button.dk-sw { padding: 0; }
 .dk-itb h2 small { color: var(--desktop-muted); font-weight: 400; margin-left: 5px; font-size: 12.5px; }
 
 /* 图片卡片：网格为正方形，按原比例时媒体高度由布局内联给出。 */
-.dk-grid-area { position: relative; padding: 4px 32px 90px; min-height: 60%; user-select: none; }
+.dk-grid-area { position: relative; padding: 4px 32px 12px; flex: 1 0 auto; user-select: none; }
+/* 占地贴住内容：底部只留少量呼吸空隙。90px 的多选浮条避让改为选中时才加
+   （浮条 absolute 悬浮在底部 44px，需要约 58px 净空），未选中时不再常年多出一段占地。 */
+.dk-root:has(.dk-selbar) .dk-grid-area { padding-bottom: 76px; }
 .dk-grid-area.list { padding-top: 0; }
 .dk-thumb { position: relative; aspect-ratio: 1; border-radius: var(--dk-rad, 9px); overflow: hidden; background: var(--desktop-surface-2); }
 .dk-thumb .dk-fr { position: absolute; inset: 0; overflow: hidden; border-radius: inherit; transition: inset .16s var(--desktop-ease-standard), border-radius .16s var(--desktop-ease-standard); }
