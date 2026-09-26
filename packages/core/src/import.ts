@@ -9,6 +9,11 @@ export interface ImportOptions {
   cancelToken?: string;
   /** 非原生回退路径的取消判定：返回 true 时停止复制并标记已取消（已复制文件保留）。 */
   shouldCancel?: () => boolean;
+  /**
+   * 已解析好的导入源（如桌面端拖入并经原生确认的文件夹，来自 picker.resolveDroppedFolder）。
+   * 传入后不再调用 picker.pickFolder，其余流程（原生快速路径、回退复制、进度、取消、释放授权）不变。
+   */
+  source?: FolderRef;
 }
 
 /** 用户取消导入的哨兵错误：不清理已复制文件、不视为失败。 */
@@ -39,7 +44,7 @@ export async function importFolder(
 
   let targetTop: FolderRef | null = null;
   try {
-    const sourceRoot = await picker.pickFolder();
+    const sourceRoot = options.source ?? await picker.pickFolder();
     task.sourceFolderName = sourceRoot.name || '未命名相册';
     options.onProgress?.({ status: 'scanning', scanned: 0, copied: 0, skipped: 0, current: sourceRoot.name });
 
