@@ -68,6 +68,18 @@ export interface ZipExportResult {
   exportedCount: number;
 }
 
+/**
+ * 用户主动取消 ZIP 导出。以类型（instanceof）而非错误消息文本表达「取消」，
+ * 与导入侧的 ImportCancelledError 同构；各适配器在取消路径上统一抛出它，
+ * UI 据此静默收尾而不当作失败提示。
+ */
+export class ZipCancelledError extends Error {
+  constructor(message = '导出已取消。') {
+    super(message);
+    this.name = 'ZipCancelledError';
+  }
+}
+
 /** Manages the app-owned album library. */
 export interface LibraryStore {
   getLibraryRoot(): Promise<FolderRef>;

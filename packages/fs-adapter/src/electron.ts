@@ -8,6 +8,7 @@ import type {
   NativeImportResult,
   ZipExportResult,
 } from './types';
+import { ZipCancelledError } from './types';
 import { isHeifImage, isRawImage } from '../../core/src/path';
 
 export interface DesktopFsEntry {
@@ -315,7 +316,7 @@ export class ElectronLibraryStore implements LibraryStore {
     try {
       onProgress?.(0, 0);
       const result = await bridge.exportZip(targetRelPath);
-      if (result.canceled) throw new Error('导出已取消。');
+      if (result.canceled) throw new ZipCancelledError();
       onProgress?.(result.exportedCount ?? 0, result.totalImages ?? 0);
       return {
         kind: 'file',

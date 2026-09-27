@@ -45,6 +45,8 @@ public final class DerivativeService {
         String key = keyOf(file);
         File out = new File(cacheDir, key + ".jpg");
         if (isUsable(out)) {
+            // 快路径同样触碰 mtime：LRU 淘汰按「最近使用」而不是「最近生成」。
+            out.setLastModified(System.currentTimeMillis());
             return out;
         }
         Object lock = locks.computeIfAbsent(key, k -> new Object());

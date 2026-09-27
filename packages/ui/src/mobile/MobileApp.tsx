@@ -490,10 +490,13 @@ export function MobileApp({
 
   // —— 全局搜索（跨图包）——
   const searching = searchActive && searchTerm.length > 0;
-  const searchImages = useMemo(() => {
+  /** 网格一次渲染的搜索结果上限：大库全文过滤可能命中数千张，同步渲染会卡顿。 */
+  const MAX_SEARCH_RESULTS = 300;
+  const searchMatches = useMemo(() => {
     if (!snapshot || !searchTerm) return [];
     return Object.values(snapshot.images).filter((img) => img.name.toLowerCase().includes(searchTerm));
   }, [snapshot, searchTerm]);
+  const searchImages = useMemo(() => searchMatches.slice(0, MAX_SEARCH_RESULTS), [searchMatches]);
   const searchFolders = useMemo(() => {
     if (!snapshot || !searchTerm) return [];
     return Object.values(snapshot.folders)
@@ -511,9 +514,9 @@ export function MobileApp({
       .map(([ext]) => `.${ext.replace(/^\./, '')}`);
   }, [snapshot, searchActive]);
 
-  /** 实际显示的图片列表：聚合 > 当前目录；搜索中查看器用搜索结果。 */
+  /** 实际显示的图片列表：聚合 > 当前目录；搜索中查看器用搜索结果全集。 */
   const displayImages = aggregate ? aggregateImages : folderImages;
-  const viewerImages = searching ? searchImages : displayImages;
+  const viewerImages = searching ? searchMatches : displayImages;
   const viewerIndex = viewerImageId ? viewerImages.findIndex((img) => img.id === viewerImageId) : -1;
   const viewerOpen = viewerImageId != null && viewerIndex >= 0;
   const pageKind: 'search' | 'library' | 'folder' = searchActive ? 'search' : isRoot ? 'library' : 'folder';
@@ -1997,7 +2000,7 @@ export function MobileApp({
         </>
       );
     }
-    if (searchFolders.length === 0 && searchImages.length === 0) {
+    if (searchFolders.length === 0 && searchMatches.length === 0) {
       return (
         <div className="m2-empty-state">
           <MobileIcon name="search" className="w-7 h-7" />
@@ -2018,11 +2021,14 @@ export function MobileApp({
             <div className="m2-pack-list">{searchFolders.map((f) => <div key={f.id}>{packCard(f, true)}</div>)}</div>
           </>
         )}
-        {searchImages.length > 0 && (
+        {searchMatches.length > 0 && (
           <>
             <div className="m2-section-head">
               <h2>
-                图片<span className="tabular-nums">{searchImages.length}</span>
+                图片<span className="tabular-nums">{searchMatches.length}</span>
+                {searchMatches.length > searchImages.length && (
+                  <small className="opacity-60">（仅显示前 {MAX_SEARCH_RESULTS} 张）</small>
+                )}
               </h2>
             </div>
             <RowGrid
@@ -2192,7 +2198,10 @@ export function MobileApp({
       {/* 多选浮动操作栏（键盘弹出时隐藏，避免被顶到键盘上沿悬浮） */}
       {showSelbar && (
         <div className="m2-selbar" style={{ zIndex: Z_BATCH_BAR }} role="toolbar" aria-label="所选图片操作">
-          <button disabled={selectedIds.size === 0 || batchBusy} onClick={() => openPrompt({ kind: 'batch-move', count: selectedImages.length })}>
+          {/* 计数与 disabled 用同一来源（selectedImages）：搜索/聚合视图下
+              selectedIds 可能含当前视图之外的图片，两个口径不一致会「显示 N 张、
+              实际移动 M 张」。 */}
+          <button disabled={selectedImages.length === 0 || batchBusy} onClick={() => openPrompt({ kind: 'batch-move', count: selectedImages.length })}>
             <MobileIcon name="move" className="w-[22px] h-[22px]" />
             移动
           </button>
@@ -2336,6 +2345,7 @@ export function MobileApp({
         <MobileOrganizeFlow
           folder={organizeFlowRef.current.folder}
           images={imagesOf(snapshot, organizeFlowRef.current.folder.id)}
+          snapshot={snapshot}
           customRules={customRules}
           store={store}
           blurredPaths={blurredImages}

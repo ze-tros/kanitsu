@@ -28,7 +28,7 @@ export interface RuleOption {
 }
 
 export interface PlannedBinding extends OrganizeBinding {
-  /** 命中的规则 id（内置规则 id，或自定义规则的名称）。 */
+  /** 命中的规则 id（内置规则 id，或自定义规则的唯一 id；名称只作展示）。 */
   rule: string;
 }
 
@@ -53,7 +53,8 @@ export function planBindings(images: readonly ImageEntry[], customRules: CustomO
 
 const isApplicable = (b: PlannedBinding): boolean => b.confidence >= ORGANIZE_CONFIDENCE_THRESHOLD;
 
-/** 规则选项：自动 + 启用的自定义规则 + 内置规则，附命中数（自动 = 全部可落盘的绑定）。 */
+/** 规则选项：自动 + 启用的自定义规则 + 内置规则，附命中数（自动 = 全部可落盘的绑定）。
+ *  id 一律用规则 id（自定义规则用其唯一 id 而非名称）：重名规则不会互相串台。 */
 export function ruleOptions(bindings: readonly PlannedBinding[], customRules: CustomOrganizeRule[]): RuleOption[] {
   const hits = new Map<string, number>();
   let total = 0;
@@ -65,11 +66,11 @@ export function ruleOptions(bindings: readonly PlannedBinding[], customRules: Cu
   const custom = customRules
     .filter((r) => r.enabled)
     .map<RuleOption>((r) => ({
-      id: r.name || 'custom',
+      id: r.id,
       name: r.name || '自定义规则',
       description: `${r.pattern} → ${r.target}`,
       kind: 'custom',
-      hitCount: hits.get(r.name || 'custom') ?? 0,
+      hitCount: hits.get(r.id) ?? 0,
     }));
   const builtin = BUILTIN_ORGANIZE_RULES.map<RuleOption>((r) => ({
     id: r.id,

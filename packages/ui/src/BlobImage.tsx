@@ -4,6 +4,7 @@ import { DEFAULT_THUMBNAIL_SIZE, getThumbnailBlob, peekThumbnailBlob } from './t
 import { observeVisibility } from './visibleObserver';
 import { acquireObjectUrl, releaseObjectUrl } from './objectUrlPool';
 import { getBlurPreviewBlob, peekBlurPreviewBlob } from './blurPreview';
+import { logDebug } from './debugLog';
 
 type LoadedImage = { key: string; url: string; degraded: boolean };
 
@@ -105,7 +106,10 @@ export function BlobImage({
           if (cancelled) return;
           deliver(blob);
         })
-        .catch(() => {
+        .catch((err: unknown) => {
+          // 落一条诊断日志：用户只看到「读取失败」占位符时，设置→调试面板
+          // 能区分文件损坏/权限/格式不支持（不再完全静默）。
+          logDebug('image', `图片读取失败 ${fileRef.name}: ${String(err)}`, 'warn');
           if (!cancelled) setFailedKey(resourceKey);
         });
     }

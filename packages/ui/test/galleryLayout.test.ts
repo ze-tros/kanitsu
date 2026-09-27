@@ -67,11 +67,17 @@ describe('justifiedLayout', () => {
 });
 
 describe('rowWindow', () => {
-  test('only rows around the viewport are mounted, aligned to blocks', () => {
+  test('only rows around the viewport are mounted (block-aligned ∪ pixel-overscan)', () => {
     const l = listLayout(1000, 800, 48);
     const w = rowWindow(l, 48 * 100, 480, 96, 4);
-    assert.equal(w.first, 96);
-    assert.equal(w.last, 116);
+    // 窗口 = block 对齐可见域 [100, 112) ∪ 像素 overscan 域 [98, 113) 的并集：
+    // 上边取更小的像素界（98），下边取更大的像素界（113）。
+    assert.equal(w.first, 98);
+    assert.equal(w.last, 113);
+    // 两侧都不再被 block 取整向外多挂行（列表视图挂载量收敛：15 行 vs 旧 20 行）。
+    const overscanRows = Math.ceil(96 / 48);
+    assert.ok(w.first >= 100 - overscanRows, '上边不超过「可见首行 - overscan 行数」');
+    assert.ok(w.last <= 111 + overscanRows, '下边不超过「可见末行 + overscan 行数」');
     assert.deepEqual(rowWindow(l, -5000, 480, 96), { first: 0, last: 0 });
     assert.deepEqual(rowWindow(listLayout(0, 800, 48), 0, 480, 96), { first: 0, last: 0 });
   });

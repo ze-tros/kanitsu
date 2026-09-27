@@ -143,3 +143,64 @@ describe('buildZip ZIP64', () => {
     assert.notEqual(u32le(bytes, locatorAt), 0x07064b50, '不应有 ZIP64 locator');
   });
 });
+
+describe('buildZip 字段与编码', () => {
+  test('UTF-8 文件名置 bit 11 标志并可完整往返', async () => {
+    const name = '相册/东京旅拍 📷/p001.jpg';
+    const bytes = buildZip([{ name, data: new Uint8Array([1, 2, 3]) }]);
+    // 本地文件头：bit 11（0x0800）必须置位，文件名按 UTF-8 字节数写入。
+    const nameBytes = new TextEncoder().encode(name);
+    assert.equal(new DataView(bytes.buffer, 0, 30).getUint16(6, true) & 0x0800, 0x0800, 'UTF-8 标志');
+    assert.equal(new DataView(bytes.buffer, 0, 30).getUint16(26, true), nameBytes.length);
+    const read = await readZip(bytes, true);
+    assert.equal(read.length, 1);
+    assert.equal(read[0]!.name, name);
+    assert.deepEqual(read[0]!.data, Buffer.from([1, 2, 3]));
+  });
+
+  test('EOCD 的中央目录偏移与大小等于实际字节位置', async () => {
+    const entries: ZipEntry[] = [
+      { name: 'a.jpg', data: new Uint8Array([1]) },
+      { name: 'b/b.jpg', data: new Uint8Array([2, 2]) },
+    ];
+    const bytes = buildZip(entries);
+    const eocdAt = bytes.length - 22;
+    const cdSize = u32le(bytes, eocdAt + 12);
+    const cdOffset = u32le(bytes, eocdAt + 16);
+    assert.equal(u32le(bytes, cdOffset), 0x02014b50, '中央目录起始处是第一个 central header');
+    // 中央目录连续覆盖到 EOCD 之前。
+    assert.equal(cdOffset + cdSize, eocdAt);
+    const read = await readZip(bytes, true);
+    assert.deepEqual(
+      read.map((e) => e.name).sort(),
+      ['a.jpg', 'b/b.jpg'],
+      'buildZip 原样输出条目（index.json 由 zipTree 层负责）',
+    );
+  });
+
+  test('CRC32 与已知值一致（crc32("123456789") = 0xCBF43926）', () => {
+    const data = new TextEncoder().encode('123456789');
+    assert.equal(crc32(data), 0xcbf43926);
+  });
+});
+
+describe('MemoryLibraryStore.zipSelection', () => {
+  test('只打包所选 relPath，计数与条目集合一致', async () => {
+    const store = await seedStore();
+    const result = await store.zipSelection(['MangaA/Vol.01/p001.jpg', 'Travel/trip.jpg'], '所选');
+    assert.equal(result.kind, 'blob');
+    assert.equal(result.totalImages, 2);
+    assert.equal(result.exportedCount, 2);
+
+    const bytes = new Uint8Array(await result.blob!.arrayBuffer());
+    const entries = await readZip(bytes, true);
+    const names = entries.map((e) => e.name).sort();
+    assert.deepEqual(names, ['MangaA/Vol.01/p001.jpg', 'Travel/trip.jpg', 'index.json']);
+    const index = JSON.parse(entries.find((e) => e.name === 'index.json')!.data!.toString());
+    assert.equal(index.images.length, 2);
+    assert.deepEqual(
+      index.images.map((i: { relPath: string }) => i.relPath).sort(),
+      ['MangaA/Vol.01/p001.jpg', 'Travel/trip.jpg'],
+    );
+  });
+});

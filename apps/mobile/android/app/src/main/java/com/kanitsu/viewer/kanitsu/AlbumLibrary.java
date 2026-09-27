@@ -24,7 +24,13 @@ public final class AlbumLibrary {
     private final File root;
 
     public AlbumLibrary(Context context) {
-        this.root = new File(context.getExternalFilesDir(null), ROOT_DIR);
+        // getExternalFilesDir 在外置存储不可用（挂载中/被移除）时返回 null：
+        // 与 ThumbnailService/DerivativeService 一致兜底到内部存储，避免构造即 NPE。
+        File base = context.getExternalFilesDir(null);
+        if (base == null) {
+            base = context.getFilesDir();
+        }
+        this.root = new File(base, ROOT_DIR);
     }
 
     public File ensureRoot() {

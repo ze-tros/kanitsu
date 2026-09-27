@@ -143,4 +143,24 @@ describe('mergeIntoNewPack', () => {
       /未选择/,
     );
   });
+
+  test('keeps an empty (imageless) selected pack instead of deleting it', async () => {
+    const store = new MemoryLibraryStore();
+    const root = await store.ensureLibraryRoot();
+    await store.createFolder(root, 'EmptyPack');
+    await store.writeBlob(root, 'solo.jpg', new Blob(['solo'], { type: 'image/jpeg' }));
+
+    const before = await scanLibrary(store);
+    const result = await mergeIntoNewPack(store, before, '', 'Merged', {
+      imageIds: [imageIdByRel(before, 'solo.jpg')],
+      folderIds: [folderIdByRel(before, 'EmptyPack')],
+    });
+
+    assert.equal(result.movedCount, 1);
+    // 「空图包」不属于「已被移空」：every() 的空真值语义不得把它顺手删掉。
+    assert.deepEqual(result.keptFolderRels, ['EmptyPack']);
+    assert.deepEqual(result.removedFolderRels, []);
+    const after = await scanLibrary(store);
+    assert.ok(Object.values(after.folders).some((folder) => folder.relPath === 'EmptyPack'));
+  });
 });

@@ -50,7 +50,6 @@ public class KanitsuPlugin extends Plugin {
 
     /** 进行中的可取消任务（导入/导出）：token -> 取消标志。 */
     private final Map<String, AtomicBoolean> taskCancels = new ConcurrentHashMap<>();
-    private String pendingExportToken = "";
 
     private AtomicBoolean registerCancel(String token) {
         AtomicBoolean c = new AtomicBoolean(false);
@@ -160,7 +159,7 @@ public class KanitsuPlugin extends Plugin {
             out.put("entries", arr);
             call.resolve(out);
         } catch (Exception e) {
-            call.reject(e.getMessage(), e);
+            rejectWithLog(call, e);
         }
     }
 
@@ -175,7 +174,7 @@ public class KanitsuPlugin extends Plugin {
                 out.put("mime", safSource.mimeOfName(file.name));
                 call.resolve(out);
             } catch (Exception e) {
-                call.reject(e.getMessage(), e);
+                rejectWithLog(call, e);
             }
         });
     }
@@ -198,7 +197,7 @@ public class KanitsuPlugin extends Plugin {
                 JSObject result = safSource.importTree(targetTopName, albums, importEmitter(), cancel);
                 call.resolve(result);
             } catch (Exception e) {
-                call.reject(e.getMessage(), e);
+                rejectWithLog(call, e);
             } finally {
                 unregisterCancel(cancelToken, cancel);
             }
@@ -226,7 +225,7 @@ public class KanitsuPlugin extends Plugin {
             String name = call.getString("name", "");
             call.resolve(albums.createFolder(albums.fileForId(parent.id), name).toJS());
         } catch (Exception e) {
-            call.reject(e.getMessage(), e);
+            rejectWithLog(call, e);
         }
     }
 
@@ -236,7 +235,7 @@ public class KanitsuPlugin extends Plugin {
             String name = call.getString("name", "未命名相册");
             call.resolve(albums.createUniqueTopFolder(name).toJS());
         } catch (Exception e) {
-            call.reject(e.getMessage(), e);
+            rejectWithLog(call, e);
         }
     }
 
@@ -249,7 +248,7 @@ public class KanitsuPlugin extends Plugin {
             try {
                 call.resolve(albums.write(albums.fileForId(folder.id), name, data).toJS());
             } catch (Exception e) {
-                call.reject(e.getMessage(), e);
+                rejectWithLog(call, e);
             }
         });
     }
@@ -267,7 +266,7 @@ public class KanitsuPlugin extends Plugin {
             out.put("entries", arr);
             call.resolve(out);
         } catch (Exception e) {
-            call.reject(e.getMessage(), e);
+            rejectWithLog(call, e);
         }
     }
 
@@ -283,7 +282,7 @@ public class KanitsuPlugin extends Plugin {
                 out.put("mime", albums.mimeOf(f));
                 call.resolve(out);
             } catch (Exception e) {
-                call.reject(e.getMessage(), e);
+                rejectWithLog(call, e);
             }
         });
     }
@@ -300,7 +299,7 @@ public class KanitsuPlugin extends Plugin {
                 out.put("data", Base64.encodeToString(bytes, Base64.NO_WRAP));
                 call.resolve(out);
             } catch (Exception e) {
-                call.reject(e.getMessage(), e);
+                rejectWithLog(call, e);
             }
         });
     }
@@ -319,7 +318,7 @@ public class KanitsuPlugin extends Plugin {
                 out.put("mime", r.mime);
                 call.resolve(out);
             } catch (Exception e) {
-                call.reject(e.getMessage(), e);
+                rejectWithLog(call, e);
             }
         });
     }
@@ -332,7 +331,7 @@ public class KanitsuPlugin extends Plugin {
             String newName = call.getString("newName", null);
             call.resolve(albums.move(albums.fileForId(entry.id), albums.fileForId(toFolder.id), newName).toJS());
         } catch (Exception e) {
-            call.reject(e.getMessage(), e);
+            rejectWithLog(call, e);
         }
     }
 
@@ -343,7 +342,7 @@ public class KanitsuPlugin extends Plugin {
             albums.remove(albums.fileForId(entry.id));
             call.resolve();
         } catch (Exception e) {
-            call.reject(e.getMessage(), e);
+            rejectWithLog(call, e);
         }
     }
 
@@ -375,7 +374,7 @@ public class KanitsuPlugin extends Plugin {
                 out.put("url", servedUrlFor(deriv.getAbsolutePath()));
                 call.resolve(out);
             } catch (Exception e) {
-                call.reject(e.getMessage(), e);
+                rejectWithLog(call, e);
             }
         });
     }
@@ -387,7 +386,6 @@ public class KanitsuPlugin extends Plugin {
     @PluginMethod
     public void exportZip(PluginCall call) {
         String target = call.getString("targetRelPath", "");
-        pendingExportToken = call.getString("cancelToken", "");
         getActivity().runOnUiThread(() -> {
             Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
             intent.addCategory(Intent.CATEGORY_OPENABLE);
@@ -417,7 +415,10 @@ public class KanitsuPlugin extends Plugin {
             return;
         }
         String target = call.getString("targetRelPath", "");
-        String cancelToken = pendingExportToken;
+        // cancelToken 直接从本次调用的 call 里读：PluginCall 跨 Activity 回调持有全部
+        // 参数，不能用单槽字段传递——保存对话框未返回前再次发起导出会覆盖它，
+        // 让前一个导出无法取消。
+        String cancelToken = call.getString("cancelToken", "");
         // 多选导出：只打包列出的 relPath（为空/缺省时导出整个目标目录）。
         Set<String> include = null;
         JSArray includeArr = call.getArray("includeRelPaths");
@@ -440,7 +441,7 @@ public class KanitsuPlugin extends Plugin {
                 out.put("exportedCount", counts[1]);
                 call.resolve(out);
             } catch (Exception e) {
-                call.reject(e.getMessage(), e);
+                rejectWithLog(call, e);
             } finally {
                 unregisterCancel(cancelToken, cancel);
             }
@@ -492,9 +493,14 @@ public class KanitsuPlugin extends Plugin {
     public void readLogs(PluginCall call) {
         int max = call.getInt("maxLines", 200);
         JSONArray arr = new JSONArray();
-        int skip = Math.max(0, logBuffer.size() - max);
+        int skip;
+        String[] snapshotLines;
+        synchronized (logBuffer) {
+            skip = Math.max(0, logBuffer.size() - max);
+            snapshotLines = logBuffer.toArray(new String[0]);
+        }
         int i = 0;
-        for (String line : logBuffer) {
+        for (String line : snapshotLines) {
             if (i++ >= skip) {
                 arr.put(line);
             }
@@ -553,10 +559,27 @@ public class KanitsuPlugin extends Plugin {
     }
 
     private void log(String level, String msg) {
-        if (logBuffer.size() >= 300) {
-            logBuffer.removeFirst();
+        if (rank(level) < rank(logLevel)) return;
+        String line = System.currentTimeMillis() + " [" + level + "] " + msg;
+        synchronized (logBuffer) {
+            if (logBuffer.size() >= 300) {
+                logBuffer.removeFirst();
+            }
+            logBuffer.addLast(line);
         }
-        logBuffer.addLast(System.currentTimeMillis() + " [" + level + "] " + msg);
+    }
+
+    /** 统一的异常出口：先落一条错误日志（设置页「渲染端日志」可见），再拒绝调用。 */
+    private void rejectWithLog(PluginCall call, Exception e) {
+        log("error", e.getMessage() != null ? e.getMessage() : String.valueOf(e));
+        call.reject(e.getMessage(), e);
+    }
+
+    private static int rank(String level) {
+        if ("debug".equals(level)) return 0;
+        if ("warn".equals(level)) return 2;
+        if ("error".equals(level)) return 3;
+        return 1;
     }
 
     private static String baseName(String relPath) {

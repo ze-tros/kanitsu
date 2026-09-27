@@ -103,7 +103,10 @@ export async function mergeIntoNewPack(
     (folder) => !selectedFolders.some((other) => other.id !== folder.id && isRelPrefix(other.relPath, folder.relPath)),
   );
   for (const folder of topFolders) {
-    const emptied = imagesOf(snapshot, folder.id).every((image) => movedIds.has(image.id));
+    // 「空图包」(子树里本就没有图片) 不属于「已被移空」：整包删除只针对图片
+    // 确实全部移出的图包，every() 对空数组恒真会让没图片的图包被顺手删掉。
+    const folderImages = imagesOf(snapshot, folder.id);
+    const emptied = folderImages.length > 0 && folderImages.every((image) => movedIds.has(image.id));
     const unsafe = isRelPrefix(folder.relPath, containerRel) || isRelPrefix(folder.relPath, createdRelPath);
     if (!emptied || unsafe) {
       keptFolderRels.push(folder.relPath);

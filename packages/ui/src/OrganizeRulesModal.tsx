@@ -144,6 +144,11 @@ export function OrganizeRulesManager({
       setError('请输入规则名称。');
       return;
     }
+    // 名称唯一（名称只作展示，但重名会让规则列表难以区分）。
+    if (rules.some((other) => other.id !== editingId && other.name === trimmedName)) {
+      setError('已有同名规则，请换一个名称。');
+      return;
+    }
     if (!trimmedPattern) {
       setError('请输入正则表达式。');
       return;

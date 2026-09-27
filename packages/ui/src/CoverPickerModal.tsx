@@ -5,6 +5,7 @@ import { childrenOf, directImagesOf, imagesOf } from '../../core/src/index';
 import { pickCover } from '../../cover-picker/src/index';
 import { BlobImage } from './BlobImage';
 import { COVER_THUMBNAIL_SIZE, preloadThumbnails, THUMB_PRIORITY_DIRECTIONAL, THUMB_PRIORITY_SUBFOLDER } from './thumbnailCache';
+import { Z_FULLSCREEN_MODAL } from './mobile/zindex';
 
 const PAGE_SIZE = 120;
 
@@ -70,6 +71,18 @@ export function CoverPickerModal({
     setVisibleCount(PAGE_SIZE);
   }, [query]);
 
+  // 键盘 Esc 关闭（移动端以硬件返回为主，Esc 覆盖 WebView / 预览模式）。
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.stopPropagation();
+        onCancel();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onCancel]);
+
   // 与主视图同款低优先级预热：打开弹窗或切换浏览目录时，把当前目录的直属图片
   // （优先级 1＝滚动方向预取档，仅次于可见）与子文件夹封面（优先级 3）排入同一
   // 缓存/队列。外部已生成的缩略图（键一致）直接命中复用；未生成过的也提前后台
@@ -96,7 +109,13 @@ export function CoverPickerModal({
   }, [snapshot, currentId, store, pinnedCovers]);
 
   return (
-    <div className="modal modal-open z-[120]">
+    <div
+      className="modal modal-open"
+      role="dialog"
+      aria-modal="true"
+      aria-label={`设置封面：${targetName}`}
+      style={{ zIndex: Z_FULLSCREEN_MODAL }}
+    >
       <div className="modal-box max-w-3xl flex flex-col max-h-[80vh]">
         <h3 className="font-bold text-lg shrink-0">设置封面：{targetName}</h3>
 

@@ -3,7 +3,8 @@
  * 确认前不移动任何文件；落盘由 MobileApp 走 applyOrganize，完成后可在任务中心撤销。
  */
 import { useMemo, useState } from 'react';
-import type { FolderNode, ImageEntry, OrganizeBinding } from '../../../core/src/index';
+import type { FolderNode, ImageEntry, LibrarySnapshot, OrganizeBinding } from '../../../core/src/index';
+import { directImagesOf } from '../../../core/src/index';
 import type { LibraryStore } from '../../../fs-adapter/src/types';
 import type { CustomOrganizeRule } from '../../../organizer/src/index';
 import { BlobImage } from '../BlobImage';
@@ -14,6 +15,7 @@ import {
   AUTO_RULE_ID,
   bindingsForRule,
   planBindings,
+  planConflicts,
   previewGroups,
   renameGroup,
   ruleOptions,
@@ -38,6 +40,7 @@ const GROUP_THUMBS = 5;
 export function MobileOrganizeFlow({
   folder,
   images,
+  snapshot,
   customRules,
   store,
   blurredPaths,
@@ -50,6 +53,8 @@ export function MobileOrganizeFlow({
 }: {
   folder: FolderNode;
   images: ImageEntry[];
+  /** 当前快照：用于冲突预估（目标目录已有同名文件 → 落盘时被跳过）。 */
+  snapshot: LibrarySnapshot;
   customRules: CustomOrganizeRule[];
   store: LibraryStore;
   blurredPaths: ReadonlySet<string>;
@@ -72,12 +77,32 @@ export function MobileOrganizeFlow({
   const bindings = edited && edited.ruleId === ruleId ? edited.bindings : selected;
   const groups = useMemo(() => previewGroups(bindings), [bindings]);
   const moving = groups.reduce((s, g) => s + g.bindings.length, 0);
-  const staying = images.length - moving;
   const imageById = useMemo(() => new Map(images.map((img) => [img.id, img])), [images]);
   const stayingImages = useMemo(() => {
     const moved = new Set(groups.flatMap((g) => g.bindings.map((b) => b.imageId)));
     return images.filter((img) => !moved.has(img.id));
   }, [groups, images]);
+  // 冲突预估与桌面端同口径：目标目录里已有同名文件的绑定落盘时会被跳过。
+  const folderIdByRel = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const node of Object.values(snapshot.folders)) map.set(node.relPath, node.id);
+    return map;
+  }, [snapshot]);
+  const conflicts = useMemo(
+    () =>
+      planConflicts(
+        groups,
+        (dir) => {
+          const id = folderIdByRel.get(folder.relPath ? `${folder.relPath}/${dir}` : dir);
+          return id ? { names: new Set(directImagesOf(snapshot, id).map((image) => image.name)) } : undefined;
+        },
+        (imageId) => snapshot.images[imageId]?.relPath,
+        folder.relPath,
+      ),
+    [folder.relPath, folderIdByRel, groups, snapshot],
+  );
+  const willMove = moving - conflicts.conflictIds.size;
+  const staying = images.length - willMove;
 
   const thumb = (img: ImageEntry | undefined) =>
     img ? (
@@ -111,7 +136,7 @@ export function MobileOrganizeFlow({
           <h1>{step === 1 ? '选择整理规则' : '预览整理结果'}</h1>
           <p>
             {step === 1
-              ? '先生成预览；确认之前，不会移动任何文件。'
+              ? '将整理该图包及其全部子目录里的图片；先生成预览，确认之前不会移动任何文件。'
               : `在「${folder.name}」内按「${rule.name}」建立 ${groups.length} 个目录；完成后可在任务中心撤销。`}
           </p>
           <div className="m2-steps" aria-label={`第 ${step} 步，共 2 步`}>
@@ -160,11 +185,11 @@ export function MobileOrganizeFlow({
           <>
             <div className="m2-summary tabular-nums">
               <div>
-                <b>{groups.length}</b>
+                <b>{groups.length - conflicts.mergeDirs.size}</b>
                 <small>新目录</small>
               </div>
               <div>
-                <b>{moving}</b>
+                <b>{willMove}</b>
                 <small>移动图片</small>
               </div>
               <div>
@@ -172,11 +197,17 @@ export function MobileOrganizeFlow({
                 <small>保持原位</small>
               </div>
             </div>
+            {conflicts.conflictIds.size > 0 && (
+              <p className="m2-empty-line" role="alert">
+                {conflicts.conflictIds.size} 张图片的目标位置已有同名文件，整理时将被跳过。
+              </p>
+            )}
             {groups.slice(0, GROUP_RENDER_LIMIT).map((g) => (
               <section key={g.dir} className="m2-group">
                 <div className="m2-group-head">
                   <MobileIcon name="folder" className="w-[18px] h-[18px] shrink-0" />
                   <strong className="truncate">{g.dir}</strong>
+                  {conflicts.mergeDirs.has(g.dir) && <small>并入已有目录</small>}
                   <small className="tabular-nums">{g.bindings.length} 张</small>
                   <button className="m2-icon-button is-small" onClick={() => setRenaming(g.dir)} aria-label={`重命名目录 ${g.dir}`}>
                     <MobileIcon name="edit" className="w-4 h-4" />

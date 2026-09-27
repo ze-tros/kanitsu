@@ -225,7 +225,10 @@ export function clearRect(px: Uint8Array, canvasW: number, canvasH: number, x: n
 
 /** 解码 GIF（逐帧顺序合成 + disposal；仅在采样帧截取），返回缩放后的 RGBA 帧列表。
  *  采样帧在合成后立即缩放：峰值内存 = 合成画布 + 单帧拷贝 + 缩放后帧，
- *  而不是「全部采样帧的全尺寸拷贝」。 */
+ *  而不是「全部采样帧的全尺寸拷贝」。
+ *  采样策略分两档：帧数温和时均匀采样含首尾帧（表现完整动画），代价是逐帧
+ *  合成全部 total 帧；帧数巨大时改用前缀采样（只合成前 count 帧）——采样只省
+ *  缩放、不省逐帧 blit，total 很大时「封顶控制耗时」的目标就落空了。 */
 export function decodeGifFrames(buf: Buffer, targetSize: number, maxFrames: number): { frames: Uint8Array[]; delays: number[]; width: number; height: number } {
   const reader = new GifReader(buf);
   const W = reader.width;
@@ -235,14 +238,21 @@ export function decodeGifFrames(buf: Buffer, targetSize: number, maxFrames: numb
   }
   const total = reader.numFrames();
   const count = Math.max(1, Math.min(maxFrames, total));
-  // 采样下标：均匀且含首尾帧；采样倍率 = 每个采样帧代表的原帧数
+  // 前缀采样阈值：帧数超过 maxFrames 的 8 倍时，逐帧合成全部帧的 blit 成本
+  // （total × W × H）已远超收益，改取前 count 帧的连续前缀。
+  const prefixSampling = total > maxFrames * 8;
+  // 采样下标；采样倍率 = 每个采样帧代表的原帧数
   const sampled = new Set<number>();
-  if (count <= 1) {
+  if (prefixSampling) {
+    for (let k = 0; k < count; k++) sampled.add(k);
+  } else if (count <= 1) {
     sampled.add(0);
   } else {
     for (let k = 0; k < count; k++) sampled.add(Math.round((k * (total - 1)) / (count - 1)));
   }
-  const stride = Math.max(1, (total - 1) / Math.max(1, count - 1));
+  const stride = prefixSampling ? total / count : Math.max(1, (total - 1) / Math.max(1, count - 1));
+  // 前缀采样只合成到最后一个采样帧为止，后面的帧不再解码。
+  const lastComposited = prefixSampling ? count - 1 : total - 1;
 
   // 逐帧合成：decodeAndBlitFrameRGBA 按帧内透明像素叠加，disposal 由我们处理，
   // 保证稀疏采样时画布状态与原始动画一致（避免白底等透明动画的残影）。
@@ -251,7 +261,7 @@ export function decodeGifFrames(buf: Buffer, targetSize: number, maxFrames: numb
   const delays: number[] = [];
   let outW = 0;
   let outH = 0;
-  for (let i = 0; i < total; i++) {
+  for (let i = 0; i <= lastComposited; i++) {
     const info = reader.frameInfo(i);
     const runtime = info as unknown as { disposal_type?: number };
     // omggif 的 frameInfo().delay 单位是厘秒（1/100 秒）

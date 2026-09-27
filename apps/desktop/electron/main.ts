@@ -50,6 +50,9 @@ async function collectLibraryFiles(dirPath: string, root: string, out: FsFileMet
   for (const entry of entries) {
     // 应用私有目录（缩略图缓存）不是图库内容，导出时跳过。
     if (isLibraryInternalName(entry.name)) continue;
+    // 符号链接/目录联接不是图库内容：目录链接会把导出范围越出图库，文件链接
+    // 会把库外文件读进 ZIP，一律跳过（真实文件以 dirent 的常规项出现）。
+    if (entry.isSymbolicLink()) continue;
     const full = path.join(dirPath, entry.name);
     if (entry.isDirectory()) {
       count += await collectLibraryFiles(full, root, out);
@@ -473,6 +476,45 @@ function assertSourceAllowed(p: string): void {
   throw new Error(`路径不在所选源文件夹内：${p}`);
 }
 
+/**
+ * 解析符号链接/目录联接后的图库守卫：词法前缀比对（assertInsideLibrary）放不下
+ * 「图库内的链接指向库外」——读写会实际落在库外。对已存在的部分做 realpath，
+ * 不存在的尾部按「已解析祖先 + 词法余段」拼接；解析不到已存在祖先时按越界处理。
+ * Windows 下 realpath 结果按大小写不敏感比较（NTFS 保留大小写但比较不敏感）。
+ */
+async function assertInsideLibraryReal(p: string): Promise<void> {
+  const root = path.resolve(getLibraryRoot());
+  const rootReal = await fs.realpath(root).catch(() => root);
+  const sameOrInside = (target: string, base: string): boolean => {
+    const t = process.platform === 'win32' ? target.toLowerCase() : target;
+    const r = process.platform === 'win32' ? base.toLowerCase() : base;
+    return t === r || t.startsWith(r.endsWith(path.sep) ? r : r + path.sep);
+  };
+  const resolveReal = async (): Promise<string> => {
+    try {
+      return await fs.realpath(path.resolve(p));
+    } catch {
+      // 目标或其部分父级尚不存在（新建文件/目录）：逐级向上找已存在的祖先。
+      let tail = '';
+      let ancestor = path.resolve(p);
+      for (;;) {
+        const parent = path.dirname(ancestor);
+        if (parent === ancestor) throw new Error(`路径不在图库内：${p}`);
+        const base = path.basename(ancestor);
+        try {
+          return path.join(await fs.realpath(parent), base, tail);
+        } catch {
+          tail = tail ? path.join(base, tail) : base;
+          ancestor = parent;
+        }
+      }
+    }
+  };
+  if (!sameOrInside(await resolveReal(), rootReal)) {
+    throw new Error(`路径不在图库内：${p}`);
+  }
+}
+
 interface NativeImportProgress {
   scanned: number;
   copied: number;
@@ -522,6 +564,9 @@ async function importSourceTreeNative(
       // 源目录若本身就是另一个 Kanitsu 图库，它的标记文件与缓存目录不是用户的
       // 图片：缓存里的缩略图都是 JPEG，照搬进来会被当成图库内容。
       if (isLibraryInternalName(entry.name)) continue;
+      // 符号链接/目录联接不下钻也不照搬：目录链接会把导入范围越出源目录，
+      // 文件链接的目标内容不属于「复制这个文件夹」的语义。
+      if (entry.isSymbolicLink()) continue;
       const sourcePath = path.join(sourceDir, entry.name);
       const targetPath = path.join(targetDir, entry.name);
       const childRelPath = relPath ? path.join(relPath, entry.name).split(path.sep).join('/') : entry.name;
@@ -610,6 +655,9 @@ async function listEntries(dirPath: string): Promise<DesktopFsEntry[]> {
   const dirents = await fs.readdir(dirPath, { withFileTypes: true });
   const entries: DesktopFsEntry[] = [];
   for (const dirent of dirents) {
+    // 符号链接/目录联接既不是图库内容也不该出现在导入源里：目录联接可能
+    // 自指（无限递归的种子），文件链接指向的内容不属于本目录。
+    if (dirent.isSymbolicLink()) continue;
     const full = path.join(dirPath, dirent.name);
     const stat = await fs.stat(full);
     const isDir = dirent.isDirectory();
@@ -646,7 +694,7 @@ async function computeLibraryFingerprint(root: string): Promise<string> {
     }
     entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
     for (const entry of entries) {
-      if (isLibraryInternalName(entry.name)) continue;
+      if (isLibraryInternalName(entry.name) || entry.isSymbolicLink()) continue;
       const childRel = rel ? `${rel}/${entry.name}` : entry.name;
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) {
@@ -670,6 +718,8 @@ async function getOrCreateFolder(parentPath: string, name: string): Promise<Desk
   assertInsideLibrary(parentPath);
   const full = path.join(parentPath, name);
   await ensureDir(full);
+  // 词法守卫之外再解析一次真实路径：parentPath 若是库内链接，建出的目录实际在库外。
+  await assertInsideLibraryReal(full);
   return entryFor(full, name);
 }
 
@@ -792,28 +842,54 @@ async function writeThumbToDisk(hash: string, data: Uint8Array): Promise<void> {
   try {
     const dir = thumbCacheDir();
     await fs.mkdir(dir, { recursive: true });
-    await fs.writeFile(path.join(dir, `${hash}.jpg`), data);
+    // 先写 .part 再原子改名：崩溃/强杀不会留下被当成有效缓存的半截 JPEG。
+    const part = path.join(dir, `${hash}.jpg.part`);
+    await fs.writeFile(part, data);
+    await fs.rename(part, path.join(dir, `${hash}.jpg`));
+    // 增量 prune：每 200 次落盘触发一次护栏检查，长时间会话里上限也能生效
+    // （此前只在启动时跑一次）。
+    thumbWritesSincePrune++;
+    if (thumbWritesSincePrune >= 200) {
+      thumbWritesSincePrune = 0;
+      void pruneThumbCache();
+    }
   } catch {
     // 落盘失败不影响功能（下次重新生成）。
   }
 }
 
-/** 启动时清理：文件数/总大小超限时按 mtime 删除最旧的。 */
+/** 距上次增量 prune 的落盘次数。 */
+let thumbWritesSincePrune = 0;
+
+/** 启动时清理：文件数/总大小超限时按 mtime 删除最旧的；崩溃残留的 .part 超过
+ *  1 小时一并清理（原子改名后正常不会出现，残留即异常）。 */
 async function pruneThumbCache(): Promise<void> {
   try {
     const dir = thumbCacheDir();
     const files: { name: string; size: number; mtimeMs: number }[] = [];
     for (const entry of await fs.readdir(dir)) {
+      if (entry.endsWith('.part')) {
+        const full = path.join(dir, entry);
+        try {
+          const st = await fs.stat(full);
+          if (Date.now() - st.mtimeMs > 60 * 60 * 1000) await fs.rm(full, { force: true });
+        } catch {
+          // 单个残留文件清理失败忽略。
+        }
+        continue;
+      }
       const st = await fs.stat(path.join(dir, entry));
       if (st.isFile()) files.push({ name: entry, size: st.size, mtimeMs: st.mtimeMs });
     }
     let total = files.reduce((n, f) => n + f.size, 0);
     if (files.length <= THUMB_DISK_MAX_FILES && total <= THUMB_DISK_MAX_BYTES) return;
+    // 迭代中不能改 files.length：for...of 按实时长度终止，超限越多只会删到一半。
+    let remaining = files.length;
     files.sort((a, b) => a.mtimeMs - b.mtimeMs); // 最旧在前
     for (const f of files) {
-      if (files.length <= THUMB_DISK_MAX_FILES && total <= THUMB_DISK_MAX_BYTES) break;
+      if (remaining <= THUMB_DISK_MAX_FILES && total <= THUMB_DISK_MAX_BYTES) break;
       await fs.rm(path.join(dir, f.name), { force: true });
-      files.length--;
+      remaining--;
       total -= f.size;
     }
   } catch {
@@ -831,12 +907,17 @@ async function pruneThumbCache(): Promise<void> {
 // sharp 直解格式 + RAW(libraw 内嵌预览提取,毫秒级;无预览时回退完整解码)
 // + HEIF(libheif wasm 完整解码,秒级,同样放宽超时)。GIF 也走 worker 但走专属分支。
 const THUMB_WORKER_FORMATS = new Set(['jpg', 'jpe', 'jpeg', 'png', 'webp', 'avif', 'bmp', ...RAW_IMAGE_EXT, ...HEIF_IMAGE_EXT]);
+/** 主进程 nativeImage 回退解码的源大小上限（与 worker 端 GIF 源上限同量级）。 */
+const GIF_NATIVE_FALLBACK_MAX_BYTES = 24 * 1024 * 1024;
 const THUMB_WORKER_COUNT = 4;
 const THUMB_JOB_TIMEOUT_MS = 8000;
 /** RAW/HEIF 任务超时:RAW 内嵌预览提取远低于此值,无预览回退完整解码时高像素
  *  机身可能需要数秒(45MP 约 2~5s);HEIF 为 wasm 完整解码(25MP 约 2~3s,
  *  48MP 更久)。放宽到 30s,超时仍杀 worker 释放槽位。 */
 const THUMB_RAW_JOB_TIMEOUT_MS = 30000;
+/** GIF 动画任务超时:抽帧重编码要逐帧 blit + LZW 重编码,大源长动画与 RAW/HEIF
+ *  同属长耗时分支,8s 的普通档会把它们误杀成超时。 */
+const THUMB_GIF_JOB_TIMEOUT_MS = 30000;
 const THUMB_PRIORITIES = 5;
 
 interface ThumbnailRequest {
@@ -900,6 +981,10 @@ function pumpThumbnailQueue(): void {
     const requestId = ++thumbnailRequestSeq;
     busyWorkers.add(worker);
     const isRawJob = isRawImage(request.file.id) || isHeifImage(request.file.id);
+    // 超时档位按「将要执行的分支」而不是扩展名一刀切：GIF 动画与 RAW/HEIF 用
+    // 放宽档，其余格式维持 8s。
+    const isAnimatedGifJob = path.extname(request.file.id).toLowerCase().slice(1) === 'gif' && request.gifAnimated;
+    const timeoutMs = isRawJob ? THUMB_RAW_JOB_TIMEOUT_MS : isAnimatedGifJob ? THUMB_GIF_JOB_TIMEOUT_MS : THUMB_JOB_TIMEOUT_MS;
     const timer = setTimeout(() => {
       const job = inFlightJobs.get(requestId);
       if (!job) return;
@@ -914,7 +999,7 @@ function pumpThumbnailQueue(): void {
       markWorkerFailed(request.file.id);
       job.reject(new Error('缩略图生成超时'));
       pumpThumbnailQueue();
-    }, isRawJob ? THUMB_RAW_JOB_TIMEOUT_MS : THUMB_JOB_TIMEOUT_MS);
+    }, timeoutMs);
     // 与 inFlightJobs.set 严格配对：注册必须先于 postMessage，迟到的响应才有处可归。
     inFlightJobs.set(requestId, { worker, resolve: request.resolve, reject: request.reject, timer });
     worker.postMessage({ requestId, filePath: request.file.id, targetSize: request.targetSize, gifAnimated: request.gifAnimated });
@@ -1138,11 +1223,13 @@ async function pruneRawDerivativeCache(): Promise<void> {
     }
     let total = files.reduce((n, f) => n + f.size, 0);
     if (files.length <= RAW_DISK_MAX_FILES && total <= RAW_DISK_MAX_BYTES) return;
+    // 迭代中不能改 files.length：for...of 按实时长度终止，超限越多只会删到一半。
+    let remaining = files.length;
     files.sort((a, b) => a.mtimeMs - b.mtimeMs);
     for (const f of files) {
-      if (files.length <= RAW_DISK_MAX_FILES && total <= RAW_DISK_MAX_BYTES) break;
+      if (remaining <= RAW_DISK_MAX_FILES && total <= RAW_DISK_MAX_BYTES) break;
       await fs.rm(path.join(dir, f.name), { force: true });
-      files.length--;
+      remaining--;
       total -= f.size;
     }
   } catch {
@@ -1168,6 +1255,13 @@ const rawDerivativeQueue: RawDerivativeRequest[] = [];
 const rawDerivativeInFlight = new Map<number, RawDerivativeRequest & { timer: NodeJS.Timeout }>();
 /** 同一派生文件的并发请求共享同一个 Promise。 */
 const rawDerivativePending = new Map<string, Promise<boolean>>();
+/** 派生生成连续失败的次数（按派生路径，会话内有效）：≥2 次后快速失败，
+ *  避免坏文件/不支持的变体反复占用 20~60s 的解码槽位无限重排。 */
+const rawDerivativeFailures = new Map<string, number>();
+
+function recordDerivativeFailure(derivPath: string): void {
+  rawDerivativeFailures.set(derivPath, (rawDerivativeFailures.get(derivPath) ?? 0) + 1);
+}
 
 function ensureRawDerivativeWorker(): Worker {
   if (rawDerivativeWorker) return rawDerivativeWorker;
@@ -1264,9 +1358,13 @@ const rawBackgroundFullInFlight = new Set<string>();
  * (预览级派生仍可看),下次 ensure 缓存未打标记时会再补。 */
 function enqueueBackgroundFullDerivative(sourcePath: string, derivPath: string): void {
   if (rawBackgroundFullInFlight.has(derivPath)) return;
+  // 后台补齐同样受失败黑名单约束：连续失败 ≥2 次不再排队（该文件停留在
+  // 预览级派生，不再反复占用完整解码的槽位）。
+  if ((rawDerivativeFailures.get(derivPath) ?? 0) >= 2) return;
   rawBackgroundFullInFlight.add(derivPath);
   void enqueueRawDerivativeJob({ sourcePath, derivPath, mode: 'full' })
-    .catch(() => undefined)
+    .then(() => rawDerivativeFailures.delete(derivPath))
+    .catch(() => recordDerivativeFailure(derivPath))
     .finally(() => rawBackgroundFullInFlight.delete(derivPath));
 }
 
@@ -1326,6 +1424,10 @@ function ensureRawDerivative(file: DesktopFsEntry, mode: RawViewMode): Promise<s
       const version = await rawDerivativeHit(derivPath);
       return rawDerivativeUrl(derivPath, version ?? Date.now());
     }
+    // 失败黑名单：连续失败 ≥2 次的派生在本次会话内快速失败，不再重排解码任务。
+    if ((rawDerivativeFailures.get(derivPath) ?? 0) >= 2) {
+      throw new Error('RAW 派生图生成失败（多次失败，本次会话内不再重试）');
+    }
     const promise = (async () => {
       // 1) 预览级派生(插队):多数相机内嵌全尺寸 JPEG,即现即显。
       //    HEIF 无独立内嵌预览可提取(libheif 完整解码本身即大头),跳过直接完整解码。
@@ -1337,6 +1439,9 @@ function ensureRawDerivative(file: DesktopFsEntry, mode: RawViewMode): Promise<s
       return await enqueueRawDerivativeJob({ sourcePath: file.id, derivPath, mode: 'full' });
     })();
     rawDerivativePending.set(derivPath, promise);
+    promise
+      .then(() => rawDerivativeFailures.delete(derivPath))
+      .catch(() => recordDerivativeFailure(derivPath));
     promise.finally(() => rawDerivativePending.delete(derivPath)).catch(() => undefined);
     pumpRawDerivativeQueue();
     const ok = await promise;
@@ -1518,8 +1623,9 @@ function registerIpc(): void {
     assertInsideLibrary(folder.id);
     await ensureDir(folder.id);
     const full = path.join(folder.id, name);
-    // 名字与目录分别校验后再兜底一次最终路径，杜绝任何拼接逃逸。
+    // 名字与目录分别校验后再兜底两次最终路径：词法拼接 + 真实路径（链接不越库）。
     assertInsideLibrary(full);
+    await assertInsideLibraryReal(full);
     await fs.writeFile(full, data);
     return entryFor(full, name);
   });
@@ -1534,6 +1640,7 @@ function registerIpc(): void {
 
   ipcMain.handle('library:readBlob', async (_event, file: DesktopFsEntry): Promise<Uint8Array> => {
     assertInsideLibrary(file.id);
+    await assertInsideLibraryReal(file.id);
     const ext = path.extname(file.id).toLowerCase();
     // Keep GIF animation by returning the original file; GIFs are usually small.
     if (ext === '.gif') {
@@ -1567,6 +1674,7 @@ function registerIpc(): void {
   // readBlob 会经 nativeImage 重编码（EXIF 已剥离），元数据必须走这条。
   ipcMain.handle('library:readSlice', async (_event, file: DesktopFsEntry, offset: number, length: number): Promise<Uint8Array> => {
     assertInsideLibrary(file.id);
+    await assertInsideLibraryReal(file.id);
     const start = Math.max(0, Math.floor(offset) || 0);
     const size = Math.max(0, Math.min(Math.floor(length) || 0, MAX_READ_SLICE));
     if (size === 0) return new Uint8Array(0);
@@ -1612,20 +1720,32 @@ function registerIpc(): void {
     // 典型几百 KB，一次性成本并落盘缓存）；静态模式 / 超大源 / 失败回退
     // 静态首帧。打开查看器时仍读取原文件，不影响 GIF 播放。
     if (isGif) {
-      try {
-        const data = await enqueueThumbnail(file, targetSize, level, variant, gifAnimated !== false);
-        putThumbCache(cacheKey, data);
-        void writeThumbToDisk(diskKey, data);
-        return data;
-      } catch (err) {
-        if (level > 0) throw err;
-        logger.warn('gif', `静态首帧生成失败，回退主进程解码：${path.basename(file.id)} (${String(err)})`);
-        await new Promise<void>((resolve) => setImmediate(resolve));
-        const data = generateThumbnailBytesNative(file, targetSize);
-        putThumbCache(cacheKey, data);
-        void writeThumbToDisk(diskKey, data);
-        return data;
+      if (failedWorkerPaths.has(file.id) && level > 0) {
+        throw new Error('低优先级跳过：GIF 已在失败名单，留给可见请求处理');
       }
+      if (!failedWorkerPaths.has(file.id)) {
+        try {
+          const data = await enqueueThumbnail(file, targetSize, level, variant, gifAnimated !== false);
+          putThumbCache(cacheKey, data);
+          void writeThumbToDisk(diskKey, data);
+          return data;
+        } catch (err) {
+          // 与普通格式一致：失败进黑名单，同一会话内不再反复卡 worker。
+          markWorkerFailed(file.id);
+          if (level > 0) throw err;
+          logger.warn('gif', `静态首帧生成失败，回退主进程解码：${path.basename(file.id)} (${String(err)})`);
+        }
+      }
+      // 主进程 nativeImage 回退前做源大小防护：nativeImage 会整文件解码，
+      // 超大 GIF（含构造的解压炸弹）不能无脑喂给它；超限直接报错走占位。
+      if (file.size != null && file.size > GIF_NATIVE_FALLBACK_MAX_BYTES) {
+        throw new Error(`GIF 源过大，跳过缩略图生成：${path.basename(file.id)}`);
+      }
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      const data = generateThumbnailBytesNative(file, targetSize);
+      putThumbCache(cacheKey, data);
+      void writeThumbToDisk(diskKey, data);
+      return data;
     }
 
     // 优先走 worker 线程生成（不阻塞主进程，sharp 解码大图也快）。可见图片
@@ -1758,6 +1878,8 @@ function registerIpc(): void {
   ipcMain.handle('library:move', async (_event, entry: DesktopFsEntry, toFolder: DesktopFsEntry, newName?: string): Promise<DesktopFsEntry> => {
     assertInsideLibrary(entry.id);
     assertInsideLibrary(toFolder.id);
+    await assertInsideLibraryReal(entry.id);
+    await assertInsideLibraryReal(toFolder.id);
     let finalName = path.basename(entry.id);
     if (newName != null) finalName = assertSafeEntryName(newName);
     const target = path.join(toFolder.id, finalName);
@@ -1772,12 +1894,15 @@ function registerIpc(): void {
       if (!sameFile) throw new Error(`目标已存在：${finalName}`);
     }
     assertInsideLibrary(target);
+    await assertInsideLibraryReal(target);
     await withFileRetry(() => fs.rename(entry.id, target));
     return entryFor(target);
   });
 
   ipcMain.handle('library:remove', async (_event, entry: DesktopFsEntry): Promise<void> => {
     assertInsideLibrary(entry.id);
+    // 删除走真实路径校验：库内链接指向库外时，词法守卫会让 rm 落在库外。
+    await assertInsideLibraryReal(entry.id);
     await removeWithRetry(entry.id);
   });
 

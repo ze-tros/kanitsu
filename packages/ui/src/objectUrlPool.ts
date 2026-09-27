@@ -53,7 +53,23 @@ function evict(): void {
     }
   }
   for (const url of droppable) drop(url);
+  // 引用中的 Blob 不受字节上限约束（撤销正在展示的 URL 会立即破图）：
+  // 全部条目都被引用而总量超限时不是可修复状态，只告警一次；等引用释放、
+  // 下一次 evict 把总量收回上限内后复位，异常再次发生时能再次提示。
+  if (totalBytes > MAX_TOTAL_BYTES) {
+    if (!overBudgetWarned) {
+      overBudgetWarned = true;
+      console.warn(
+        `[kanitsu] 对象 URL 池超出字节上限（约 ${Math.round(totalBytes / 1048576)}MB），且条目均在展示中：等引用释放后自动收缩`,
+      );
+    }
+  } else {
+    overBudgetWarned = false;
+  }
 }
+
+/** 字节超限但无法淘汰（全部条目被引用）时的告警开关：只提示一次。 */
+let overBudgetWarned = false;
 
 /**
  * 取一个对象 URL 供 <img>/<video> 展示；组件销毁时必须调用 releaseObjectUrl

@@ -33,7 +33,8 @@ describe('organizer naming rules', () => {
 
     const viaParser = parseImageName('042_123456789_p0.jpg', [rule]);
     assert.equal(viaParser.virtualPath, '042/042_123456789_p0.jpg');
-    assert.equal(viaParser.rule, '三位前缀分组');
+    // parsed.rule 返回规则 id（唯一）：重名规则不会在命中统计与选中行为上串台。
+    assert.equal(viaParser.rule, 'test-prefix');
   });
 
   test('invalid custom regex is ignored', () => {
@@ -251,6 +252,57 @@ describe('目标位置已有同名目录 / 同名文件（三端语义对齐）'
     assert.ok(
       !Object.values(after.images).some((i) => i.relPath.includes('escape')),
       '文件不得逃出整理容器',
+    );
+  });
+
+  test('多级 ..（a/../../b.jpg）同样被拒绝；绝对路径样式的绑定被约束在容器内', async () => {
+    const store = new MemoryLibraryStore();
+    const root = await store.ensureLibraryRoot();
+    const pack = await store.createFolder(root, 'Pack');
+    await store.writeBlob(pack, 'x.jpg', new Blob(['x'], { type: 'image/svg+xml' }));
+    await store.writeBlob(pack, 'y.jpg', new Blob(['y'], { type: 'image/svg+xml' }));
+
+    const snapshot = await scanLibrary(store);
+    const byName = (name: string) => Object.values(snapshot.images).find((i) => i.name === name)!;
+    const result = await applyOrganize(store, snapshot, 'Pack', [
+      { imageId: byName('x.jpg').id, virtualPath: 'a/../../b.jpg', confidence: 0.9, materialized: false },
+      { imageId: byName('y.jpg').id, virtualPath: '/abs/y.jpg', confidence: 0.9, materialized: false },
+    ]);
+
+    // 多级 .. 逃逸 → move-failed；「/abs/…」不逃逸（前导斜杠被归一为容器相对路径）。
+    assert.deepEqual(result.conflicts.map((c) => c.reason), ['move-failed']);
+    assert.equal(result.appliedCount, 1);
+    const after = await scanLibrary(store);
+    const rels = Object.values(after.images).map((i) => i.relPath).sort();
+    assert.ok(rels.includes('Pack/x.jpg'), '逃逸绑定不得移动文件');
+    assert.ok(rels.includes('Pack/abs/y.jpg'), '绝对路径样式的绑定落在容器内');
+    assert.ok(!rels.some((rel) => rel.startsWith('abs/') || rel === 'b.jpg'), '不得落到容器外');
+  });
+
+  test('移动全部失败时，本次新建的空目标目录被回滚', async () => {
+    const store = new MemoryLibraryStore();
+    const root = await store.ensureLibraryRoot();
+    const pack = await store.createFolder(root, 'Pack');
+    await store.writeBlob(pack, 'x.jpg', new Blob(['x'], { type: 'image/svg+xml' }));
+    await store.writeBlob(pack, 'y.jpg', new Blob(['y'], { type: 'image/svg+xml' }));
+
+    const snapshot = await scanLibrary(store);
+    // 模拟快照过期（源文件在整理前被外部删除）：store.move 全部失败。
+    await store.remove({ id: '/Pack/x.jpg', name: 'x.jpg', kind: 'file' });
+    await store.remove({ id: '/Pack/y.jpg', name: 'y.jpg', kind: 'file' });
+
+    const byName = (name: string) => Object.values(snapshot.images).find((i) => i.name === name)!;
+    const result = await applyOrganize(store, snapshot, 'Pack', [
+      { imageId: byName('x.jpg').id, virtualPath: 'fresh/x.jpg', confidence: 0.9, materialized: false },
+      { imageId: byName('y.jpg').id, virtualPath: 'fresh/y.jpg', confidence: 0.9, materialized: false },
+    ]);
+
+    assert.equal(result.appliedCount, 0);
+    assert.equal(result.conflicts.filter((c) => c.reason === 'move-failed').length, 2);
+    const after = await scanLibrary(store);
+    assert.ok(
+      !Object.values(after.folders).some((f) => f.relPath === 'Pack/fresh'),
+      '冲突全部失败时新建的空目录不得残留',
     );
   });
 

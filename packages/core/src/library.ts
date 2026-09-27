@@ -6,6 +6,11 @@ import { scanLibrary, type ScanOptions } from './scan';
  * A persistent store for the library scan index. The renderer keeps this index so
  * that a fresh startup does not need to re-walk the whole on-disk library; it loads
  * the cached snapshot instead. Mutations re-scan the affected library and save.
+ *
+ * 缓存命中完全信任 fingerprint 契约：桌面端对整棵目录树（relPath|size|mtime）做
+ * 摘要，应用自身之外的任何增删改都会令其失配；memory 端按顶层条目名拼接。
+ * 影响快照内容的配置只有 RAW / HEIF 收录开关（下方显式比对）；整理规则等
+ * 纯展示配置不进快照，无需参与缓存失效判断。
  */
 export interface PersistentIndex {
   /** Returns the cached snapshot, or `null` if none is persisted (e.g. first run). */

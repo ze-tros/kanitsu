@@ -55,7 +55,9 @@ export function RulesPanel({
     if (!name) return null;
     const parsed = parseImageName(name, rules);
     if (parsed.confidence < LOW_CONFIDENCE) return { hit: false as const };
-    return { hit: true as const, path: parsed.virtualPath, rule: BUILTIN_NAMES.get(parsed.rule) ?? parsed.rule };
+    // parsed.rule 是规则 id：内置用 id 反查名称，自定义规则用其唯一 id 反查名称。
+    const customNames = new Map(rules.map((rule) => [rule.id, rule.name]));
+    return { hit: true as const, path: parsed.virtualPath, rule: BUILTIN_NAMES.get(parsed.rule) ?? customNames.get(parsed.rule) ?? parsed.rule };
   }, [rules, sample]);
 
   const toggleEnabled = (id: string) => {
@@ -157,6 +159,7 @@ export function RulesPanel({
       {editor && createPortal(
         <RuleEditorDialog
           rule={editor.rule}
+          rules={rules}
           sample={sample}
           onSave={saveRule}
           onDelete={deleteRule}
@@ -170,12 +173,14 @@ export function RulesPanel({
 
 function RuleEditorDialog({
   rule,
+  rules,
   sample: initialSample,
   onSave,
   onDelete,
   onClose,
 }: {
   rule: CustomOrganizeRule | null;
+  rules: CustomOrganizeRule[];
   sample: string;
   onSave: (rule: CustomOrganizeRule) => void;
   onDelete: (id: string) => void;
@@ -205,6 +210,10 @@ function RuleEditorDialog({
     const trimmedConfidence = confidence.trim();
     const numericConfidence = trimmedConfidence === '' ? DEFAULT_CONFIDENCE : Number(trimmedConfidence);
     if (!name.trim()) return setError('请输入规则名称。');
+    // 名称唯一（名称只作展示，但重名会让规则列表难以区分）。
+    if (rules.some((other) => other.id !== rule?.id && other.name === name.trim())) {
+      return setError('已有同名规则，请换一个名称。');
+    }
     if (!pattern.trim()) return setError('请输入正则表达式。');
     if (regexError) return setError('正则表达式无效：' + regexError);
     if (!target.trim()) return setError('请输入目标目录模板。');

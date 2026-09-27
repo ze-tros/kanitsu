@@ -65,21 +65,29 @@ export class FolderPathBlockedError extends Error {}
  * 解析父目录下名为 `segment` 的子目录；不存在则创建。
  * 与真实平台语义对齐：该名字已被文件占用时抛 FolderPathBlockedError，
  * 而不是把文件当目录继续往下走（各端行为会分裂，memory 端甚至会静默改写节点）。
+ * `createdOut` 传入时，记录本次【新建】的目录引用，供调用方回滚空目录。
  */
-async function resolveChildFolder(store: LibraryStore, parent: FolderRef, segment: string): Promise<FolderRef> {
+async function resolveChildFolder(store: LibraryStore, parent: FolderRef, segment: string, createdOut?: FolderRef[]): Promise<FolderRef> {
   for await (const entry of store.listChildren(parent)) {
     if (entry.name !== segment) continue;
     if (entry.kind === 'folder') return { id: entry.id, name: entry.name, kind: 'folder' };
     throw new FolderPathBlockedError(`目标路径被同名文件占用：${segment}`);
   }
-  return store.createFolder(parent, segment);
+  const created = await store.createFolder(parent, segment);
+  createdOut?.push(created);
+  return created;
 }
 
 type FolderCache = Map<string, FolderRef>;
 type ChildNameCache = Map<string, Set<string>>;
 
 /** Resolves/creates a folder relative to the library root, memoizing every visited level. */
-async function resolveFolderCached(store: LibraryStore, relPath: string, cache: FolderCache): Promise<FolderRef> {
+async function resolveFolderCached(
+  store: LibraryStore,
+  relPath: string,
+  cache: FolderCache,
+  createdOut?: FolderRef[],
+): Promise<FolderRef> {
   const normalized = normalizeRelPath(relPath);
   const existing = cache.get(normalized);
   if (existing) return existing;
@@ -96,7 +104,7 @@ async function resolveFolderCached(store: LibraryStore, relPath: string, cache: 
     const childRel = currentRel ? currentRel + '/' + segment : segment;
     let child: FolderRef | null = cache.get(childRel) ?? null;
     if (!child) {
-      child = await resolveChildFolder(store, current, segment);
+      child = await resolveChildFolder(store, current, segment, createdOut);
       cache.set(childRel, child);
     }
     current = child;
@@ -148,8 +156,13 @@ const UNIQUE_SUFFIX_BYTES = 12;
 
 export function nextUniqueName(names: Set<string>, name: string): string {
   const dot = name.lastIndexOf('.');
-  let stem = dot > 0 ? name.slice(0, dot) : name;
-  const ext = dot > 0 ? name.slice(dot) : '';
+  // 只有「非首字符且不在末尾」的点号才按扩展名分隔：'.jpg' 整名当 stem（隐藏
+  // 文件），'x.' 的孤立尾点不当扩展名，避免产出「x (2).」这类畸形名。
+  // 多段扩展名(.tar.gz)按最后一个点切分：stem 保留中段、尾部扩展名原样保留，
+  // 追加序号后仍是合法的单段文件名。
+  const hasExt = dot > 0 && dot < name.length - 1;
+  let stem = hasExt ? name.slice(0, dot) : name;
+  const ext = hasExt ? name.slice(dot) : '';
   // 先把基础名压到安全长度，再追加序号：超长名无限追加「 (N)」会越过
   // 文件系统的 255 字节上限导致移动失败。截断按码点进行，避免劈开代理对。
   const stemBudget = MAX_NAME_BYTES - textEncoder.encode(ext).length - UNIQUE_SUFFIX_BYTES;
@@ -199,6 +212,9 @@ export async function applyOrganize(
   // dominant cost for large libraries (previously O(files × depth) directory scans).
   const folderCache: FolderCache = new Map();
   const childNameCache: ChildNameCache = new Map();
+  /** 本次调用【新建】的目录（按创建序）：结束后回收仍是空的，避免冲突
+   *  被全部跳过时留下预览/撤销都不体现的空文件夹。 */
+  const createdFolders: FolderRef[] = [];
 
   const actions: OrganizeAction[] = [];
   const conflicts: OrganizeConflict[] = [];
@@ -251,7 +267,7 @@ export async function applyOrganize(
     if (normalizeRelPath(image.relPath) === targetAbsRel) continue;
 
     try {
-      const targetFolder = await resolveFolderCached(store, targetFolderRel, folderCache);
+      const targetFolder = await resolveFolderCached(store, targetFolderRel, folderCache, createdFolders);
       const names = await loadChildNames(store, targetFolderRel, targetFolder, childNameCache);
       let finalName = targetName;
       if (names.has(nameKey(finalName))) {
@@ -284,6 +300,22 @@ export async function applyOrganize(
         reason: err instanceof FolderPathBlockedError ? 'target-exists' : 'move-failed',
       });
       void err;
+    }
+  }
+
+  // 回滚本次新建且仍为空的目录（从深到浅：子目录删掉后父目录才有机会变空；
+  // 已装有移动成果的目录自然不会为空，保留）。
+  for (const folder of [...createdFolders].reverse()) {
+    try {
+      let empty = true;
+      for await (const child of store.listChildren(folder)) {
+        void child;
+        empty = false;
+        break;
+      }
+      if (empty) await store.remove(folder);
+    } catch {
+      // 回滚失败无害：最多多留一个空目录。
     }
   }
 

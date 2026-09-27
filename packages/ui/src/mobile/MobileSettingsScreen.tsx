@@ -373,7 +373,8 @@ export function MobileSettingsScreen({
           <section className="m2-set-card" aria-label="关于">
             <h4>关于</h4>
             <SettingsItem icon="shield" title="隐私" subtitle="不联网、不上传；只访问你授权的文件夹，导入后不修改源文件夹" />
-            <SettingsItem icon="info" title="Kanitsu" subtitle={`Android 版 · v${androidBridge()?.version ?? '0.1.0'}`} />
+            {/* 版本号由构建期注入（desktop package.json 单一来源）；缺失时省略而不是显示写死的错误值。 */}
+            <SettingsItem icon="info" title="Kanitsu" subtitle={androidBridge()?.version ? `Android 版 · v${androidBridge()!.version}` : 'Android 版'} />
           </section>
         </main>
       </div>

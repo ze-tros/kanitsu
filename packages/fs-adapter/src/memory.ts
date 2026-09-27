@@ -288,11 +288,21 @@ export class MemoryLibraryStore implements LibraryStore {
     this.tree.remove(entry.id);
   }
 
-  async zipLibrary(targetRelPath: string, onProgress?: (done: number, total: number) => void): Promise<ZipExportResult> {
+  async zipLibrary(
+    targetRelPath: string,
+    onProgress?: (done: number, total: number) => void,
+    // 与 types.ts 签名对齐；memory 端无原生取消能力，token 仅占位。
+    _cancelToken?: string,
+  ): Promise<ZipExportResult> {
     return this.zipTree(targetRelPath, null, onProgress);
   }
 
-  async zipSelection(relPaths: string[], _archiveName: string, onProgress?: (done: number, total: number) => void): Promise<ZipExportResult> {
+  async zipSelection(
+    relPaths: string[],
+    _archiveName: string,
+    onProgress?: (done: number, total: number) => void,
+    _cancelToken?: string,
+  ): Promise<ZipExportResult> {
     return this.zipTree('', new Set(relPaths.map((p) => normalizeRel(p))), onProgress);
   }
 

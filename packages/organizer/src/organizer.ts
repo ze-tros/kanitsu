@@ -299,7 +299,9 @@ export function applyCustomRule(fileName: string, rule: CustomOrganizeRule): Par
   return {
     virtualPath: dir + '/' + fileName,
     confidence: clampConfidence(rule.confidence),
-    rule: rule.name || 'custom',
+    // 返回规则 id（唯一）而不是名称：重名规则不会在命中统计与选中行为上互相串台，
+    // 名称只作展示文本（展示层按 id 反查）。
+    rule: rule.id,
   };
 }
 

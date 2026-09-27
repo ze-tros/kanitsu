@@ -662,7 +662,7 @@ html:has(.dk-setup-win), html:has(.dk-setup-win) body, html:has(.dk-setup-win) #
 .dk-v-bottom { bottom: 0; padding: 20px 0 10px; background: linear-gradient(transparent, rgba(0,0,0,.62)); }
 .dk-viewer.idle .dk-v-top { opacity: 0; transform: translateY(-8px); pointer-events: none; -webkit-app-region: no-drag; }
 .dk-viewer.idle .dk-v-bottom { opacity: 0; transform: translateY(8px); pointer-events: none; }
-.dk-viewer.idle .dk-v-arrow { opacity: 0 !important; }
+.dk-viewer.idle .dk-v-arrow { opacity: 0 !important; pointer-events: none; }
 .dk-viewer.idle .dk-v-stage { cursor: none; }
 .dk-viewer .dk-ib { color: #e6e2dc; }
 .dk-viewer .dk-ib:hover:not(:disabled) { background: rgba(255,255,255,.12); color: #fff; }

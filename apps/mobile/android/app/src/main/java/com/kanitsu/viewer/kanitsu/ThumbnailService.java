@@ -126,13 +126,21 @@ public final class ThumbnailService {
     private Result lookup(String key) {
         File gif = new File(cacheDir, key + ".gif");
         if (gif.exists()) {
+            touchForLru(gif);
             return new Result(readFile(gif), "image/gif");
         }
         File jpg = new File(cacheDir, key + ".jpg");
         if (jpg.exists()) {
+            touchForLru(jpg);
             return new Result(readFile(jpg), "image/jpeg");
         }
         return null;
+    }
+
+    /** 命中即触碰 mtime：磁盘 LRU 淘汰按「最近使用」而不是「最近生成」
+     *  （仅一次元数据写，不涉及文件内容）。 */
+    private static void touchForLru(File f) {
+        f.setLastModified(System.currentTimeMillis());
     }
 
     private void store(String key, Result result) {

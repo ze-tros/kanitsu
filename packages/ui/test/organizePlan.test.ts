@@ -37,13 +37,15 @@ test('选单条规则时其余图片保持原位', () => {
   assert.equal(bindingsForRule(plan, AUTO_RULE_ID).length, 3);
 });
 
-test('自定义规则优先并以名称作为规则 id', () => {
+test('自定义规则优先，规则 id 用唯一 id（重名规则不串台）', () => {
   const rules = [{ id: 'r1', name: '按作者', pattern: '^\\[(.+?)\\]', target: 'by/$1', confidence: 0.9, enabled: true }];
   const plan = planBindings(images, rules);
   const custom = ruleOptions(plan, rules).find((o) => o.kind === 'custom')!;
-  assert.equal(custom.id, '按作者');
+  // 规则选项的 id 是规则的唯一 id；名称只作展示文本。
+  assert.equal(custom.id, 'r1');
+  assert.equal(custom.name, '按作者');
   assert.equal(custom.hitCount, 2);
-  assert.equal(bindingsForRule(plan, '按作者')[0]!.virtualPath, 'by/佐仓/[佐仓] 标题A.jpg');
+  assert.equal(bindingsForRule(plan, 'r1')[0]!.virtualPath, 'by/佐仓/[佐仓] 标题A.jpg');
 });
 
 test('预览按目标目录分组并可重命名', () => {

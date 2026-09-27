@@ -294,6 +294,12 @@ export function MobilePromptDialog({
   const titleId = useId();
   const labelId = useId();
 
+  // initialValue 变化时同步输入值：对话框实例被复用（如连续重命名不同图片）时，
+  // 否则会显示上一次的文件名。
+  useEffect(() => {
+    setValue(initialValue);
+  }, [initialValue]);
+
   useEffect(() => {
     // 延迟聚焦，等弹窗动画与输入法就绪
     const t = window.setTimeout(() => {

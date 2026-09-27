@@ -16,6 +16,10 @@ export interface ScanOptions {
   enableHeif?: boolean;
 }
 
+/** 目录递归深度上限：防御性护栏，异常深的嵌套不会打爆递归栈；
+ *  超过上限的层级不再下钻（快照里不出现该层及更深的内容）。 */
+const MAX_SCAN_DEPTH = 128;
+
 export async function scanLibrary(store: LibraryStore, opts?: ScanOptions): Promise<LibrarySnapshot> {
   const enableRaw = opts?.enableRaw ?? false;
   const enableHeif = opts?.enableHeif ?? false;
@@ -24,7 +28,7 @@ export async function scanLibrary(store: LibraryStore, opts?: ScanOptions): Prom
   const folders: Record<string, FolderNode> = {};
   const images: Record<string, ImageEntry> = {};
 
-  async function walk(folder: FolderRef, relPath: string, parentId: string | null): Promise<FolderNode> {
+  async function walk(folder: FolderRef, relPath: string, parentId: string | null, depth: number): Promise<FolderNode> {
     const folderNode: FolderNode = {
       id: folderIdFor(relPath),
       parentId,
@@ -42,8 +46,9 @@ export async function scanLibrary(store: LibraryStore, opts?: ScanOptions): Prom
 
     for await (const child of store.listChildren(folder)) {
       if (child.kind === 'folder') {
+        if (depth >= MAX_SCAN_DEPTH) continue;
         childCount++;
-        const childNode = await walk(child, joinRelPath(relPath, child.name), folderNode.id);
+        const childNode = await walk(child, joinRelPath(relPath, child.name), folderNode.id, depth + 1);
         descendantImageCount += childNode.imageCount;
       } else if (isSupportedImage(child.name) || (enableRaw && isRawImage(child.name)) || (enableHeif && isHeifImage(child.name))) {
         const childRel = joinRelPath(relPath, child.name);
@@ -70,7 +75,7 @@ export async function scanLibrary(store: LibraryStore, opts?: ScanOptions): Prom
     return folderNode;
   }
 
-  await walk(root, '', null);
+  await walk(root, '', null, 0);
   const rootId = folderIdFor('');
   return { rootId, folders, images, fingerprint, rawScan: enableRaw, heifScan: enableHeif };
 }

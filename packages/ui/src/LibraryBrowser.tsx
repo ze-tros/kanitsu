@@ -75,6 +75,7 @@ import {
   type PersistentIndex,
 } from '../../core/src/index';
 import type { FileRef, FolderRef, ImportSourcePicker, LibraryStore } from '../../fs-adapter/src/types';
+import { ZipCancelledError } from '../../fs-adapter/src/types';
 import type { DesktopRawViewMode } from '../../fs-adapter/src/electron';
 import type { CustomOrganizeRule } from '../../organizer/src/index';
 import { pickCover } from '../../cover-picker/src/index';
@@ -201,6 +202,15 @@ function downloadBlob(blob: Blob, fileName: string): void {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+}
+
+/**
+ * 「用户主动取消」判定：优先按错误类型（ZipCancelledError 在渲染端抛出，
+ * instanceof 可靠）；导入侧的取消大多源自主进程对话框，经 IPC 只剩消息文本，
+ * 以「取消」关键词兜底（唯一保留的文本判定，集中在这一处）。
+ */
+function isCancelledError(err: unknown): boolean {
+  return err instanceof ZipCancelledError || /取消/.test(String(err));
 }
 
 // 子文件夹预览图预加载参数：进入某文件夹时，为每个子文件夹的前若干张
@@ -420,6 +430,14 @@ export function LibraryBrowser({
   // ———————————————————— 本机记录 ————————————————————
   const [pinnedCovers, setPinnedCovers] = useState<Record<string, string>>(() => loadPinnedCovers());
   const [blurredImages, setBlurredImages] = useState<ReadonlySet<string>>(() => loadBlurredImages());
+  // 封面/隐私标记的持久化：随状态变化统一写盘（副作用不进 setState updater，
+  // 大图包的同步 stringify 也因此发生在渲染之后而不是事件处理中）。
+  useEffect(() => {
+    savePinnedCovers(pinnedCovers);
+  }, [pinnedCovers]);
+  useEffect(() => {
+    saveBlurredImages(blurredImages);
+  }, [blurredImages]);
   const [importedAt, setImportedAt] = useState<ImportedAtMap>(() => loadImportedAt());
   const [recentBrowse, setRecentBrowse] = useState<RecentBrowseEntry[]>(() => loadRecentBrowse());
   /** 本次会话新导入、尚未打开过的顶层图包。 */
@@ -564,8 +582,9 @@ export function LibraryBrowser({
     return ts ? formatRelativeTime(ts) : undefined;
   }, [importedAt]);
 
-  // 「最近导入」时间窗随导入记录一起刷新（导入后立即出现在筛选里）。
-  const recentCutoff = useMemo(() => Date.now() - RECENT_IMPORT_WINDOW_MS, [importedAt]);
+  // 「最近导入」时间窗每次渲染取当前时钟：冻结在导入瞬间的话，时钟推进后
+  // 「最近」筛选永不变化（图包会一直留在/离开「最近」分类）。
+  const recentCutoff = Date.now() - RECENT_IMPORT_WINDOW_MS;
   const filterCounts = useMemo<Record<LibraryFilter, number>>(() => ({
     all: topFolders.length,
     recent: topFolders.filter((f) => (importedAt[f.id] ?? 0) >= recentCutoff).length,
@@ -1078,12 +1097,14 @@ export function LibraryBrowser({
   }, [currentFolderId, isRoot, notify, prefs.includeSubfolders, prefs.sort, prefs.sortDir, selectFolder, snapshot]);
 
   // ———————————————————— 标记：封面 / 隐私 ————————————————————
+  // 持久化统一放在渲染后的 effect 里：setState updater 必须纯净（React 18
+  // 可能多次调用），localStorage 写入（大图包下是同步 stringify）也不该阻塞
+  // 状态更新本身。
   const pinCover = useCallback((folderId: string, imageId: string | null, imageName?: string) => {
     setPinnedCovers((prev) => {
       const next = { ...prev };
       if (imageId) next[folderId] = imageId;
       else delete next[folderId];
-      savePinnedCovers(next);
       return next;
     });
     notify(imageId ? `已将「${imageName ?? '该图片'}」设为图包封面` : '已恢复智能封面', 'success');
@@ -1101,7 +1122,6 @@ export function LibraryBrowser({
         if (blurred) next.add(p);
         else next.delete(p);
       }
-      saveBlurredImages(next);
       return next;
     });
   }, []);
@@ -1199,7 +1219,7 @@ export function LibraryBrowser({
       notify(`已导入「${task.targetTopFolder}」· ${formatCount(task.copiedImageCount)} 张${skipped}`, 'success', [...reportAction, ...openAction]);
     } catch (err) {
       const msg = String(err);
-      if (/取消/.test(msg)) dropTask(taskId);
+      if (isCancelledError(err)) dropTask(taskId);
       else {
         finishTask(taskId, 'failed', { result: `失败：${msg}` });
         notify(`导入失败：${msg}`, 'error');
@@ -1260,7 +1280,7 @@ export function LibraryBrowser({
           } catch (err) {
             // IPC 错误形如 “Error invoking remote method 'x': Error: <msg>”，只保留说明文字。
             const msg = String(err).replace(/^Error invoking remote method '[^']+': /, '').replace(/^Error: /, '');
-            if (!/取消/.test(msg)) notify(msg, 'error');
+            if (!isCancelledError(err)) notify(msg, 'error');
           }
         }
       })();
@@ -1303,7 +1323,7 @@ export function LibraryBrowser({
       notify(`已导出 ${formatCount(result.exportedCount)} 张图片${result.outputPath ? `到 ${result.outputPath}` : ''}`, 'success');
     } catch (err) {
       const msg = String(err);
-      if (/取消/.test(msg)) dropTask(taskId);
+      if (isCancelledError(err)) dropTask(taskId);
       else {
         finishTask(taskId, 'failed', { result: `失败：${msg}` });
         notify(`导出失败：${msg}`, 'error');
@@ -1522,29 +1542,24 @@ export function LibraryBrowser({
 
   const confirmDelete = useCallback(async (request: DeleteRequest) => {
     setDialog(null);
-    // 查看器里删掉当前图：删完停在相邻的一张，而不是直接退出查看器。
-    const deletingIds = new Set(request.images.map((image) => image.id));
-    const viewerNext = viewerImageId && deletingIds.has(viewerImageId)
-      ? (() => {
-          const i = viewerImages.findIndex((image) => image.id === viewerImageId);
-          const rest = viewerImages.filter((image) => !deletingIds.has(image.id));
-          if (rest.length === 0) return null;
-          const after = viewerImages.slice(i + 1).find((image) => !deletingIds.has(image.id));
-          return after ?? rest[rest.length - 1]!;
-        })()
-      : undefined;
+    const snap = snapshotRef.current;
     const total = request.images.length + request.folders.length;
     const taskId = total > 1 ? startTask({ kind: 'delete', title: `删除 ${formatCount(total)} 项`, total }) : null;
     setBusy(true);
     let ok = 0;
     let failed = 0;
+    const failures: string[] = [];
+    /** 实际删除成功的图片 id（含被删目录覆盖到的图片），查看器列表据此收缩。 */
+    const deletedIds = new Set<string>();
     try {
       for (const image of request.images) {
         try {
           await deleteImage(store, image);
           ok++;
-        } catch {
+          deletedIds.add(image.id);
+        } catch (err) {
           failed++;
+          if (failures.length < 3) failures.push(`${image.name}：${String(err).replace(/^Error: /, '')}`);
         }
         if (taskId) patchTask(taskId, { done: ok + failed });
       }
@@ -1552,18 +1567,28 @@ export function LibraryBrowser({
         try {
           await deleteLibraryFolder(store, folder.relPath);
           ok++;
-        } catch {
+          // 目录删掉了，它覆盖的图片也一并从查看器列表剔除。
+          if (snap) for (const img of imagesOf(snap, folder.id)) deletedIds.add(img.id);
+        } catch (err) {
           failed++;
+          if (failures.length < 3) failures.push(`${folder.name}：${String(err).replace(/^Error: /, '')}`);
         }
         if (taskId) patchTask(taskId, { done: ok + failed });
       }
-      if (viewerNext !== undefined) {
-        if (viewerNext) {
-          setViewerList((list) => (list ? list.filter((image) => !deletingIds.has(image.id)) : list));
-          setViewerImageId(viewerNext.id);
-        } else {
+      // 查看器跳转按【实际删除结果】计算：当前图删成功了才切到相邻一张，
+      // 删除失败（或整个目录删除失败）时当前图仍在，保持不动。
+      if (deletedIds.size > 0) {
+        setViewerList((list) => (list ? list.filter((image) => !deletedIds.has(image.id)) : list));
+      }
+      if (viewerImageId && deletedIds.has(viewerImageId)) {
+        const i = viewerImages.findIndex((image) => image.id === viewerImageId);
+        const rest = viewerImages.filter((image) => !deletedIds.has(image.id));
+        if (rest.length === 0) {
           setViewerImageId(null);
           setViewerList(null);
+        } else {
+          const after = viewerImages.slice(i + 1).find((image) => !deletedIds.has(image.id));
+          setViewerImageId((after ?? rest[rest.length - 1]!).id);
         }
       }
       const next = await refresh();
@@ -1572,8 +1597,11 @@ export function LibraryBrowser({
         selectFolder(parent && next.folders[parent] ? parent : next.rootId);
       }
       clearSelection();
+      const failureDetail = failures.length > 0
+        ? `（${failures.join('；')}${failures.length < failed ? ' 等' : ''}）`
+        : '';
       const text = failed > 0
-        ? `已删除 ${formatCount(ok)} 项，失败 ${failed} 项`
+        ? `已删除 ${formatCount(ok)} 项，失败 ${failed} 项${failureDetail}`
         : total === 1
           ? `已删除「${request.images[0]?.name ?? request.folders[0]?.name}」`
           : `已删除 ${formatCount(ok)} 项`;
@@ -2055,7 +2083,12 @@ export function LibraryBrowser({
         }
         return;
       }
-      const navMap: Record<string, NavKey> = { ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down', Home: 'home', End: 'end', PageUp: 'pageUp', PageDown: 'pageDown' };
+      // 列表视图是单列布局：左右方向键映射为上下移动（与列表语义一致），
+      // 网格视图保持「左右按序号」。
+      const listMode = prefs.layout === 'list';
+      const navMap: Record<string, NavKey> = listMode
+        ? { ArrowLeft: 'up', ArrowRight: 'down', ArrowUp: 'up', ArrowDown: 'down', Home: 'home', End: 'end', PageUp: 'pageUp', PageDown: 'pageDown' }
+        : { ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down', Home: 'home', End: 'end', PageUp: 'pageUp', PageDown: 'pageDown' };
       if (navMap[key]) {
         event.preventDefault();
         moveFocus(navMap[key]!);
@@ -2082,7 +2115,7 @@ export function LibraryBrowser({
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [activateKey, clearSelection, contextMenu, dialog, filterText, focusKey, galleryImages, handleNavBack, handleNavForward, moveFocus, openPalette, openViewer, palette, renameKey, requestDelete, runImport, selectAll, selectedFolders, selectedImages, selection, selectionCount, setThumbStep, settings, snapshot, taskPopoverOpen, toggleSelect, viewerImageId]);
+  }, [activateKey, clearSelection, contextMenu, dialog, filterText, focusKey, galleryImages, handleNavBack, handleNavForward, moveFocus, openPalette, openViewer, palette, prefs.layout, renameKey, requestDelete, runImport, selectAll, selectedFolders, selectedImages, selection, selectionCount, setThumbStep, settings, snapshot, taskPopoverOpen, toggleSelect, viewerImageId]);
 
   // 鼠标侧键：浏览时后退 / 前进；查看器里上一张 / 下一张。输入框聚焦时不触发。
   useEffect(() => {

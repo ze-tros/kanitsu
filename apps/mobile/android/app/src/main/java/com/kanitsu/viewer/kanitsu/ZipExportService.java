@@ -33,15 +33,24 @@ public final class ZipExportService {
         this.context = context;
     }
 
-    public int[] export(AlbumLibrary albums, String targetRelPath, Uri outUri, ProgressEmitter emitter, AtomicBoolean cancel) throws IOException, JSONException {
-        return export(albums, targetRelPath, null, outUri, emitter, cancel);
-    }
-
     /**
      * include 非空时只打包其中列出的图片（相对图库根的 relPath）。条目仍由遍历图库得到、
      * 再按集合过滤，传入的路径不直接拼接成文件，不会越出图库根。
+     *
+     * 失败（异常）路径会删除已创建的 content:// 文档：用户拿到的要么是完整 zip，
+     * 要么什么都不留，而不是半截损坏的归档；取消走正常返回（canceled 标志），
+     * 已写入的条目保留，语义不变。
      */
     public int[] export(AlbumLibrary albums, String targetRelPath, Set<String> include, Uri outUri, ProgressEmitter emitter, AtomicBoolean cancel) throws IOException, JSONException {
+        try {
+            return doExport(albums, targetRelPath, include, outUri, emitter, cancel);
+        } catch (IOException | JSONException | RuntimeException e) {
+            deleteExportDocumentQuietly(outUri);
+            throw e;
+        }
+    }
+
+    private int[] doExport(AlbumLibrary albums, String targetRelPath, Set<String> include, Uri outUri, ProgressEmitter emitter, AtomicBoolean cancel) throws IOException, JSONException {
         File root = albums.ensureRoot();
         String norm = normalize(targetRelPath);
         File sourceDir = norm.isEmpty() ? root : new File(root, norm);
@@ -79,12 +88,20 @@ public final class ZipExportService {
                 counts[1]++;
                 emitter.emit(counts[1], total, 0, item.relPath);
             }
-            if (counts[1] > 0) {
-                writeIndexJson(zos, indexRoot, items);
-            }
+            // index.json 无条件写出：与 memory/Electron 端对齐（取消/空目录时
+            // images 数组为空或为部分结果，但归档结构始终完整）。
+            writeIndexJson(zos, indexRoot, items);
             zos.finish();
         }
         return counts;
+    }
+
+    /** 删除本次导出创建的 SAF 文档（失败清理）。删除失败也忽略：目标文档由用户指定。 */
+    private void deleteExportDocumentQuietly(Uri uri) {
+        try {
+            android.provider.DocumentsContract.deleteDocument(context.getContentResolver(), uri);
+        } catch (Exception ignored) {
+        }
     }
 
     private void collectItems(File dir, File root, AlbumLibrary albums, List<Item> out) throws IOException {

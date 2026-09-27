@@ -200,6 +200,10 @@ export function initAndroidBridge(): Promise<KanitsuAndroidBridge> {
   return requireBridge();
 }
 
+/** 应用版本：构建时由 apps/web/vite.config.ts 从 apps/desktop/package.json 注入。 */
+const APP_VERSION: string =
+  (import.meta as unknown as { env?: Record<string, string | undefined> }).env?.KANITSU_VERSION ?? '';
+
 function requireBridge(): Promise<KanitsuAndroidBridge> {
   if (window.kanitsuAndroid) return Promise.resolve(window.kanitsuAndroid);
   if (!bridgePromise) {
@@ -208,7 +212,10 @@ function requireBridge(): Promise<KanitsuAndroidBridge> {
       const p = registerPlugin<KanitsuPluginNative>('Kanitsu');
       const bridge: KanitsuAndroidBridge = {
         platform: 'android',
-        version: '0.1.0',
+        // 构建时由 apps/web/vite.config.ts 从 apps/desktop/package.json 注入
+        // （define import.meta.env.KANITSU_VERSION）；非 Vite 环境（类型检查/
+        // 测试）为空，UI 侧据此省略版本号，不再显示写死的错误值。
+        version: APP_VERSION,
         pickSourceFolder: () => p.pickSourceFolder(),
         listSourceChildren: async (folder) => (await p.listSourceChildren({ folder })).entries,
         readSourceBlob: async (file) => b64ToBytes((await p.readSourceBlob({ file })).data),

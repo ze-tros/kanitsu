@@ -124,6 +124,29 @@ test('encodeFrames → decodeGifFrames：往返（编 → 解 → 编）输出�
   assert.equal(round.height, 6);
 });
 
+test('decodeGifFrames：帧数巨大时前缀采样（不逐帧合成全部帧）', () => {
+  const w = 4;
+  const h = 4;
+  const total = 200; // > GIF_MAX_FRAMES(16) × 8 → 走前缀采样
+  const colors = Array.from({ length: total }, (_, i) => [i, 100, 50] as [number, number, number]);
+  const buf = Buffer.alloc(1 << 20);
+  const writer = new GifWriter(buf, w, h, { palette: makePackedPalette(colors), loop: 0 });
+  for (let i = 0; i < total; i++) {
+    writer.addFrame(0, 0, w, h, new Array<number>(w * h).fill(i), { delay: 4, transparent: GifTransparentIndex });
+  }
+  const gif = buf.subarray(0, writer.end());
+
+  const { frames, delays } = decodeGifFrames(Buffer.from(gif), 16, 16);
+  assert.equal(frames.length, 16);
+  assert.equal(delays.length, 16);
+  // 前缀采样：输出帧依次对应源帧 0..15（每帧纯色 i → R 分量 = i）。
+  // 若仍是均匀采样，最后一帧会是源帧 199（R = 199）。
+  const centerOf = (frame: Uint8Array): number => frame[((2 * 4 + 2) * 4)]!;
+  for (let k = 0; k < 16; k++) {
+    assert.equal(centerOf(frames[k]!), k, `第 ${k} 个输出帧应是源帧 ${k}`);
+  }
+});
+
 /** omggif 调色板按 b|g<<8|r<<16 打包；透明索引 255 要求调色板补足 2 的幂（对齐 256）。 */
 function makePackedPalette(colors: [number, number, number][]): number[] {
   const palette = colors.map(([r, g, b]) => b | (g << 8) | (r << 16));

@@ -61,13 +61,25 @@ function loadHeifLib(): Promise<HeifLibModule> {
 
 /**
  * 完整解码 HEIF/HEIC 主图为 RGBA8。速度参考:25MP 约 2s(wasm 单线程);
- * 多图/动图容器取首帧。失败(容器损坏、无 HEVC 数据)直接抛错给调用方。
+ * 多图/动图容器优先取 is_primary_image 标记的主图(images[0] 不一定是主图,
+ * 相机文件常把隐藏网格图排在前面),找不到标记时回退首帧。失败(容器损坏、
+ * 无 HEVC 数据)直接抛错给调用方。
  */
 export async function decodeHeifToRgba(bytes: Uint8Array): Promise<HeifPixels> {
   const lib = await loadHeifLib();
   const images = new lib.HeifDecoder().decode(bytes);
   if (!images.length) throw new Error('HEIF 容器解析失败');
-  const image = images[0];
+  let image = images[0]!;
+  for (const candidate of images) {
+    try {
+      if (lib.heif_image_handle_is_primary_image(candidate.handle)) {
+        image = candidate;
+        break;
+      }
+    } catch {
+      // 标记不可用：保留回退选择
+    }
+  }
   try {
     const width = image.get_width();
     const height = image.get_height();
@@ -80,7 +92,14 @@ export async function decodeHeifToRgba(bytes: Uint8Array): Promise<HeifPixels> {
     });
     return { width: result.width, height: result.height, rgba: result.data };
   } finally {
-    image.free();
+    // decode() 返回的全部图像对象（含未选中的）统一释放，避免 wasm 侧句柄泄漏。
+    for (const img of images) {
+      try {
+        img.free();
+      } catch {
+        // 释放失败忽略
+      }
+    }
   }
 }
 
@@ -121,77 +140,96 @@ export async function decodeHeifEmbeddedToRgba(bytes: Uint8Array, minLongEdge: n
   const images = dec.decode(bytes);
   if (!images.length) return null;
   const ctx = dec.decoder;
-  if (!ctx) return null;
-
-  // 收集候选:主图之外的顶层图像(部分文件把预览列为顶层图像)+ 独立图像 item。
-  // 主图排除用 is_primary_image 标记( get_item_id 绑定不可靠,不能按 id 比)。
-  const candidates: { handle: unknown; long: number; area: number }[] = [];
-  for (let i = 1; i < images.length; i++) {
-    try {
-      const handle = images[i].handle;
-      if (lib.heif_image_handle_is_primary_image(handle)) continue;
-      const long = Math.max(images[i].get_width(), images[i].get_height());
-      if (long > 0) candidates.push({ handle, long, area: long * Math.min(images[i].get_width(), images[i].get_height()) });
-    } catch {
-      // 跳过异常的顶层图像
-    }
-  }
+  // 顶层图像句柄归 decode() 返回的 HeifLibImage 所有（由 free() 统一释放），
+  // item 句柄由 heif_context_get_image_handle 新建（须逐个 heif_image_handle_release）；
+  // 两者混用一套释放逻辑会重复释放/悬垂，用 fromItem 区分。
+  const candidates: { handle: unknown; long: number; area: number; fromItem: boolean }[] = [];
   try {
-    for (const id of lib.heif_context_get_list_of_item_IDs(ctx)) {
-      if (lib.heif_item_is_item_hidden(ctx, id)) continue;
-      let handle: unknown;
-      try {
-        handle = lib.heif_context_get_image_handle(ctx, id);
-      } catch {
-        continue; // 非图像 item(Exif/mime 等)取句柄会抛错
-      }
-      try {
-        if (lib.heif_image_handle_is_primary_image(handle)) continue;
-      } catch {
-        // 标记不可用时保留候选:后面还有隐藏过滤与尺寸下限兜底
-      }
-      const width = lib.heif_image_handle_get_width(handle);
-      const height = lib.heif_image_handle_get_height(handle);
-      if (width > 0 && height > 0) {
-        candidates.push({ handle, long: Math.max(width, height), area: width * height });
-      } else {
-        lib.heif_image_handle_release(handle);
-      }
-    }
-  } catch {
-    // 枚举失败不影响候选解析
-  }
+    if (!ctx) return null;
 
-  // 满足清晰度下限的候选里取像素量最小者(解码最快),逐个尝试直至成功。
-  const acceptable = candidates
-    .filter((c) => c.long >= minLongEdge)
-    .sort((a, b) => a.area - b.area);
-  let pixels: HeifPixels | null = null;
-  for (const candidate of acceptable) {
+    // 收集候选:主图之外的顶层图像(部分文件把预览列为顶层图像)+ 独立图像 item。
+    // 主图排除用 is_primary_image 标记( get_item_id 绑定不可靠,不能按 id 比)。
+    for (let i = 1; i < images.length; i++) {
+      try {
+        const handle = images[i].handle;
+        if (lib.heif_image_handle_is_primary_image(handle)) continue;
+        const long = Math.max(images[i].get_width(), images[i].get_height());
+        if (long > 0) candidates.push({ handle, long, area: long * Math.min(images[i].get_width(), images[i].get_height()), fromItem: false });
+      } catch {
+        // 跳过异常的顶层图像
+      }
+    }
     try {
-      const out = await lib.heif_js_decode_image2(
-        candidate.handle,
-        lib.heif_colorspace.heif_colorspace_RGB,
-        lib.heif_chroma.heif_chroma_interleaved_RGBA,
-      );
-      if (out && out.image && out.channels) {
+      for (const id of lib.heif_context_get_list_of_item_IDs(ctx)) {
+        if (lib.heif_item_is_item_hidden(ctx, id)) continue;
+        let handle: unknown;
         try {
-          pixels = extractInterleaved(lib, out);
-        } finally {
-          lib.heif_image_release(out.image);
+          handle = lib.heif_context_get_image_handle(ctx, id);
+        } catch {
+          continue; // 非图像 item(Exif/mime 等)取句柄会抛错
         }
-        break;
+        try {
+          if (lib.heif_image_handle_is_primary_image(handle)) {
+            lib.heif_image_handle_release(handle);
+            continue;
+          }
+        } catch {
+          // 标记不可用时保留候选:后面还有隐藏过滤与尺寸下限兜底
+        }
+        const width = lib.heif_image_handle_get_width(handle);
+        const height = lib.heif_image_handle_get_height(handle);
+        if (width > 0 && height > 0) {
+          candidates.push({ handle, long: Math.max(width, height), area: width * height, fromItem: true });
+        } else {
+          lib.heif_image_handle_release(handle);
+        }
       }
     } catch {
-      // 该 item 解码失败(ispe 不一致等),换下一个候选
+      // 枚举失败不影响候选解析
+    }
+
+    // 满足清晰度下限的候选里取像素量最小者(解码最快),逐个尝试直至成功。
+    const acceptable = candidates
+      .filter((c) => c.long >= minLongEdge)
+      .sort((a, b) => a.area - b.area);
+    let pixels: HeifPixels | null = null;
+    for (const candidate of acceptable) {
+      try {
+        const out = await lib.heif_js_decode_image2(
+          candidate.handle,
+          lib.heif_colorspace.heif_colorspace_RGB,
+          lib.heif_chroma.heif_chroma_interleaved_RGBA,
+        );
+        if (out && out.image && out.channels) {
+          try {
+            pixels = extractInterleaved(lib, out);
+          } finally {
+            lib.heif_image_release(out.image);
+          }
+          break;
+        }
+      } catch {
+        // 该 item 解码失败(ispe 不一致等),换下一个候选
+      }
+    }
+    return pixels;
+  } finally {
+    // 只释放 item 句柄；顶层图像句柄由 HeifLibImage.free() 统一释放，
+    // 两边都放会让同一底层句柄被释放两次。
+    for (const candidate of candidates) {
+      if (!candidate.fromItem) continue;
+      try {
+        lib.heif_image_handle_release(candidate.handle);
+      } catch {
+        // 释放失败忽略
+      }
+    }
+    for (const img of images) {
+      try {
+        img.free();
+      } catch {
+        // 释放失败忽略
+      }
     }
   }
-  for (const candidate of candidates) {
-    try {
-      lib.heif_image_handle_release(candidate.handle);
-    } catch {
-      // 释放失败忽略
-    }
-  }
-  return pixels;
 }
