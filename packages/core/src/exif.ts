@@ -412,6 +412,29 @@ const SUB_IFD_POINTERS: Record<number, ExifIfd> = {
   0xa005: 'Interop',
 };
 
+/**
+ * 结构性/二进制标签：子 IFD 偏移、缩略图数据定位、XMP 包、厂商私有块等，
+ * 值是字节偏移或原始负载，对用户没有可读性，不进「全部标签」列表。
+ */
+const HIDDEN_TAGS: ReadonlySet<number> = new Set([
+  0x014a, // SubIFDs：缩略图/预览 IFD 的偏移指针
+  0x0201, // JPEGInterchangeFormat：内嵌缩略图数据偏移
+  0x0202, // JPEGInterchangeFormatLength：内嵌缩略图数据长度
+  0x02bc, // XMLPacket：XMP 元数据包
+  0x927c, // MakerNote：厂商私有二进制
+  0xc4a5, // PrintImageMatching：PrintIM 二进制
+]);
+
+/** 数值数组超过该长度的标签视为二进制负载（XMP 包、私有块），不进「全部标签」。 */
+const MAX_LISTED_VALUES = 64;
+
+/** 显示文本上限：超长的可读文本（内嵌 XML 等）截断展示，避免撑爆面板。 */
+const MAX_FIELD_TEXT = 256;
+
+function truncateFieldText(text: string): string {
+  return text.length <= MAX_FIELD_TEXT ? text : `${text.slice(0, MAX_FIELD_TEXT)}…`;
+}
+
 const IFD0_TAGS: Record<number, TagMeta> = {
   0x0100: { name: 'ImageWidth', label: '图像宽度' },
   0x0101: { name: 'ImageLength', label: '图像高度' },
@@ -421,12 +444,16 @@ const IFD0_TAGS: Record<number, TagMeta> = {
   0x010f: { name: 'Make', label: '制造商' },
   0x0110: { name: 'Model', label: '型号' },
   0x0112: { name: 'Orientation', label: '方向' },
+  0x0115: { name: 'SamplesPerPixel', label: '每像素样本数' },
   0x011a: { name: 'XResolution', label: 'X 分辨率' },
   0x011b: { name: 'YResolution', label: 'Y 分辨率' },
   0x0128: { name: 'ResolutionUnit', label: '分辨率单位' },
   0x0131: { name: 'Software', label: '软件' },
   0x0132: { name: 'DateTime', label: '文件时间' },
   0x013b: { name: 'Artist', label: '作者' },
+  0x0213: { name: 'YCbCrPositioning', label: '色度定位' },
+  0x828d: { name: 'CFARepeatPatternDim', label: 'CFA 排列尺寸' },
+  0x828e: { name: 'CFAPattern', label: 'CFA 图案' },
   0x8298: { name: 'Copyright', label: '版权' },
 };
 
@@ -614,6 +641,7 @@ const ENUM_TEXT: Record<string, Record<number, string>> = {
     9: '逆光',
   },
   ColorSpace: { 1: 'sRGB', 2: 'Adobe RGB', 65535: '未校准' },
+  YCbCrPositioning: { 1: '居中', 2: '共定位' },
   CustomRendered: { 0: '正常', 1: '特殊处理' },
   SubjectDistanceRange: { 0: '未知', 1: '微距', 2: '近距', 3: '远距' },
   ResolutionUnit: { 2: '英寸', 3: '厘米' },
@@ -757,6 +785,7 @@ function collectIfd(buf: Uint8Array, base: number, ifdOffset: number, ifd: ExifI
       collectIfd(buf, base, valueOffset, subIfd, le, out, depth + 1);
       continue;
     }
+    if (HIDDEN_TAGS.has(tag)) continue;
     const size = TYPE_SIZE[type];
     if (!size || num > 8192) continue;
     const total = num * size;
@@ -765,8 +794,16 @@ function collectIfd(buf: Uint8Array, base: number, ifdOffset: number, ifd: ExifI
     if (src < 0 || src + total > buf.length) continue;
     const decoded = decodeValue(buf, src, type, num, le, tag);
     if (!decoded) continue;
+    if (Array.isArray(decoded.raw) && decoded.raw.length > MAX_LISTED_VALUES) continue;
     const meta = tagMeta(ifd, tag);
-    out.push({ ifd, tag, name: meta.name, label: meta.label, text: formatFieldText(meta.name, decoded), raw: decoded.raw });
+    out.push({
+      ifd,
+      tag,
+      name: meta.name,
+      label: meta.label,
+      text: truncateFieldText(formatFieldText(meta.name, decoded)),
+      raw: decoded.raw,
+    });
   }
 }
 

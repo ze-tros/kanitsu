@@ -9,12 +9,12 @@ type EntryValue = string | number[] | Array<[number, number]>;
 
 interface EntrySpec {
   tag: number;
-  /** 2=ASCII 3=SHORT 4=LONG 5=RATIONAL 7=UNDEFINED 10=SRATIONAL */
-  type: 2 | 3 | 4 | 5 | 7 | 10;
+  /** 1=BYTE 2=ASCII 3=SHORT 4=LONG 5=RATIONAL 7=UNDEFINED 10=SRATIONAL */
+  type: 1 | 2 | 3 | 4 | 5 | 7 | 10;
   value: EntryValue;
 }
 
-const TYPE_WIDTH: Record<number, number> = { 2: 1, 3: 2, 4: 4, 5: 8, 7: 1, 10: 8 };
+const TYPE_WIDTH: Record<number, number> = { 1: 1, 2: 1, 3: 2, 4: 4, 5: 8, 7: 1, 10: 8 };
 
 function u32le(value: number): Uint8Array {
   return new Uint8Array([value & 0xff, (value >> 8) & 0xff, (value >>> 16) & 0xff, (value >>> 24) & 0xff]);
@@ -515,5 +515,74 @@ describe('拍摄参数行合成', () => {
     );
     assert.ok(result);
     assert.ok(!result.fields.some((f) => f.tag === 0x927c));
+  });
+});
+
+describe('全部标签的可读性过滤', () => {
+  test('结构偏移与二进制块不进全部标签', () => {
+    // Sony ARW IFD0 常见的噪声标签：SubIFDs 指针、缩略图定位、XMP 包（BYTE 数组）与 PrintIM。
+    const result = parseExif(
+      buildTiff({
+        ifd0: [
+          { tag: 0x010f, type: 2, value: 'SONY' },
+          { tag: 0x014a, type: 4, value: [138530] },
+          { tag: 0x0201, type: 4, value: [192674] },
+          { tag: 0x0202, type: 4, value: [473949] },
+          { tag: 0x02bc, type: 1, value: Array.from({ length: 512 }, (_, i) => i & 0x7f) },
+          { tag: 0xc4a5, type: 7, value: [0x50, 0x72, 0x69, 0x6e] },
+        ],
+      }),
+    );
+    assert.ok(result);
+    const tags = new Set(result.fields.map((f) => f.tag));
+    for (const tag of [0x014a, 0x0201, 0x0202, 0x02bc, 0xc4a5]) {
+      assert.ok(!tags.has(tag), `0x${tag.toString(16)} 不应出现在全部标签里`);
+    }
+    assert.ok(result.fields.some((f) => f.name === 'Make'), '其余标签不受影响');
+  });
+
+  test('未收录标签的超长数值数组视为二进制负载', () => {
+    const result = parseExif(
+      buildTiff({
+        ifd0: [
+          { tag: 0x010f, type: 2, value: 'SONY' },
+          { tag: 0x9998, type: 4, value: Array.from({ length: 100 }, (_, i) => i) },
+        ],
+      }),
+    );
+    assert.ok(result);
+    assert.ok(!result.fields.some((f) => f.name === 'Tag0x9998'), '超长数值数组不应展示');
+  });
+
+  test('超长可读文本截断展示', () => {
+    const result = parseExif(
+      buildTiff({
+        ifd0: [
+          { tag: 0x010f, type: 2, value: 'SONY' },
+          { tag: 0x9999, type: 2, value: 'A'.repeat(1000) },
+        ],
+      }),
+    );
+    assert.ok(result);
+    const field = result.fields.find((f) => f.name === 'Tag0x9999');
+    assert.ok(field, '可读文本标签保留');
+    assert.ok(field.text.length <= 257, `显示文本应截断（长度 ${field.text.length}）`);
+    assert.ok(field.text.endsWith('…'), '截断处以省略号结尾');
+  });
+
+  test('常见标准标签给出中文名而非十六进制占位', () => {
+    const result = parseExif(
+      buildTiff({
+        ifd0: [
+          { tag: 0x010f, type: 2, value: 'SONY' },
+          { tag: 0x0213, type: 3, value: [2] },
+        ],
+      }),
+    );
+    assert.ok(result);
+    const field = result.fields.find((f) => f.tag === 0x0213);
+    assert.ok(field);
+    assert.equal(field.label, '色度定位');
+    assert.equal(field.text, '共定位');
   });
 });
