@@ -224,6 +224,8 @@ const PACK_GAP = 20;
 const NARROW_WIDTH = 1180;
 const COMPACT_WIDTH = 980;
 const VIEWER_IDLE_MS = 2600;
+/** scrollend 未到时的兜底时长：最后一次 scroll 事件后静默这么久即视为滚动结束。 */
+const SCROLL_END_FALLBACK_MS = 180;
 const CONTINUE_LIMIT = 4;
 /** 检查器「可整理」提示最多解析的图片数。 */
 const ORGANIZE_HINT_MAX = 4000;
@@ -798,23 +800,27 @@ export function LibraryBrowser({
   }, [settings, isEmptyLibrary]);
 
   // 滚动中给主区加 .dk-scrolling 并暂停后台预热（只保留可见与下一屏）。
+  // scrollend 只跟随真正的滚动操作：内容变矮把 scrollTop 夹回产生的 scroll 事件
+  // （如从大图包滚到底后切到小图包）没有对应的 scrollend，类会永久残留，卡片
+  // 因此失去 hover 与点击。所以除 scrollend 外始终保留 trailing 定时器兜底。
   useEffect(() => {
     const main = mainScrollRef.current;
     if (!main) return;
     let timer: number | null = null;
     let frame: number | null = null;
-    const native = 'onscrollend' in main;
     const end = () => {
+      if (timer != null) {
+        window.clearTimeout(timer);
+        timer = null;
+      }
       main.classList.remove('dk-scrolling');
       setThumbnailPreloadPaused(false);
     };
     const onScroll = () => {
       main.classList.add('dk-scrolling');
       setThumbnailPreloadPaused(true);
-      if (!native) {
-        if (timer != null) window.clearTimeout(timer);
-        timer = window.setTimeout(end, 180);
-      }
+      if (timer != null) window.clearTimeout(timer);
+      timer = window.setTimeout(end, SCROLL_END_FALLBACK_MS);
       if (frame == null) {
         frame = requestAnimationFrame(() => {
           frame = null;
@@ -823,11 +829,10 @@ export function LibraryBrowser({
       }
     };
     main.addEventListener('scroll', onScroll, { passive: true });
-    if (native) main.addEventListener('scrollend', end);
+    main.addEventListener('scrollend', end);
     return () => {
       main.removeEventListener('scroll', onScroll);
-      if (native) main.removeEventListener('scrollend', end);
-      if (timer != null) window.clearTimeout(timer);
+      main.removeEventListener('scrollend', end);
       if (frame != null) cancelAnimationFrame(frame);
       end();
     };
