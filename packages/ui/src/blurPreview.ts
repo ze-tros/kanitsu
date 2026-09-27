@@ -33,6 +33,16 @@ const BLUR_PREVIEW_QUALITY = 0.85;
  * 锚定旧的降采样方案并略轻——同等 σ 下真高斯的观感比插值糊更重。
  */
 const BLUR_PREVIEW_SIGMA_FRACTION = 0.02;
+/**
+ * 展示端 CSS 兜底与烘焙预览的观感对齐系数：烘焙链路（缩到 128px 画布 →
+ * ctx.filter blur 参数 = 128×2%×2 ≈ 5.12px，σ=参数一半 → 放大 2 倍出 256px）
+ * 在显示边长 S 下的等效 σ = 2.56×2×(S/256) = 0.02·S；CSS blur(P) 的 σ=P/2，
+ * 故 CSS 参数取 S×4% 时与成品观感一致。BlobImage 的冷路径兜底按实际
+ * clientWidth × 此系数取半径——此前固定 18px 在小格子上比成品重 2~3 倍，
+ * 首次开启（全体冷生成）时整屏先重度糊再逐张换轻糊，观感是「缩略图消失
+ * 然后重新出现模糊版」。
+ */
+export const BLUR_PREVIEW_CSS_FRACTION = 0.04;
 /** 管线版本：任何影响输出的参数 / 步骤变化都要 bump，持久层旧条目整体失效。 */
 const PIPELINE_VERSION = 3;
 

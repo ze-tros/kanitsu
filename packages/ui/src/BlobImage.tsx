@@ -3,7 +3,7 @@ import type { FileRef, LibraryStore } from '../../fs-adapter/src/types';
 import { DEFAULT_THUMBNAIL_SIZE, getThumbnailBlob, peekThumbnailBlob } from './thumbnailCache';
 import { observeVisibility } from './visibleObserver';
 import { acquireObjectUrl, releaseObjectUrl } from './objectUrlPool';
-import { getBlurPreviewBlob, peekBlurPreviewBlob } from './blurPreview';
+import { BLUR_PREVIEW_CSS_FRACTION, getBlurPreviewBlob, peekBlurPreviewBlob } from './blurPreview';
 import { logDebug } from './debugLog';
 
 type LoadedImage = { key: string; url: string; degraded: boolean };
@@ -28,9 +28,9 @@ export function BlobImage({
   thumbnailSize?: number;
 }) {
   // 模糊卡片与普通卡片共用同一缩略图缓存键（thumb-${thumbnailSize}）：源就
-  // 是普通尺寸缩略图，不再有专用小图档。切隐私不换键，此前“切换后整屏重新
-  // 加载 / 入场动画重播”的问题从根上不存在；糊化在 blurPreview.ts 生成路径
-  // 完成（缩到 128px 小画布做真高斯），展示端无 filter 光栅化。
+  // 是普通尺寸缩略图，不再有专用小图档。切隐私不换键：effect 因 blur 重跑时
+  // 缩略图缓存命中走同步重交付，无骨架、无入场动画重播；糊化在 blurPreview.ts
+  // 生成路径完成（缩到 128px 小画布做真高斯），展示端无 filter 光栅化。
   const peekCachedThumb = (): Blob | null =>
     thumbnail ? peekThumbnailBlob(fileRef, thumbnailSize) : null;
   const resourceKey = `${fileRef.id}\u0000${fileRef.mtime ?? ''}\u0000${fileRef.size ?? ''}\u0000${thumbnail ? `thumb-${thumbnailSize}` : 'full'}`;
@@ -40,6 +40,10 @@ export function BlobImage({
   const [loaded, setLoaded] = useState<LoadedImage | null>(null);
   const [failedKey, setFailedKey] = useState<string | null>(null);
   const [shownKey, setShownKey] = useState<string | null>(null);
+  // CSS 兜底半径（px）：冷路径交源图时按显示边长比例取值，与烘焙预览同观感；
+  // 交付烘焙图 / 取消隐私时清空。量不出尺寸（display:none 等）时为 null，
+  // 退回 .blur-preview 的固定半径类。
+  const [cssBlurPx, setCssBlurPx] = useState<number | null>(null);
   // 一律等 IntersectionObserver 触发再加载（缓存命中也不跳过）：全量挂载下
   // 进图包即有数百张卡片，若缓存命中就同步取 URL/解码，几百个 object URL 与
   // 解码请求的洪峰会把进目录卡成秒级。IO 的 rootMargin 300px 足以让可见卡片
@@ -66,22 +70,28 @@ export function BlobImage({
     if (!shouldLoad) return;
     let cancelled = false;
     let ownedUrl: string | null = null;
-    // A previous effect already released its URL. Clear a matching stale state
-    // before an A -> B -> A resource cycle can expose that released URL again.
-    setLoaded((current) => (current?.key === resourceKey ? null : current));
-    setFailedKey((current) => (current === resourceKey ? null : current));
-    // 缩略图走内存缓存：同一文件切走再切回时直接复用已生成的 Blob，
-    // 不再触发 IPC / 磁盘解码 / 重新编码（见 thumbnailCache.ts）。
-    const commit = (blob: Blob, degraded: boolean) => {
+    const commit = (blob: Blob, degraded: boolean, cssPx: number | null = null) => {
       if (cancelled) return;
       const next = acquireObjectUrl(blob);
+      // 糊化冷路径会先交源图、生成完再换预览，两次 commit 各自 acquire：
+      // 换了 Blob 必须释放上一个 URL，否则它的引用计数永远 >0，池子无法淘汰。
+      if (ownedUrl && ownedUrl !== next) releaseObjectUrl(ownedUrl);
       ownedUrl = next;
+      // 成功交付即清除本资源的失败态（缓存命中路径不经过下面的清空分支）。
+      setFailedKey((current) => (current === resourceKey ? null : current));
+      setCssBlurPx(cssPx);
       setLoaded({ key: resourceKey, url: next, degraded });
     };
     // 模糊隐私：源 Blob 先经 blurPreview.ts 糊化（缩到小画布做真高斯），出图
     // 即已糊、无 CSS filter 光栅化。内存层同步命中时零等待；未命中则查
-    // IndexedDB 持久层（冷启动不重新生成）；失败时回落源 Blob 并由
-    // .blur-preview 的 CSS blur 兜底，隐私不降级。
+    // IndexedDB 持久层（冷启动不重新生成）；生成期间与生成失败时先交源图、
+    // 由按显示尺寸比例的 CSS 高斯兜底（与成品同观感），隐私不降级。
+    // blur 必须在依赖里：切换隐私要重新交付。开启时内存命中同步换糊化图；
+    // 未命中（首次开启全体冷生成）先同步交源图 + 同强度 CSS 兜底再异步热替
+    // 换——此前固定 18px 兜底比成品重 2~3 倍，且移动端全量挂载下几百张排队
+    // 生成要数秒，观感即「缩略图消失然后重新出现模糊版」；取消时同步换回
+    // 源缩略图。此前 blur 不在依赖里，取消后 src 仍是糊化 Blob，只能靠滚动
+    // 重挂载恢复清晰。
     const deliver = (source: Blob) => {
       if (!blur || !thumbnail) {
         commit(source, false);
@@ -92,12 +102,34 @@ export function BlobImage({
         commit(preview, preview !== source);
         return;
       }
-      getBlurPreviewBlob(source, blurIdentity).then((out) => commit(out, out !== source));
+      // CSS 兜底半径按显示边长 × 4%（与烘焙预览的等效 σ 一致，见
+      // blurPreview.ts 的 BLUR_PREVIEW_CSS_FRACTION），小格子不再比成品重。
+      const el = containerRef.current;
+      const cssPx =
+        el && el.clientWidth > 0 ? Math.max(2, Math.round(el.clientWidth * BLUR_PREVIEW_CSS_FRACTION)) : null;
+      commit(source, false, cssPx);
+      // 真糊化生成只排当前视口内（±320px，与 IO rootMargin 同量级）的卡片：
+      // 移动端全量挂载下否则几百张全部入队（4 并发、每张十几毫秒主线程），
+      // 视口外的保持 CSS 兜底——观感已与成品一致，桌面端滚回窗口重挂载、
+      // 下次切隐私都会自然补上烘焙版。
+      const box = el?.getBoundingClientRect();
+      const inView =
+        !!box && box.top < window.innerHeight + 320 && box.bottom > -320 && box.left < window.innerWidth + 320 && box.right > -320;
+      if (!inView) return;
+      getBlurPreviewBlob(source, blurIdentity).then((out) => {
+        if (!cancelled && out !== source) commit(out, true);
+      });
     };
     const cached = peekCachedThumb();
     if (cached) {
+      // 缓存命中走同步重交付：同一资源复用池里同一个 URL，切隐私不产生骨
+      // 架闪烁，入场动画也不重播。
       deliver(cached);
     } else {
+      // 未命中才清空当前展示：异步加载期间不能把上一次 effect 已释放的旧
+      // URL 继续挂在 img 上（池子可能已把它撤销），回落骨架。
+      setLoaded((current) => (current?.key === resourceKey ? null : current));
+      setFailedKey((current) => (current === resourceKey ? null : current));
       const load = thumbnail
         ? getThumbnailBlob(store, fileRef, thumbnailSize, { shouldCancel: () => cancelled })
         : Promise.resolve(store.readBlob(fileRef));
@@ -117,17 +149,21 @@ export function BlobImage({
       cancelled = true;
       if (ownedUrl) releaseObjectUrl(ownedUrl);
     };
-  }, [store, fileRef.id, fileRef.mtime, fileRef.size, resourceKey, shouldLoad, thumbnail, thumbnailSize]);
+  }, [store, fileRef.id, fileRef.mtime, fileRef.size, resourceKey, blurIdentity, shouldLoad, thumbnail, thumbnailSize, blur]);
 
   // 缩略图优先显示图像靠上的部分（object-cover 裁剪默认居中，会裁掉主体所在的
   // 上半部）；原图查看不受影响。
   const coverClass = thumbnail ? ' object-top' : '';
-  // 糊化预览已自带高斯（degraded），去掉 CSS blur 及配套的 scale 补边；
-  // 仅生成失败回落源 Blob 时保留 .blur-preview 的高斯模糊兜底。
+  // 糊化预览已自带高斯（degraded），去掉 CSS blur 及配套的 scale 补边；生成
+  // 期间 / 生成失败回落源 Blob 时按显示尺寸比例做 CSS 高斯（与成品同观感），
+  // 量不出尺寸才退回 .blur-preview 的固定半径类。
   // 入场不做渐入（opacity 从 0 起的淡入洪峰正是“快速滑动整屏空白”的来源），
   // 骨架一直保留到 img 解码完成（onLoad）才交接——URL 就绪 ≠ 已画得出，
   // 解码空窗期图片“可见但没画出来”，极高速滑动下就是空白卡片。
-  const imageClass = `${className ?? ''}${blur && !loaded?.degraded ? ' blur-preview' : ''}${coverClass}`;
+  const cssFallback = blur && url != null && loaded?.degraded === false;
+  const imageClass = `${className ?? ''}${cssFallback && cssBlurPx == null ? ' blur-preview' : ''}${coverClass}`;
+  const fallbackStyle =
+    cssFallback && cssBlurPx != null ? { filter: `blur(${cssBlurPx}px)`, transform: 'scale(1.06)' } : undefined;
   const shown = url != null && shownKey === resourceKey;
   return (
     <div
@@ -139,6 +175,7 @@ export function BlobImage({
         src={url ?? undefined}
         alt={alt ?? fileRef.name}
         className={imageClass}
+        style={fallbackStyle}
         loading="eager"
         onLoad={() => setShownKey(resourceKey)}
         onError={() => setFailedKey(resourceKey)}
