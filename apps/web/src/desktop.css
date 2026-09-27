@@ -285,7 +285,7 @@ button.dk-sw { padding: 0; }
 .dk-hero .dk-meta { color: var(--desktop-text-soft); margin-top: 4px; font-size: 12.5px; }
 .dk-hero-actions { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
 .dk-hero-actions .dk-btn:not(.primary) { background: color-mix(in srgb, var(--desktop-surface-2) 78%, transparent); backdrop-filter: blur(12px); }
-.dk-subs { display: grid; grid-auto-flow: column; grid-auto-columns: 176px; gap: 14px; overflow-x: auto; padding: 0 32px 6px; scrollbar-width: thin; }
+.dk-subs { display: grid; grid-auto-flow: column; grid-auto-columns: 176px; gap: 14px; overflow-x: auto; padding: 4px 32px 6px; scrollbar-width: thin; }
 .dk-sub-card { text-align: left; min-width: 0; }
 .dk-sub-card .dk-th { display: block; height: 112px; border-radius: 10px; overflow: hidden; position: relative; background: var(--desktop-surface-2); box-shadow: inset 0 0 0 1px var(--desktop-line); transition: transform .18s var(--desktop-ease-standard); }
 .dk-sub-card:hover .dk-th { transform: translateY(-2px); }

@@ -15,7 +15,6 @@ import {
   EyeSlash,
   FileZip,
   FolderOpen,
-  FolderPlus,
   ImageSquare,
   ImagesSquare,
   List,
@@ -351,7 +350,6 @@ export function SubPackStrip({
   onOpen,
   onContextMenu,
   onShowAll,
-  onCreate,
 }: {
   items: readonly SubPackData[];
   total: number;
@@ -360,7 +358,6 @@ export function SubPackStrip({
   onOpen: (folder: FolderNode) => void;
   onContextMenu: (event: ReactMouseEvent, folder: FolderNode) => void;
   onShowAll: () => void;
-  onCreate: () => void;
 }) {
   return (
     <div className="dk-subs" role="list" aria-label="子图包">
@@ -377,15 +374,11 @@ export function SubPackStrip({
           </button>
         );
       })}
-      {total > items.length ? (
+      {total > items.length && (
         <button type="button" role="listitem" className="dk-sub-card new" onClick={onShowAll}>
           <span className="dk-th"><Stack size={26} /></span>
           <strong>全部 {formatCount(total)} 个子图包</strong>
-        </button>
-      ) : (
-        <button type="button" role="listitem" className="dk-sub-card new" onClick={onCreate}>
-          <span className="dk-th"><FolderPlus size={24} /></span>
-          <strong className="dk-muted">新建子图包</strong>
+          <small className="num">还有 {formatCount(total - items.length)} 个</small>
         </button>
       )}
     </div>

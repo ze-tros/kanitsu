@@ -2364,7 +2364,16 @@ export function LibraryBrowser({
         {subPacks.length > 0 && (
           <>
             <SectionHeader title="子图包" count={subPacks.length}>
-              {subpacksExpanded && <button type="button" className="dk-dd" onClick={() => setSubpacksExpanded(false)}>收起为横向卡片</button>}
+              <button
+                type="button"
+                className="dk-dd"
+                aria-pressed={subpacksExpanded}
+                title={subpacksExpanded ? '收起为一行横向卡片' : '展开为网格，查看全部子图包'}
+                onClick={() => setSubpacksExpanded((v) => !v)}
+              >
+                {subpacksExpanded ? <Stack size={15} /> : <SquaresFour size={15} />}
+                {subpacksExpanded ? '收起为横向卡片' : '展开为网格'}
+              </button>
             </SectionHeader>
             {subpacksExpanded ? (
               packSurface
@@ -2377,7 +2386,6 @@ export function LibraryBrowser({
                 onOpen={openFolder}
                 onContextMenu={(event, folder) => openMenu(event, folderMenu(folder))}
                 onShowAll={() => setSubpacksExpanded(true)}
-                onCreate={() => createFolderIn(selectedFolder)}
               />
             )}
           </>
