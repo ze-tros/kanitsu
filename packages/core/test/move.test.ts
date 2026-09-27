@@ -4,6 +4,7 @@ import { MemoryLibraryStore } from '../../fs-adapter/src/memory';
 import { scanLibrary } from '../src/scan';
 import { moveEntries } from '../src/move';
 import { undoOrganize } from '../src/organize';
+import { resolveFolderRef } from '../src/entry-ops';
 import type { LibrarySnapshot } from '../src/types';
 
 async function seedStore(): Promise<MemoryLibraryStore> {
@@ -76,5 +77,61 @@ describe('moveEntries', () => {
     const result = await moveEntries(store, before, 'Target', { imageIds: [imageId(before, 'Target/dup.jpg')], folderIds: [] });
     assert.equal(result.movedImages, 0);
     assert.equal(result.manifest.actions.length, 0);
+  });
+
+  test('image colliding with a same-name directory in the target is renamed, directory intact', async () => {
+    const store = await seedStore();
+    // 目标目录里已有一个【目录】叫 photo.jpg（真实平台/旧 memory 实现会静默覆盖它）。
+    const root = await store.ensureLibraryRoot();
+    const packB = await store.createFolder(root, 'PackB');
+    await store.writeBlob(packB, 'photo.jpg', new Blob(['photo'], { type: 'image/jpeg' }));
+    const target = await store.createFolder(root, 'Target');
+    const photoDir = await store.createFolder(target, 'photo.jpg');
+    await store.writeBlob(photoDir, 'inner.jpg', new Blob(['inner'], { type: 'image/jpeg' }));
+
+    const before = await scanLibrary(store);
+    const result = await moveEntries(store, before, 'Target', {
+      imageIds: [imageId(before, 'PackB/photo.jpg')],
+      folderIds: [],
+    });
+    assert.equal(result.movedImages, 1);
+    assert.deepEqual(result.failures, []);
+
+    const after = await scanLibrary(store);
+    const paths = Object.values(after.images).map((i) => i.relPath).sort();
+    assert.ok(paths.includes('Target/photo (2).jpg'), '图片改名避开同名目录');
+    assert.ok(paths.includes('Target/photo.jpg/inner.jpg'), '同名目录及其内容原样保留');
+  });
+
+  test('folder colliding with a same-name file in the target reports target-exists', async () => {
+    const store = await seedStore();
+    const root = await store.ensureLibraryRoot();
+    // 目标目录里已有一个【文件】叫 Blocked，而 PackA 下有同名图包。
+    const target = await store.createFolder(root, 'Target');
+    await store.writeBlob(target, 'Blocked', new Blob(['file'], { type: 'image/jpeg' }));
+    const blocked = await store.createFolder(root, 'BlockedPackSrc');
+    await store.createFolder(blocked, 'Blocked');
+    await store.writeBlob(await store.createFolder(blocked, 'Blocked'), 'x.jpg', new Blob(['x'], { type: 'image/jpeg' }));
+
+    const before = await scanLibrary(store);
+    const result = await moveEntries(store, before, 'Target', {
+      imageIds: [],
+      folderIds: [folderId(before, 'BlockedPackSrc/Blocked')],
+    });
+    assert.equal(result.movedFolders, 0);
+    assert.deepEqual(result.failures.map((f) => f.reason), ['target-exists']);
+
+    // 'Blocked' 无扩展名不进快照，直接列目标目录验证文件未被覆盖。
+    const targetRef = await resolveFolderRef(store, 'Target');
+    assert.ok(targetRef);
+    const names: string[] = [];
+    for await (const child of store.listChildren(targetRef)) names.push(`${child.kind}:${child.name}`);
+    assert.ok(names.includes('file:Blocked'), '同名文件未被覆盖');
+
+    const after = await scanLibrary(store);
+    assert.ok(
+      Object.values(after.images).some((i) => i.relPath === 'BlockedPackSrc/Blocked/x.jpg'),
+      '源图包未被移动',
+    );
   });
 });

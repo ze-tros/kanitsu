@@ -107,14 +107,171 @@ function expandTargetTemplate(target: string, match: RegExpMatchArray): string {
   });
 }
 
+// —— 自定义规则正则的回溯安全校验 ——
+// 用户输入的正则直接在主线程执行，灾难性回溯（ReDoS）会冻结整个界面且无法
+// 中止。两层防护：静态启发式拒绝典型嵌套无界量词形态；再用对抗样本做限时
+// 试跑，超时即判为高危。结果按 pattern 缓存，避免逐张图片重复探测。
+
+export interface PatternSafety {
+  ok: boolean;
+  /** 不安全/非法时的说明（供规则编辑器展示）。 */
+  reason?: string;
+}
+
+const MAX_PATTERN_LENGTH = 500;
+/** 单个对抗样本的匹配耗时上限（毫秒）。 */
+const PROBE_BUDGET_MS = 24;
+
+/**
+ * 静态启发式：捕获/非捕获组自身被无界量词（`*` `+` `{n,}`）修饰，且组内也出现
+ * 过无界量词时命中（典型如 `(a+)+`、`((a+)b)+`）。
+ */
+function hasNestedQuantifier(pattern: string): boolean {
+  // 记录每层组内是否出现过无界量词；出组时若该组被无界量词修饰即命中。
+  const nested = new Set<number>();
+  let depth = 0;
+  let i = 0;
+  const skipClass = (): void => {
+    i++; // '['
+    if (pattern[i] === '^') i++;
+    if (pattern[i] === ']') i++;
+    while (i < pattern.length && pattern[i] !== ']') {
+      if (pattern[i] === '\\') i++;
+      i++;
+    }
+    i++; // ']'
+  };
+  while (i < pattern.length) {
+    const ch = pattern[i]!;
+    if (ch === '\\') {
+      i += 2;
+      continue;
+    }
+    if (ch === '[') {
+      skipClass();
+      continue;
+    }
+    if (ch === '(') {
+      depth++;
+      i++;
+      continue;
+    }
+    if (ch === ')') {
+      const closeDepth = depth;
+      depth--;
+      i++;
+      let j = i;
+      if (pattern[j] === '?') j++; // 可选组 / 非贪婪标记
+      if ((pattern[j] === '*' || pattern[j] === '+') && nested.has(closeDepth)) return true;
+      if (pattern[j] === '{') {
+        const close = pattern.indexOf('}', j);
+        const body = close > j ? pattern.slice(j + 1, close) : '';
+        if (/,\s*$/.test(body) && nested.has(closeDepth)) return true;
+      }
+      continue;
+    }
+    if (ch === '*' || ch === '+') {
+      nested.add(depth);
+      i++;
+      continue;
+    }
+    if (ch === '{') {
+      const close = pattern.indexOf('}', i);
+      const body = close > i ? pattern.slice(i + 1, close) : '';
+      if (/^\d+,\s*$/.test(body)) nested.add(depth);
+      i = close > i ? close + 1 : i + 1;
+      continue;
+    }
+    i++;
+  }
+  return false;
+}
+
+/** 从 pattern 里抽出字面字符（字符类/转义之外），用于构造对抗样本。 */
+function patternLiteralChars(pattern: string): string {
+  const chars: string[] = [];
+  let i = 0;
+  while (i < pattern.length) {
+    const ch = pattern[i]!;
+    if (ch === '\\') {
+      i += 2;
+      continue;
+    }
+    if (ch === '[') {
+      i++;
+      if (pattern[i] === '^') i++;
+      if (pattern[i] === ']') i++;
+      while (i < pattern.length && pattern[i] !== ']') {
+        if (pattern[i] === '\\') i++;
+        i++;
+      }
+      i++;
+      continue;
+    }
+    if (/[a-z0-9]/i.test(ch)) chars.push(ch);
+    i++;
+  }
+  return [...new Set(chars)].join('');
+}
+
+/** 限时试跑：样本呈超线性耗时（疑似灾难性回溯）时返回 true。 */
+function probePatternUnsafe(regexp: RegExp): boolean {
+  const literals = patternLiteralChars(regexp.source) || 'a';
+  const units = literals.slice(0, 2);
+  for (const n of [16, 22]) {
+    const subject = units.repeat(Math.ceil(n / units.length)).slice(0, n) + '!';
+    const start = performance.now();
+    try {
+      regexp.test(subject);
+    } catch {
+      return true;
+    }
+    if (performance.now() - start > PROBE_BUDGET_MS) return true;
+  }
+  return false;
+}
+
+const patternSafetyCache = new Map<string, PatternSafety>();
+
+/** 校验自定义规则的 pattern：语法合法、长度有界、且没有灾难性回溯风险。 */
+export function validateCustomRulePattern(pattern: string): PatternSafety {
+  const cached = patternSafetyCache.get(pattern);
+  if (cached) return cached;
+  let result: PatternSafety;
+  if (!pattern.trim()) {
+    result = { ok: false, reason: '正则表达式为空' };
+  } else if (pattern.length > MAX_PATTERN_LENGTH) {
+    result = { ok: false, reason: `正则表达式过长（超过 ${MAX_PATTERN_LENGTH} 字符）` };
+  } else {
+    try {
+      const regexp = new RegExp(pattern, 'u');
+      if (hasNestedQuantifier(pattern)) {
+        result = { ok: false, reason: '正则包含嵌套无界量词（如 (a+)+），可能导致灾难性回溯' };
+      } else if (probePatternUnsafe(regexp)) {
+        result = { ok: false, reason: '正则在对抗样本上耗时异常，疑似灾难性回溯' };
+      } else {
+        result = { ok: true };
+      }
+    } catch {
+      result = { ok: false, reason: '正则表达式无效' };
+    }
+  }
+  if (patternSafetyCache.size > 100) patternSafetyCache.clear();
+  patternSafetyCache.set(pattern, result);
+  return result;
+}
+
 /**
  * Applies one custom rule against a file name. Returns null when the rule is
- * disabled, invalid, does not match, or would produce an unsafe path.
+ * disabled, invalid, unsafe, does not match, or expands to no target directory
+ * (target 展开为空时按「不匹配」处理，回落到内置规则，保证预览与落盘口径一致）。
  */
 export function applyCustomRule(fileName: string, rule: CustomOrganizeRule): ParsedName | null {
   if (!rule?.enabled) return null;
   const base = stripExtension(fileName);
   if (!base) return null;
+
+  if (!validateCustomRulePattern(rule.pattern).ok) return null;
 
   let regexp: RegExp;
   try {
@@ -135,9 +292,12 @@ export function applyCustomRule(fileName: string, rule: CustomOrganizeRule): Par
 
   // applyOrganize also validates paths, but keep the preview conservative.
   if (dir.split('/').some((segment) => segment === '..')) return null;
+  // 目录为空 = 无处可去：桌面端曾把这种绑定直接移动到容器根（预览却完全不显示），
+  // 移动端则静默丢弃。统一视为不匹配，回落到内置规则。
+  if (!dir) return null;
 
   return {
-    virtualPath: dir ? dir + '/' + fileName : fileName,
+    virtualPath: dir + '/' + fileName,
     confidence: clampConfidence(rule.confidence),
     rule: rule.name || 'custom',
   };

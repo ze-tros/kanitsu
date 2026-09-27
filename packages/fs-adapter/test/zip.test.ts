@@ -1,6 +1,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import yauzl from 'yauzl';
+import { buildZip, crc32, type ZipEntry } from '../src/zip';
 import { MemoryLibraryStore } from '../src/memory';
 
 async function seedStore(): Promise<MemoryLibraryStore> {
@@ -97,5 +98,48 @@ describe('MemoryLibraryStore.zipLibrary', () => {
     const index = JSON.parse(entries[0]!.data!.toString());
     assert.equal(index.images.length, 0);
     assert.deepEqual(index.folders, []);
+  });
+});
+
+function u32le(bytes: Uint8Array, pos: number): number {
+  return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(pos, true);
+}
+
+describe('buildZip ZIP64', () => {
+  test('条目数 > 65535 时写 ZIP64 EOCD，yauzl 能读出全部条目', async () => {
+    const entries: ZipEntry[] = [];
+    for (let i = 0; i < 70000; i++) {
+      entries.push({ name: `f${i}.jpg`, data: new Uint8Array([0x61 + (i % 26)]) });
+    }
+    const bytes = buildZip(entries);
+    assert.equal(crc32(new Uint8Array([0x61])), 0xe8b7be43, 'CRC 基准值');
+
+    // EOCD 位于文件尾：条目数字段应为 0xFFFF 哨兵。
+    const eocdAt = bytes.length - 22;
+    assert.equal(u32le(bytes, eocdAt), 0x06054b50);
+    assert.equal(new DataView(bytes.buffer, eocdAt, 22).getUint16(8, true), 0xffff);
+
+    // Locator 指向 ZIP64 EOCD，记录里是真实条目数。
+    const locatorAt = eocdAt - 20;
+    assert.equal(u32le(bytes, locatorAt), 0x07064b50);
+    const eocd64Offset = Number(new DataView(bytes.buffer, locatorAt, 20).getBigUint64(8, true));
+    assert.equal(u32le(bytes, eocd64Offset), 0x06064b50);
+    const eocd64Entries = Number(new DataView(bytes.buffer, eocd64Offset, 56).getBigUint64(32, true));
+    assert.equal(eocd64Entries, 70000);
+
+    // 端到端：标准解压器读出的条目数与内容一致。
+    const read = await readZip(bytes);
+    assert.equal(read.length, 70000);
+    assert.equal(read[0]!.name, 'f0.jpg');
+    assert.equal(read[69999]!.name, 'f69999.jpg');
+  });
+
+  test('小归档不写 ZIP64 结构（保持与传统读法兼容）', async () => {
+    const bytes = buildZip([{ name: 'a.jpg', data: new Uint8Array([1]) }]);
+    const eocdAt = bytes.length - 22;
+    assert.equal(u32le(bytes, eocdAt), 0x06054b50);
+    assert.equal(new DataView(bytes.buffer, eocdAt, 22).getUint16(8, true), 1);
+    const locatorAt = eocdAt - 20;
+    assert.notEqual(u32le(bytes, locatorAt), 0x07064b50, '不应有 ZIP64 locator');
   });
 });

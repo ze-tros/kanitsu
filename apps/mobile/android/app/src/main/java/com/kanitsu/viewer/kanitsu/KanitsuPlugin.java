@@ -149,15 +149,19 @@ public class KanitsuPlugin extends Plugin {
 
     @PluginMethod
     public void listSourceChildren(PluginCall call) {
-        AndroidEntry folder = AndroidEntry.fromJS(call.getObject("folder"));
-        List<AndroidEntry> list = safSource.listChildren(folder.id);
-        JSONArray arr = new JSONArray();
-        for (AndroidEntry e : list) {
-            arr.put(e.toJS());
+        try {
+            AndroidEntry folder = AndroidEntry.fromJS(call.getObject("folder"));
+            List<AndroidEntry> list = safSource.listChildren(folder.id);
+            JSONArray arr = new JSONArray();
+            for (AndroidEntry e : list) {
+                arr.put(e.toJS());
+            }
+            JSObject out = new JSObject();
+            out.put("entries", arr);
+            call.resolve(out);
+        } catch (Exception e) {
+            call.reject(e.getMessage(), e);
         }
-        JSObject out = new JSObject();
-        out.put("entries", arr);
-        call.resolve(out);
     }
 
     @PluginMethod

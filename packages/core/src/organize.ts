@@ -1,7 +1,8 @@
 import type { FileRef, FolderRef, FsEntry, LibraryStore } from '../../fs-adapter/src/types';
 import type { LibrarySnapshot, OrganizeBinding } from './types';
-import { baseNameOfRelPath, canonicalizeRelPath, joinRelPath, normalizeRelPath, parentRelPath } from './path';
+import { baseNameOfRelPath, canonicalizeRelPath, joinRelPath, nameKey, normalizeRelPath, parentRelPath } from './path';
 import { stableHash } from './hash';
+import { resolveFolderRef } from './entry-ops';
 
 /**
  * One concrete file move produced by materializing an organize plan.
@@ -57,15 +58,25 @@ async function listChildrenArray(store: LibraryStore, folder: FolderRef): Promis
   return out;
 }
 
-async function findChildFolder(store: LibraryStore, folder: FolderRef, name: string): Promise<FolderRef | null> {
-  for await (const entry of store.listChildren(folder)) {
-    if (entry.kind === 'folder' && entry.name === name) return { id: entry.id, name: entry.name, kind: 'folder' };
+/** 目标路径的某一段已被同名【文件】占用，无法在其下创建/穿越目录。 */
+export class FolderPathBlockedError extends Error {}
+
+/**
+ * 解析父目录下名为 `segment` 的子目录；不存在则创建。
+ * 与真实平台语义对齐：该名字已被文件占用时抛 FolderPathBlockedError，
+ * 而不是把文件当目录继续往下走（各端行为会分裂，memory 端甚至会静默改写节点）。
+ */
+async function resolveChildFolder(store: LibraryStore, parent: FolderRef, segment: string): Promise<FolderRef> {
+  for await (const entry of store.listChildren(parent)) {
+    if (entry.name !== segment) continue;
+    if (entry.kind === 'folder') return { id: entry.id, name: entry.name, kind: 'folder' };
+    throw new FolderPathBlockedError(`目标路径被同名文件占用：${segment}`);
   }
-  return null;
+  return store.createFolder(parent, segment);
 }
 
 type FolderCache = Map<string, FolderRef>;
-type FileNameCache = Map<string, Set<string>>;
+type ChildNameCache = Map<string, Set<string>>;
 
 /** Resolves/creates a folder relative to the library root, memoizing every visited level. */
 async function resolveFolderCached(store: LibraryStore, relPath: string, cache: FolderCache): Promise<FolderRef> {
@@ -85,8 +96,7 @@ async function resolveFolderCached(store: LibraryStore, relPath: string, cache: 
     const childRel = currentRel ? currentRel + '/' + segment : segment;
     let child: FolderRef | null = cache.get(childRel) ?? null;
     if (!child) {
-      child = await findChildFolder(store, current, segment);
-      if (!child) child = await store.createFolder(current, segment);
+      child = await resolveChildFolder(store, current, segment);
       cache.set(childRel, child);
     }
     current = child;
@@ -95,13 +105,17 @@ async function resolveFolderCached(store: LibraryStore, relPath: string, cache: 
   return current;
 }
 
-/** Loads the set of direct file names in a folder once, keyed by library-relative path. */
-async function loadFileNames(store: LibraryStore, folderRel: string, folder: FolderRef, cache: FileNameCache): Promise<Set<string>> {
+/**
+ * Loads the set of direct child names (files AND folders) in a folder once, keyed by
+ * library-relative path. 文件与目录共享同一命名空间：目标目录里已有同名【目录】时
+ * 移动图片同样会冲突（真实平台报错，memory 端会静默覆盖整棵子树），必须一起判重。
+ */
+async function loadChildNames(store: LibraryStore, folderRel: string, folder: FolderRef, cache: ChildNameCache): Promise<Set<string>> {
   let names = cache.get(folderRel);
   if (!names) {
     names = new Set<string>();
     for await (const child of store.listChildren(folder)) {
-      if (child.kind === 'file') names.add(child.name);
+      names.add(nameKey(child.name));
     }
     cache.set(folderRel, names);
   }
@@ -125,12 +139,25 @@ async function loadFileRefs(store: LibraryStore, folderRel: string, folder: Fold
   return refs;
 }
 
+const textEncoder = new TextEncoder();
+
+/** 单段文件名的字节上限（Windows/常见文件系统为 255 字节，留出余量）。 */
+const MAX_NAME_BYTES = 240;
+/** 为追加序号「 (999)」预留的字节数。 */
+const UNIQUE_SUFFIX_BYTES = 12;
+
 export function nextUniqueName(names: Set<string>, name: string): string {
   const dot = name.lastIndexOf('.');
-  const stem = dot > 0 ? name.slice(0, dot) : name;
+  let stem = dot > 0 ? name.slice(0, dot) : name;
   const ext = dot > 0 ? name.slice(dot) : '';
+  // 先把基础名压到安全长度，再追加序号：超长名无限追加「 (N)」会越过
+  // 文件系统的 255 字节上限导致移动失败。截断按码点进行，避免劈开代理对。
+  const stemBudget = MAX_NAME_BYTES - textEncoder.encode(ext).length - UNIQUE_SUFFIX_BYTES;
+  while (stemBudget > 0 && textEncoder.encode(stem).length > stemBudget) {
+    stem = [...stem].slice(0, -1).join('');
+  }
   let i = 2;
-  while (names.has(`${stem} (${i})${ext}`)) i++;
+  while (names.has(nameKey(`${stem} (${i})${ext}`))) i++;
   return `${stem} (${i})${ext}`;
 }
 
@@ -142,9 +169,7 @@ export async function ensureFolderRel(store: LibraryStore, relPath: string): Pro
   let current = root;
   for (const segment of normalized.split('/')) {
     if (!segment) continue;
-    let child = await findChildFolder(store, current, segment);
-    if (!child) child = await store.createFolder(current, segment);
-    current = child;
+    current = await resolveChildFolder(store, current, segment);
   }
   return current;
 }
@@ -173,7 +198,7 @@ export async function applyOrganize(
   // avoid re-walking/re-listing the same directories for every file. This is the
   // dominant cost for large libraries (previously O(files × depth) directory scans).
   const folderCache: FolderCache = new Map();
-  const fileNameCache: FileNameCache = new Map();
+  const childNameCache: ChildNameCache = new Map();
 
   const actions: OrganizeAction[] = [];
   const conflicts: OrganizeConflict[] = [];
@@ -227,9 +252,9 @@ export async function applyOrganize(
 
     try {
       const targetFolder = await resolveFolderCached(store, targetFolderRel, folderCache);
-      const names = await loadFileNames(store, targetFolderRel, targetFolder, fileNameCache);
+      const names = await loadChildNames(store, targetFolderRel, targetFolder, childNameCache);
       let finalName = targetName;
-      if (names.has(finalName)) {
+      if (names.has(nameKey(finalName))) {
         if (conflictMode === 'rename') {
           finalName = nextUniqueName(names, finalName);
         } else {
@@ -240,8 +265,8 @@ export async function applyOrganize(
 
       const source: FileRef = { id: image.fileRefId, name: image.name, kind: 'file' };
       const moved = await store.move(source, targetFolder, finalName);
-      if (parentRelPath(normalizeRelPath(image.relPath)) === targetFolderRel) names.delete(image.name);
-      names.add(moved.kind === 'file' ? moved.name : finalName);
+      if (parentRelPath(normalizeRelPath(image.relPath)) === targetFolderRel) names.delete(nameKey(image.name));
+      names.add(nameKey(moved.kind === 'file' ? moved.name : finalName));
       actions.push({
         fromRelPath: parentRelPath(normalizeRelPath(image.relPath)),
         fromName: image.name,
@@ -254,7 +279,9 @@ export async function applyOrganize(
         imageId: binding.imageId,
         name: image.name,
         targetRelPath: targetAbsRel,
-        reason: 'move-failed',
+        // 目标路径的某一层被同名文件占住：本质是「目标位置已有内容」，归入
+        // target-exists 让预览/冲突口径一致，而不是语焉不详的移动失败。
+        reason: err instanceof FolderPathBlockedError ? 'target-exists' : 'move-failed',
       });
       void err;
     }
@@ -291,29 +318,32 @@ export async function undoOrganize(
   const errors: string[] = [];
   let undone = 0;
   const total = manifest.actions.length;
-  const folderCache: FolderCache = new Map();
   const fileRefCache: FileRefCache = new Map();
 
   for (const action of [...manifest.actions].reverse()) {
     try {
-      const toFolder = await resolveFolderCached(store, action.toRelPath, folderCache);
-      const toRefs = await loadFileRefs(store, action.toRelPath, toFolder, fileRefCache);
-      const source = toRefs.get(action.toName);
+      // 用「不创建目录」的解析：撤销时源目录/目标目录可能已被用户删除，
+      // 不能为了查一个不存在的文件而凭空重建整棵目录树（空目录残留）。
+      const toFolder = await resolveFolderRef(store, action.toRelPath);
+      const toRefs = toFolder ? await loadFileRefs(store, action.toRelPath, toFolder, fileRefCache) : null;
+      const source = toRefs?.get(action.toName);
       if (!source) {
         errors.push(`无法还原缺失的文件：${action.toRelPath}/${action.toName}`);
         onProgress?.(undone, total);
         continue;
       }
-      const fromFolder = await resolveFolderCached(store, action.fromRelPath, folderCache);
-      const fromRefs = await loadFileRefs(store, action.fromRelPath, fromFolder, fileRefCache);
-      if (fromRefs.has(action.fromName)) {
+      const fromFolder = await resolveFolderRef(store, action.fromRelPath);
+      const fromRefs = fromFolder ? await loadFileRefs(store, action.fromRelPath, fromFolder, fileRefCache) : null;
+      if (fromRefs && fromRefs.has(action.fromName)) {
         errors.push(`目标已存在，跳过还原：${action.fromRelPath}/${action.fromName}`);
         onProgress?.(undone, total);
         continue;
       }
-      const moved = await store.move(source, fromFolder, action.fromName);
-      toRefs.delete(action.toName);
-      fromRefs.set(action.fromName, moved.kind === 'file' ? moved : { id: moved.id, name: moved.name, kind: 'file' });
+      const target = fromFolder ?? (await ensureFolderRel(store, action.fromRelPath));
+      const moved = await store.move(source, target, action.fromName);
+      // source 非 null 意味着 toRefs 一定已加载。
+      toRefs!.delete(action.toName);
+      fromRefs?.set(action.fromName, moved.kind === 'file' ? moved : { id: moved.id, name: moved.name, kind: 'file' });
       undone++;
     } catch (err) {
       errors.push(`撤销失败：${action.toName}：${String(err)}`);

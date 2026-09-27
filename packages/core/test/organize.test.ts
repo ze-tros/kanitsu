@@ -2,8 +2,9 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { MemoryLibraryStore } from '../../fs-adapter/src/memory';
 import { scanLibrary, imagesOf } from '../src/scan';
-import { applyCustomRule, organizeByFolder, parseImageName } from '../../organizer/src/organizer';
+import { applyCustomRule, organizeByFolder, parseImageName, validateCustomRulePattern } from '../../organizer/src/organizer';
 import { applyOrganize, undoOrganize, type OrganizeManifest } from '../src/organize';
+import { resolveFolderRef } from '../src/entry-ops';
 
 describe('organizer naming rules', () => {
   test('groups pixiv-style ids by work id', () => {
@@ -153,5 +154,157 @@ describe('applyOrganize / undoOrganize', () => {
     const res = await undoOrganize(store, manifest);
     assert.equal(res.undone, 0);
     assert.equal(res.errors.length, 0);
+  });
+});
+
+describe('目标位置已有同名目录 / 同名文件（三端语义对齐）', () => {
+  test('目标目录里已有同名【目录】时按 target-exists 处理，目录子树不被破坏', async () => {
+    const store = new MemoryLibraryStore();
+    const root = await store.ensureLibraryRoot();
+    const pack = await store.createFolder(root, 'Pack');
+    await store.writeBlob(pack, 'x.jpg', new Blob(['x'], { type: 'image/svg+xml' }));
+    // 关键种子：目标位置是一个【目录】叫 a.jpg，里面还有文件（旧实现会静默覆盖整棵子树）。
+    const dir = await store.createFolder(pack, 'a.jpg');
+    await store.writeBlob(dir, 'inner.jpg', new Blob(['inner'], { type: 'image/svg+xml' }));
+
+    const snapshot = await scanLibrary(store);
+    const image = Object.values(snapshot.images).find((i) => i.relPath === 'Pack/x.jpg')!;
+    const result = await applyOrganize(store, snapshot, 'Pack', [
+      { imageId: image.id, virtualPath: 'a.jpg', confidence: 0.9, materialized: false },
+    ]);
+
+    assert.equal(result.appliedCount, 0);
+    assert.deepEqual(result.conflicts.map((c) => c.reason), ['target-exists']);
+
+    // 目录与内部文件原封不动。
+    const after = await scanLibrary(store);
+    assert.ok(
+      Object.values(after.images).some((i) => i.relPath === 'Pack/a.jpg/inner.jpg'),
+      '同名目录的子文件必须原样保留',
+    );
+    assert.ok(Object.values(after.images).some((i) => i.relPath === 'Pack/x.jpg'), '源文件未被移动');
+  });
+
+  test('rename 模式为同名【目录】追加序号而不是移进去', async () => {
+    const store = new MemoryLibraryStore();
+    const root = await store.ensureLibraryRoot();
+    const pack = await store.createFolder(root, 'Pack');
+    await store.writeBlob(pack, 'x.jpg', new Blob(['x'], { type: 'image/svg+xml' }));
+    const dir = await store.createFolder(pack, 'a.jpg');
+    await store.writeBlob(dir, 'inner.jpg', new Blob(['inner'], { type: 'image/svg+xml' }));
+
+    const snapshot = await scanLibrary(store);
+    const image = Object.values(snapshot.images).find((i) => i.relPath === 'Pack/x.jpg')!;
+    const result = await applyOrganize(
+      store,
+      snapshot,
+      'Pack',
+      [{ imageId: image.id, virtualPath: 'a.jpg', confidence: 0.9, materialized: false }],
+      { conflict: 'rename' },
+    );
+
+    assert.equal(result.appliedCount, 1);
+    const after = await scanLibrary(store);
+    const paths = Object.values(after.images).map((i) => i.relPath).sort();
+    assert.deepEqual(paths, ['Pack/a (2).jpg', 'Pack/a.jpg/inner.jpg']);
+  });
+
+  test('目标路径中间段被同名【文件】占用时按 target-exists 处理，不再创建目录', async () => {
+    const store = new MemoryLibraryStore();
+    const root = await store.ensureLibraryRoot();
+    const pack = await store.createFolder(root, 'Pack');
+    await store.writeBlob(pack, 'x.jpg', new Blob(['x'], { type: 'image/svg+xml' }));
+    // 关键种子：'2024' 是文件不是目录（真实平台 createFolder 会 ENOTDIR/EEXIST）。
+    await store.writeBlob(pack, '2024', new Blob(['blocker'], { type: 'image/svg+xml' }));
+
+    const snapshot = await scanLibrary(store);
+    const image = Object.values(snapshot.images).find((i) => i.relPath === 'Pack/x.jpg')!;
+    const result = await applyOrganize(store, snapshot, 'Pack', [
+      { imageId: image.id, virtualPath: '2024/03/x.jpg', confidence: 0.9, materialized: false },
+    ]);
+
+    assert.equal(result.appliedCount, 0);
+    assert.deepEqual(result.conflicts.map((c) => c.reason), ['target-exists']);
+    const after = await scanLibrary(store);
+    assert.ok(Object.values(after.images).some((i) => i.relPath === 'Pack/x.jpg'), '源文件未被移动');
+    assert.ok(
+      !Object.values(after.folders).some((f) => f.relPath === 'Pack/2024' || f.relPath === 'Pack/2024/03'),
+      '不得把同名文件当目录穿越/改建',
+    );
+  });
+
+  test('含 .. 的绑定被 canonicalizeRelPath 拒绝并记为 move-failed', async () => {
+    const store = new MemoryLibraryStore();
+    const root = await store.ensureLibraryRoot();
+    const pack = await store.createFolder(root, 'Pack');
+    await store.writeBlob(pack, 'x.jpg', new Blob(['x'], { type: 'image/svg+xml' }));
+
+    const snapshot = await scanLibrary(store);
+    const image = Object.values(snapshot.images).find((i) => i.relPath === 'Pack/x.jpg')!;
+    const result = await applyOrganize(store, snapshot, 'Pack', [
+      { imageId: image.id, virtualPath: '../escape.jpg', confidence: 0.9, materialized: false },
+    ]);
+
+    assert.equal(result.appliedCount, 0);
+    assert.deepEqual(result.conflicts.map((c) => c.reason), ['move-failed']);
+    const after = await scanLibrary(store);
+    assert.ok(
+      !Object.values(after.images).some((i) => i.relPath.includes('escape')),
+      '文件不得逃出整理容器',
+    );
+  });
+
+  test('undo 不为缺失的目录凭空重建目录树', async () => {
+    const store = new MemoryLibraryStore();
+    const root = await store.ensureLibraryRoot();
+    const pack = await store.createFolder(root, 'Pack');
+    await store.writeBlob(pack, 'x.jpg', new Blob(['x'], { type: 'image/svg+xml' }));
+    const snapshot = await scanLibrary(store);
+    const image = Object.values(snapshot.images).find((i) => i.relPath === 'Pack/x.jpg')!;
+    const result = await applyOrganize(store, snapshot, 'Pack', [
+      { imageId: image.id, virtualPath: 'new-dir/x.jpg', confidence: 0.9, materialized: false },
+    ]);
+    assert.equal(result.appliedCount, 1);
+
+    // 用户删掉了整个目标目录树（含移进去的文件），再撤销。
+    // 注意：snapshot 里的 folder id 是领域 id（folder:xxx），不是存储层 ref，
+    // 删除必须用 resolveFolderRef 解析出真正的存储层条目。
+    const newDirRef = await resolveFolderRef(store, 'Pack/new-dir');
+    assert.ok(newDirRef, '整理后目标目录存在');
+    await store.remove(newDirRef);
+
+    const undone = await undoOrganize(store, result.manifest);
+    assert.equal(undone.undone, 0);
+    assert.equal(undone.errors.length, 1);
+    assert.match(undone.errors[0]!, /无法还原缺失的文件/);
+    // 撤销失败后不得留下重建出来的空目录。
+    const after = await scanLibrary(store);
+    assert.ok(!Object.values(after.folders).some((f) => f.relPath === 'Pack/new-dir'), '不得凭空重建目录');
+  });
+});
+
+describe('自定义规则的安全校验', () => {
+  test('target 展开为空时视为不匹配（回落内置规则），不产出无目录绑定', () => {
+    const rule = { id: 't', name: 't', pattern: '^(.+)$', target: '.', confidence: 0.9, enabled: true };
+    assert.equal(applyCustomRule('sub.jpg', rule), null);
+    const parsed = parseImageName('sub.jpg', [rule]);
+    assert.notEqual(parsed.rule, 't', '应回落到内置规则');
+    assert.ok(parsed.virtualPath.includes('/'), '兜底结果必须含目录');
+  });
+
+  test('灾难性回溯正则被拒绝（静态嵌套量词检测）', () => {
+    const safety = validateCustomRulePattern('^(a+)+$');
+    assert.equal(safety.ok, false);
+    assert.ok(safety.reason);
+    // 匹配时同样不生效。
+    const rule = { id: 'redos', name: 'redos', pattern: '^(a+)+$', target: '$1', confidence: 0.9, enabled: true };
+    assert.equal(applyCustomRule(`${'a'.repeat(24)}b.jpg`, rule), null);
+  });
+
+  test('常用合法正则通过校验', () => {
+    assert.equal(validateCustomRulePattern('^(\\d{3})_').ok, true);
+    assert.equal(validateCustomRulePattern('^(\\d{1,4})_(\\d{5,})_p(\\d+)$').ok, true);
+    assert.equal(validateCustomRulePattern('(.*)_(\\d+)').ok, true);
+    assert.equal(validateCustomRulePattern('(').ok, false, '语法错误仍被拒绝');
   });
 });

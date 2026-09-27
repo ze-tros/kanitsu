@@ -347,7 +347,38 @@ describe('HEIF/AVIF 的 Exif item', () => {
     assert.equal(source.reads[0]![0], 0);
     assert.ok(source.reads[1]![0] > 256 * 1024, `补读位置 = ${source.reads[1]![0]}`);
   });
+
+  test('item 起点在窗口内、但 TIFF 头跨越窗口边界时也补读（不再判为无 EXIF）', async () => {
+    const exifItem = buildExifItem(sampleTiff());
+    // 先用 leadBytes=0 探测 item 的实际落点（ftyp+meta 长度与 leadBytes 无关），
+    // 再精确摆放：item 距 256KB 窗口末尾 10 字节 → 窗口内可见 10 字节 ≥ 8，
+    // 但 exif_tiff_header_offset 指向的 TIFF 头需要 item 起点后 12 字节，跨出窗口。
+    const probe = buildHeif(exifItem, 0);
+    const mdatStart = findSubsequence(probe, exifItem);
+    assert.ok(mdatStart > 0, '探测 item 落点');
+    const boundary = 256 * 1024;
+    const itemStart = boundary - 10;
+    const source = trackedSource(buildHeif(exifItem, itemStart - mdatStart));
+    assert.ok(source.size > boundary, '文件必须大于头部窗口');
+
+    const result = await readExif(source);
+    assert.ok(result, '跨窗口 TIFF 头应经补读解析出来');
+    expectCoreRows(result);
+    assert.equal(source.reads.length, 2, `读取次数 = ${source.reads.length}`);
+    assert.equal(source.reads[1]![0], itemStart, `补读位置 = item 起点`);
+  });
 });
+
+/** 在 bytes 里查找 pattern 首次出现的下标；找不到返回 -1。 */
+function findSubsequence(bytes: Uint8Array, pattern: Uint8Array): number {
+  outer: for (let i = 0; i + pattern.length <= bytes.length; i++) {
+    for (let k = 0; k < pattern.length; k++) {
+      if (bytes[i + k] !== pattern[k]) continue outer;
+    }
+    return i;
+  }
+  return -1;
+}
 
 // —— Canon CR3：moov > uuid 的 CMT1/CMT2/CMT4 ——
 

@@ -11,6 +11,7 @@ import {
   applyCustomRule,
   BUILTIN_ORGANIZE_RULES,
   parseImageName,
+  validateCustomRulePattern,
   type CustomOrganizeRule,
 } from '../../../organizer/src/index';
 import { Switch } from './controls';
@@ -29,12 +30,9 @@ function createRuleId(): string {
 function regexErrorOf(pattern: string): string {
   const trimmed = pattern.trim();
   if (!trimmed) return '';
-  try {
-    new RegExp(trimmed, 'u');
-    return '';
-  } catch (err) {
-    return err instanceof Error ? err.message : String(err);
-  }
+  // 语法 + 回溯安全（灾难性回溯的正则会冻结主线程）一起在这里拦截。
+  const safety = validateCustomRulePattern(trimmed);
+  return safety.ok ? '' : safety.reason ?? '正则表达式无效';
 }
 
 const BUILTIN_NAMES = new Map(BUILTIN_ORGANIZE_RULES.map((rule) => [rule.id, rule.name]));

@@ -54,6 +54,7 @@ public final class AlbumLibrary {
     public AndroidEntry createFolder(File parent, String name) throws IOException {
         assertInside(parent);
         File dir = new File(parent, sanitize(name));
+        assertInside(dir);
         if (!dir.mkdirs() && !dir.isDirectory()) {
             throw new IOException("创建目录失败：" + name);
         }
@@ -76,16 +77,16 @@ public final class AlbumLibrary {
 
     public AndroidEntry write(File dir, String name, byte[] data) throws IOException {
         assertInside(dir);
-        File out = new File(dir, name);
+        File out = fileIn(dir, name);
         try (BufferedOutputStream fos = new BufferedOutputStream(new FileOutputStream(out), 256 * 1024)) {
             fos.write(data);
         }
-        return AndroidEntry.file(out.getAbsolutePath(), name, data.length, out.lastModified(), 0, 0);
+        return AndroidEntry.file(out.getAbsolutePath(), out.getName(), data.length, out.lastModified(), 0, 0);
     }
 
     public AndroidEntry write(File dir, String name, InputStream input) throws IOException {
         assertInside(dir);
-        File out = new File(dir, name);
+        File out = fileIn(dir, name);
         long bytes = 0;
         byte[] buffer = new byte[256 * 1024];
         try (BufferedInputStream in = new BufferedInputStream(input, buffer.length);
@@ -96,7 +97,15 @@ public final class AlbumLibrary {
                 bytes += n;
             }
         }
-        return AndroidEntry.file(out.getAbsolutePath(), name, bytes, out.lastModified(), 0, 0);
+        return AndroidEntry.file(out.getAbsolutePath(), out.getName(), bytes, out.lastModified(), 0, 0);
+    }
+
+    /** 在 dir 下构造条目 File：名字必须过 sanitize（write 此前是唯一漏掉清洗的写路径，
+     *  SAF 提供方或渲染端传来的 `../x` 会由 OS 解析越界），且最终路径必须仍在库内。 */
+    private File fileIn(File dir, String name) throws IOException {
+        File out = new File(dir, sanitize(name));
+        assertInside(out);
+        return out;
     }
 
     public List<AndroidEntry> listChildren(File dir) throws IOException {
@@ -186,6 +195,7 @@ public final class AlbumLibrary {
         assertInside(toDir);
         String targetName = (newName == null || newName.trim().isEmpty()) ? from.getName() : sanitize(newName);
         File to = new File(toDir, targetName);
+        assertInside(to);
         if (to.exists()) {
             throw new IOException("目标已存在：" + targetName);
         }
@@ -234,7 +244,9 @@ public final class AlbumLibrary {
     public static String sanitize(String name) {
         String n = name == null ? "" : name.trim();
         n = n.replaceAll("[\\\\/:*?\"<>|]", "_");
-        if (n.isEmpty()) {
+        // 纯点号名字（"." / ".."）会被 OS 解析成目录本身/父目录：createFolder("...")
+        // 会返回库外目录、write 会写到库外。清洗为占位名而不是放行。
+        if (n.isEmpty() || n.equals(".") || n.equals("..")) {
             n = "未命名相册";
         }
         return n;

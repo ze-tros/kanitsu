@@ -163,6 +163,21 @@ function assertNotLibraryInternalName(name: string): void {
   if (isLibraryInternalName(name.trim())) throw new Error(`“${name}”是应用保留名称，请换一个。`);
 }
 
+/**
+ * 渲染端（或来源目录名）传来的条目名只允许是单个路径段：IPC handler 用它直接
+ * path.join 拼目标路径，名字里出现 `..`、分隔符或盘符就会逃出目标目录甚至图库。
+ * UI 层的输入校验不是防线，凡是「以 name 拼路径」的入口都必须过这里。
+ */
+function assertSafeEntryName(name: unknown): string {
+  const value = String(name ?? '');
+  if (!value.trim()) throw new Error('名称不能为空。');
+  if (value === '.' || value === '..') throw new Error(`“${value}”不是合法的名称。`);
+  if (/[/\\:]/.test(value)) throw new Error(`“${value}”不能包含路径分隔符或盘符。`);
+  if (/[\u0000-\u001f]/.test(value)) throw new Error(`“${value}”包含非法控制字符。`);
+  assertNotLibraryInternalName(value);
+  return value;
+}
+
 interface DesktopSettings {
   version: number;
   /** 用户选定的数据目录；空串表示尚未设置（首次启动引导未完成）。 */
@@ -613,6 +628,44 @@ async function listEntries(dirPath: string): Promise<DesktopFsEntry[]> {
   );
 }
 
+/**
+ * 图库指纹：对整棵目录树（相对路径｜大小｜mtime）做 SHA1 摘要。
+ * 旧的「根目录 mtime」方案在 NTFS 上对深层写入/删除不敏感（父目录 mtime 只在
+ * 直接子项增删时更新），会导致缓存索引永不失效；摘要让任何一层变更都能触发重扫。
+ * 应用私有目录（.kanitsu-cache 等）不参与：缩略图落盘不该触发全量重扫。
+ */
+async function computeLibraryFingerprint(root: string): Promise<string> {
+  const hash = createHash('sha1');
+  const walk = async (dir: string, rel: string): Promise<void> => {
+    let entries: import('fs').Dirent[];
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true });
+    } catch {
+      hash.update(`E\t${rel}\n`);
+      return;
+    }
+    entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    for (const entry of entries) {
+      if (isLibraryInternalName(entry.name)) continue;
+      const childRel = rel ? `${rel}/${entry.name}` : entry.name;
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        hash.update(`D\t${childRel}\n`);
+        await walk(full, childRel);
+      } else {
+        try {
+          const st = await fs.stat(full);
+          hash.update(`F\t${childRel}\t${st.size}\t${Math.round(st.mtimeMs)}\n`);
+        } catch {
+          hash.update(`F\t${childRel}\t-\t-\n`);
+        }
+      }
+    }
+  };
+  await walk(root, '');
+  return hash.digest('hex');
+}
+
 async function getOrCreateFolder(parentPath: string, name: string): Promise<DesktopFsEntry> {
   assertInsideLibrary(parentPath);
   const full = path.join(parentPath, name);
@@ -834,9 +887,12 @@ function takeNextThumbnail(): ThumbnailRequest | undefined {
 }
 
 function pumpThumbnailQueue(): void {
+  // 无条件先把池补满，再做任务派发：worker 崩溃/超时被杀的瞬间队列可能恰好
+  // 为空（超时路径正持有一个执行中任务），若只在「有任务」时重建，槽位就永远
+  // 不再恢复，池会静默萎缩到 1 个 worker。
+  for (let i = 0; i < THUMB_WORKER_COUNT; i++) ensureThumbnailWorker(i);
   for (let i = 0; i < THUMB_WORKER_COUNT; i++) {
     if (totalQueuedThumbnails() === 0) return;
-    ensureThumbnailWorker(i);
     const worker = workerPool[i];
     if (!worker || busyWorkers.has(worker)) continue;
     const request = takeNextThumbnail();
@@ -859,8 +915,9 @@ function pumpThumbnailQueue(): void {
       job.reject(new Error('缩略图生成超时'));
       pumpThumbnailQueue();
     }, isRawJob ? THUMB_RAW_JOB_TIMEOUT_MS : THUMB_JOB_TIMEOUT_MS);
+    // 与 inFlightJobs.set 严格配对：注册必须先于 postMessage，迟到的响应才有处可归。
     inFlightJobs.set(requestId, { worker, resolve: request.resolve, reject: request.reject, timer });
-      worker.postMessage({ requestId, filePath: request.file.id, targetSize: request.targetSize, gifAnimated: request.gifAnimated });
+    worker.postMessage({ requestId, filePath: request.file.id, targetSize: request.targetSize, gifAnimated: request.gifAnimated });
   }
 }
 
@@ -1443,24 +1500,26 @@ function registerIpc(): void {
     await ensureDir(root);
     // fingerprint 与 getRoot 在启动时并发调用，取指纹前同样要等骨架建好。
     await ensureLibraryScaffold(root);
-    const stat = await fs.stat(root);
-    return String(stat.mtimeMs);
+    return computeLibraryFingerprint(root);
   });
 
   ipcMain.handle('library:createFolder', async (_event, parent: DesktopFsEntry, name: string): Promise<DesktopFsEntry> => {
-    assertNotLibraryInternalName(name);
+    assertSafeEntryName(name);
     return getOrCreateFolder(parent.id, name);
   });
 
   ipcMain.handle('library:createTopFolder', async (_event, name: string): Promise<DesktopFsEntry> => {
-    assertNotLibraryInternalName(name);
+    assertSafeEntryName(name);
     return createTopFolder(name);
   });
 
   ipcMain.handle('library:writeBlob', async (_event, folder: DesktopFsEntry, name: string, data: Uint8Array): Promise<DesktopFsEntry> => {
+    assertSafeEntryName(name);
     assertInsideLibrary(folder.id);
     await ensureDir(folder.id);
     const full = path.join(folder.id, name);
+    // 名字与目录分别校验后再兜底一次最终路径，杜绝任何拼接逃逸。
+    assertInsideLibrary(full);
     await fs.writeFile(full, data);
     return entryFor(full, name);
   });
@@ -1699,8 +1758,20 @@ function registerIpc(): void {
   ipcMain.handle('library:move', async (_event, entry: DesktopFsEntry, toFolder: DesktopFsEntry, newName?: string): Promise<DesktopFsEntry> => {
     assertInsideLibrary(entry.id);
     assertInsideLibrary(toFolder.id);
-    if (newName) assertNotLibraryInternalName(newName);
-    const target = path.join(toFolder.id, newName ?? path.basename(entry.id));
+    let finalName = path.basename(entry.id);
+    if (newName != null) finalName = assertSafeEntryName(newName);
+    const target = path.join(toFolder.id, finalName);
+    // Windows 的 rename 会静默覆盖已存在的目标文件；先探一次存在性，重名时报错
+    // 而不是丢数据。仅改大小写的重命名（同一文件）放行：inode 相同、或路径按
+    // Windows 大小写不敏感语义相等。
+    const [sourceStat, targetStat] = await Promise.all([fs.stat(entry.id).catch(() => null), fs.stat(target).catch(() => null)]);
+    if (targetStat) {
+      const sameFile =
+        (sourceStat != null && targetStat.ino !== 0 && targetStat.ino === sourceStat.ino && targetStat.dev === sourceStat.dev) ||
+        path.resolve(target).toLowerCase() === path.resolve(entry.id).toLowerCase();
+      if (!sameFile) throw new Error(`目标已存在：${finalName}`);
+    }
+    assertInsideLibrary(target);
     await withFileRetry(() => fs.rename(entry.id, target));
     return entryFor(target);
   });

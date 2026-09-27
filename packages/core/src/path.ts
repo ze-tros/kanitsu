@@ -43,6 +43,14 @@ export function baseNameOfRelPath(relPath: string): string {
   return idx < 0 ? p : p.slice(idx + 1);
 }
 
+/**
+ * 判重用的名字键：统一到 NFC 规范形，避免同一名字的 NFD/NFC 两种编码
+ * （macOS 常见 NFD）绕过「同名」判断、产生视觉同名的重复文件。
+ */
+export function nameKey(name: string): string {
+  return name.normalize('NFC');
+}
+
 export function extOf(name: string): string {
   const idx = name.lastIndexOf('.');
   return idx < 0 ? '' : name.slice(idx + 1).toLowerCase();

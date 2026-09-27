@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState, type FormEvent } from 'react';
-import { applyCustomRule, BUILTIN_ORGANIZE_RULES, type CustomOrganizeRule } from '../../organizer/src/index';
+import { applyCustomRule, BUILTIN_ORGANIZE_RULES, validateCustomRulePattern, type CustomOrganizeRule } from '../../organizer/src/index';
 
 const STORAGE_KEY = 'kanitsu-organize-custom-rules';
 
@@ -79,12 +79,10 @@ export function OrganizeRulesManager({
   const regexError = useMemo(() => {
     const trimmed = pattern.trim();
     if (!trimmed) return '';
-    try {
-      new RegExp(trimmed, 'u');
-      return '';
-    } catch (err) {
-      return err instanceof Error ? err.message : String(err);
-    }
+    // 语法 + 回溯安全（灾难性回溯的正则会冻结主线程）一起在这里拦截。
+    const safety = validateCustomRulePattern(trimmed);
+    if (!safety.ok) return safety.reason ?? '正则表达式无效';
+    return '';
   }, [pattern]);
 
   const preview = useMemo(() => {
@@ -98,8 +96,9 @@ export function OrganizeRulesManager({
       enabled: true,
     };
     if (!rule.pattern || !rule.target) return null;
+    if (regexError) return null;
     return applyCustomRule(sample, rule);
-  }, [name, pattern, target, confidence, sample, editingId]);
+  }, [name, pattern, target, confidence, sample, editingId, regexError]);
 
   const resetDraft = () => {
     setName('');

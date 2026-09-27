@@ -69,6 +69,10 @@ export class MemoryTree {
       if (!next) {
         next = { name: part, kind: 'folder', children: new Map() };
         cur.children.set(part, next);
+      } else if (next.kind !== 'folder') {
+        // 与真实平台对齐（ENOTDIR/EEXIST）：路径中的同名文件不能被当目录穿越，
+        // 否则后续写入会把这个文件节点当文件夹继续挂子节点，静默破坏结构。
+        throw new Error(`路径中存在同名文件，无法作为目录使用：${part}`);
       }
       cur = next;
     }
@@ -104,6 +108,9 @@ export class MemoryTree {
     if (!child) {
       child = { name, kind: 'folder', children: new Map() };
       p.children.set(name, child);
+    } else if (child.kind !== 'folder') {
+      // 真实平台会对「同名文件占位」抛 EEXIST/ENOTDIR，这里不能静默返回文件节点。
+      throw new Error(`已存在同名文件，无法创建文件夹：${name}`);
     }
     return child;
   }
@@ -138,6 +145,17 @@ export class MemoryTree {
     const oldParent = this.get(parentPath(id));
     const targetParent = this.ensureFolder(toFolder.id);
     const actualName = newName ?? baseName(id);
+    const existing = targetParent.children.get(actualName);
+    if (existing && existing !== node) {
+      // 对齐真实平台：文件↔目录互相覆盖与「目录覆盖非空目录」都抛错，
+      // 不允许静默替换（memory 端唯一可能无声销毁用户数据的入口）。
+      if (existing.kind !== node.kind) {
+        throw new Error(`目标已存在同名${existing.kind === 'folder' ? '目录' : '文件'}：${actualName}`);
+      }
+      if (node.kind === 'folder' && existing.children.size > 0) {
+        throw new Error(`目标已存在非空同名目录：${actualName}`);
+      }
+    }
     oldParent?.children.delete(baseName(id));
     targetParent.children.set(actualName, node);
     node.name = actualName;

@@ -1,6 +1,6 @@
 import type { FileRef, LibraryStore } from '../../fs-adapter/src/types';
 import type { FolderNode, ImageEntry, LibrarySnapshot } from './types';
-import { canonicalizeRelPath, normalizeRelPath, parentRelPath } from './path';
+import { canonicalizeRelPath, nameKey, normalizeRelPath, parentRelPath } from './path';
 import { stableHash } from './hash';
 import { resolveFolderRef } from './entry-ops';
 import { nextUniqueName, type OrganizeAction, type OrganizeManifest } from './organize';
@@ -77,21 +77,27 @@ export async function moveEntries(
   options.onProgress?.(0, total);
 
   // 目标目录现有的文件名 / 子目录名，用于重名判断（随移动实时更新）。
+  // 文件与目录共享同一命名空间（真实文件系统不允许同名共存）：图片移动到
+  // 「已有同名目录」的名字上、或图包移动到「已有同名文件」的名字上，同样
+  // 是冲突（平台报错或静默覆盖），统一用 takenNames 判重。
   const takenFiles = new Set<string>();
   const takenFolders = new Set<string>();
+  const takenNames = new Set<string>();
   for await (const child of store.listChildren(target)) {
     if (child.kind === 'file') takenFiles.add(child.name);
     else takenFolders.add(child.name);
+    takenNames.add(nameKey(child.name));
   }
 
   let movedImages = 0;
   for (const image of images) {
     try {
       const source: FileRef = { id: image.fileRefId ?? image.id, name: image.name, kind: 'file' };
-      const finalName = takenFiles.has(image.name) ? nextUniqueName(takenFiles, image.name) : image.name;
+      const finalName = takenNames.has(nameKey(image.name)) ? nextUniqueName(takenNames, image.name) : image.name;
       const moved = await store.move(source, target, finalName);
       const toName = moved.kind === 'file' ? moved.name : finalName;
       takenFiles.add(toName);
+      takenNames.add(nameKey(toName));
       actions.push({
         fromRelPath: parentRelPath(normalizeRelPath(image.relPath)),
         fromName: image.name,
@@ -111,13 +117,14 @@ export async function moveEntries(
     if (isRelPrefix(folder.relPath, targetRel)) fail('invalid-target');
     else if (parentRelPath(folder.relPath) === targetRel) {
       // 已经在目标目录里，无需移动。
-    } else if (takenFolders.has(folder.name)) fail('target-exists');
+    } else if (takenNames.has(nameKey(folder.name))) fail('target-exists');
     else {
       try {
         const source = await resolveFolderRef(store, folder.relPath);
         if (!source) throw new Error('missing');
         await store.move(source, target, folder.name);
         takenFolders.add(folder.name);
+        takenNames.add(nameKey(folder.name));
         movedFolders++;
       } catch {
         fail('move-failed');

@@ -250,6 +250,8 @@ function resolveTiffOffset(b: Uint8Array, at: number, length: number): number {
 /**
  * HEIF/AVIF 的 Exif item 位置。负载可能落在 `b`（文件头部窗口）之外，
  * 此时只给出位置，`tiffOffset` 置 -1，待补读后由 resolveTiffOffset 确认。
+ * TIFF 头跨越窗口边界（item 起点在窗口内、但魔数在窗口外）时同样置 -1：
+ * 窗口内扫不到魔数不代表文件里没有，交给调用方补读后再解析。
  */
 function heifPayloadRef(b: Uint8Array, itemStart: number, itemLength: number): ExifPayloadRef | null {
   if (itemLength < 8 || itemStart < 0) return null;
@@ -257,7 +259,7 @@ function heifPayloadRef(b: Uint8Array, itemStart: number, itemLength: number): E
   const available = itemStart < b.length ? Math.min(length, b.length - itemStart) : 0;
   if (available < 8) return { offset: itemStart, length, tiffOffset: -1 };
   const tiffOffset = resolveTiffOffset(b, itemStart, available);
-  return tiffOffset >= 0 ? { offset: itemStart, length, tiffOffset } : null;
+  return tiffOffset >= 0 ? { offset: itemStart, length, tiffOffset } : { offset: itemStart, length, tiffOffset: -1 };
 }
 
 /** 从 `meta` 盒里定位 item_type = 'Exif' 的 item 在文件中的位置。 */
@@ -920,8 +922,17 @@ export function parseExif(bytes: Uint8Array): ExifResult | null {
 }
 
 /**
+ * 补读负载的长度上限：EXIF 负载本体很小（JPEG APP1 上限 64KB，HEIF Exif item
+ * 实际几十 KB），不再复用 8MB 的 MAX_PAYLOAD——容器声明超大 extent 时避免
+ * 只为一个 Exif item 补读 8MB 过 IPC/桥。
+ */
+const MAX_REFILL_BYTES = 1024 * 1024;
+
+/**
  * 按需读取原文件区间并解析 EXIF。
- * 先读头部窗口一次；HEIF/AVIF 的 Exif item 落在窗口外时补读该段。
+ * 先读头部窗口一次；EXIF 负载落在窗口外时补读该段。负载完整落在窗口内时，
+ * parseExif 已经解析过同一段字节并失败（TIFF 系 RAW 的补读分支恒为 covered），
+ * 直接判无 EXIF，不再重解析。
  */
 export async function readExif(source: ExifByteSource): Promise<ExifResult | null> {
   const headLength = Math.min(source.size, HEAD_BYTES);
@@ -931,9 +942,10 @@ export async function readExif(source: ExifByteSource): Promise<ExifResult | nul
   if (direct) return direct;
   const ref = locateExifPayload(head);
   if (!ref || ref.offset < 0) return null;
-  const need = Math.min(ref.length, MAX_PAYLOAD);
+  const need = Math.min(ref.length, MAX_PAYLOAD, MAX_REFILL_BYTES);
   const covered = ref.offset + need <= head.length;
-  const payload = covered ? head.subarray(ref.offset, ref.offset + need) : await source.read(ref.offset, need);
+  if (covered) return null;
+  const payload = await source.read(ref.offset, need);
   const tiffOffset = ref.tiffOffset >= 0 ? ref.tiffOffset : resolveTiffOffset(payload, 0, payload.length);
   return tiffOffset >= 0 ? parseExifTiff(payload, tiffOffset) : null;
 }

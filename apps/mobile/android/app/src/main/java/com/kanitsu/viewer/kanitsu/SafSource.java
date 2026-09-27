@@ -67,20 +67,35 @@ public final class SafSource {
     }
 
     public List<AndroidEntry> listChildren(String documentId) {
+        return listChildren(documentId, null);
+    }
+
+    /**
+     * 列出 SAF 目录的子项。行级异常只丢掉那一行并记入 errors（可选）：
+     * 整个游标循环被 catch 吞掉时，无权限/提供方回收的目录会静默表现为
+     * 「空图包」，导入静默少拷且不留任何痕迹。
+     */
+    public List<AndroidEntry> listChildren(String documentId, List<String> errors) {
         List<AndroidEntry> out = new ArrayList<>();
+        Uri childrenUri;
+        Cursor c = null;
         try {
-            Uri childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, documentId);
-            try (Cursor c = context.getContentResolver().query(childrenUri,
+            childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, documentId);
+            c = context.getContentResolver().query(childrenUri,
                 new String[] {
                     DocumentsContract.Document.COLUMN_DOCUMENT_ID,
                     DocumentsContract.Document.COLUMN_DISPLAY_NAME,
                     DocumentsContract.Document.COLUMN_MIME_TYPE,
                     DocumentsContract.Document.COLUMN_SIZE,
                     DocumentsContract.Document.COLUMN_LAST_MODIFIED
-                }, null, null, null)) {
-                while (c != null && c.moveToNext()) {
+                }, null, null, null);
+            while (c != null && c.moveToNext()) {
+                try {
                     String id = c.getString(0);
                     String name = c.getString(1);
+                    if (name == null || name.isEmpty()) {
+                        name = "未命名";
+                    }
                     String mime = c.getString(2);
                     long size = safeLong(c, 3);
                     long mtime = safeLong(c, 4);
@@ -89,11 +104,28 @@ public final class SafSource {
                     } else {
                         out.add(AndroidEntry.file(id, name, size, mtime, 0, 0));
                     }
+                } catch (Exception rowError) {
+                    if (errors != null) {
+                        errors.add(documentId + " 行读取失败: " + String.valueOf(rowError.getMessage()));
+                    }
                 }
             }
-        } catch (Exception ignored) {
+        } catch (Exception queryError) {
+            if (errors != null) {
+                errors.add(documentId + " 目录查询失败: " + String.valueOf(queryError.getMessage()));
+            }
+        } finally {
+            if (c != null) {
+                try {
+                    c.close();
+                } catch (Exception ignored) {
+                }
+            }
         }
-        out.sort((a, b) -> a.kind.equals(b.kind) ? a.name.compareToIgnoreCase(b.name) : (a.kind.equals("folder") ? -1 : 1));
+        // name 已经兜底为非空，这里再防一次历史数据（null 安全比较）。
+        out.sort((a, b) -> a.kind.equals(b.kind)
+                ? String.valueOf(a.name).compareToIgnoreCase(String.valueOf(b.name))
+                : (a.kind.equals("folder") ? -1 : 1));
         return out;
     }
 
@@ -153,15 +185,28 @@ public final class SafSource {
 
     private void walk(String documentId, File dstDir, String relPath, int[] scanned, int[] copied, int[] skipped,
                       List<JSObject> skippedFiles, List<String> errors, AlbumLibrary albums, ProgressEmitter emitter, AtomicBoolean cancel) throws IOException {
-        for (AndroidEntry child : listChildren(documentId)) {
+        List<String> rowErrors = new ArrayList<>();
+        List<AndroidEntry> children = listChildren(documentId, rowErrors);
+        errors.addAll(rowErrors);
+        for (AndroidEntry child : children) {
             // 取消检查：已复制文件保留，直接停止后续复制（下次重试按 size+mtime 跳过）。
             if (cancel != null && cancel.get()) {
                 return;
             }
+            // 应用私有名与桌面端导入口径一致：.kanitsu-cache / .kanitsu-library.json
+            // 不是图库内容，从别的 Kanitsu 图库目录导入时不应被再次卷入。
+            if (child.name.equals(".kanitsu-cache") || child.name.equals(".kanitsu-library.json")) {
+                continue;
+            }
             String childRel = relPath.isEmpty() ? child.name : relPath + "/" + child.name;
             if (child.kind.equals("folder")) {
-                File sub = new File(dstDir, child.name);
+                // SAF 提供方可控名字（如 ".."）：过 sanitize 且最终目录必须仍在库内。
+                File sub = new File(dstDir, AlbumLibrary.sanitize(child.name));
+                albums.assertInside(sub);
                 sub.mkdirs();
+                if (!sub.isDirectory()) {
+                    throw new IOException("创建目录失败：" + childRel);
+                }
                 walk(child.id, sub, childRel, scanned, copied, skipped, skippedFiles, errors, albums, emitter, cancel);
             } else {
                 scanned[0]++;
