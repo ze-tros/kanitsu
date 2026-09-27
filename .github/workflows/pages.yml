@@ -1,0 +1,59 @@
+name: Pages
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+    # 站点是手写的静态文件，只在站点内容或本工作流变化时重新部署。
+    paths:
+      - 'site/**'
+      - '.github/workflows/pages.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy static site to GitHub Pages
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Fail fast when the site is missing
+        run: |
+          if [ ! -f site/index.html ]; then
+            echo "::error::site/index.html 不存在，拒绝部署空站点。"
+            exit 1
+          fi
+
+      # 纯静态站点不使用 Jekyll：configure-pages 仅静态检测站点配置，
+      # 开启 enablement 会为 Pages 站点自动开启（或更新）Actions 发布源。
+      - name: Configure Pages
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+        with:
+          enablement: true
+
+      # upload-pages-artifact 内部已完成 tar 打包与上传，不需要额外的打包步骤。
+      - name: Upload site artifact
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
