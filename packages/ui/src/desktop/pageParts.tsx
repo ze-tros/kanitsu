@@ -438,7 +438,7 @@ export function ImageToolbar({
       <h2>图片<small className="num">{formatCount(count)}</small></h2>
       {hasChildren && (
         <button type="button" className={`dk-tog ${includeSubfolders ? 'on' : ''}`} role="switch" aria-checked={includeSubfolders} onClick={onToggleSubfolders}>
-          <span className="dk-sw" />含子目录
+          <span className="dk-sw" />含子图包
         </button>
       )}
       {filterText && (

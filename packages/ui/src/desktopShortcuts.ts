@@ -20,7 +20,7 @@ export const DESKTOP_SHORTCUTS: ReadonlyArray<DesktopShortcutGroup> = [
     title: '全局',
     items: [
       { label: '命令面板 / 搜索', keys: ['Ctrl', 'K'] },
-      { label: '导入文件夹', keys: ['Ctrl', 'O'] },
+      { label: '导入图包', keys: ['Ctrl', 'O'] },
       { label: '后退 / 前进（也可用鼠标侧键）', keys: ['Alt', '←', '→'] },
       { label: '打开设置', keys: ['Ctrl', ','] },
       { label: '显示 / 隐藏侧栏', keys: ['Ctrl', 'B'] },

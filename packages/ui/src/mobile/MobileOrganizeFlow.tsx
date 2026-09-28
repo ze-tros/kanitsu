@@ -136,8 +136,8 @@ export function MobileOrganizeFlow({
           <h1>{step === 1 ? '选择整理规则' : '预览整理结果'}</h1>
           <p>
             {step === 1
-              ? '将整理该图包及其全部子目录里的图片；先生成预览，确认之前不会移动任何文件。'
-              : `在「${folder.name}」内按「${rule.name}」建立 ${groups.length} 个目录；完成后可在任务中心撤销。`}
+              ? '将整理该图包及其全部子图包里的图片；先生成预览，确认之前不会移动任何文件。'
+              : `在「${folder.name}」内按「${rule.name}」建立 ${groups.length} 个子图包；完成后可在任务中心撤销。`}
           </p>
           <div className="m2-steps" aria-label={`第 ${step} 步，共 2 步`}>
             <i className="is-on" />

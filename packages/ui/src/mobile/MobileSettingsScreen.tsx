@@ -256,7 +256,7 @@ function BrowseInline() {
       <SettingsItem
         icon="gauge"
         title="后台预取"
-        subtitle="空闲时预热当前目录、子目录与全库缩略图，滚动更顺"
+        subtitle="空闲时预热当前图包、子图包与全库缩略图，滚动更顺"
         trailing={
           <Switch
             checked={prefetch}

@@ -484,7 +484,7 @@ export function MobileApp({
   const packSubtitle = useCallback(
     (folder: FolderNode): string => {
       const parts: string[] = [];
-      if (folder.childCount > 0) parts.push(`${folder.childCount} 个子目录`);
+      if (folder.childCount > 0) parts.push(`${folder.childCount} 个子图包`);
       const imported = importedAt[folder.id];
       if (imported) parts.push(formatRelativeTime(imported));
       else parts.push(formatBytes(folderStats.get(folder.id)?.bytes ?? 0));
@@ -1622,7 +1622,7 @@ export function MobileApp({
         quickActions: [
           { label: '整理', icon: 'wand', disabled: images.length === 0, onSelect: () => openOrganizeFor(folder) },
           { label: '导出 ZIP', icon: 'zip', disabled: images.length === 0, onSelect: () => handleExport(folder) },
-          { label: '新建子目录', icon: 'folder-plus', onSelect: () => openPrompt({ kind: 'create-folder', folder }) },
+          { label: '新建子图包', icon: 'folder-plus', onSelect: () => openPrompt({ kind: 'create-folder', folder }) },
           { label: '设置封面', icon: 'image', disabled: images.length === 0, onSelect: () => openCoverPicker(folder) },
         ],
         actions: [
@@ -1630,7 +1630,7 @@ export function MobileApp({
           ...(!isRootFolder ? [{ label: '重命名', icon: 'edit' as const, onSelect: () => openPrompt({ kind: 'rename-folder', folder }) }] : []),
           ...(pinned ? [{ label: '取消固定封面', icon: 'pin' as const, onSelect: () => pinCover(folder.id, null) }] : []),
           {
-            label: allBlurred ? '取消隐私预览（含子目录）' : '隐私预览（含子目录）',
+            label: allBlurred ? '取消隐私预览（含子图包）' : '隐私预览（含子图包）',
             icon: allBlurred ? 'eye' : 'eye-off',
             disabled: images.length === 0,
             onSelect: () => toggleFolderBlur(folder),
@@ -1891,7 +1891,7 @@ export function MobileApp({
               <h1>{selectedFolder.name}</h1>
               <div className="m2-meta tabular-nums">
                 {selectedFolder.imageCount} 张
-                {selectedFolder.childCount > 0 ? ` · ${selectedFolder.childCount} 个子目录` : ''} · {formatBytes(folderStats.get(selectedFolder.id)?.bytes ?? 0)}
+                {selectedFolder.childCount > 0 ? ` · ${selectedFolder.childCount} 个子图包` : ''} · {formatBytes(folderStats.get(selectedFolder.id)?.bytes ?? 0)}
                 {imported ? ` · ${formatRelativeTime(imported)}导入` : ''}
               </div>
             </div>
@@ -1919,7 +1919,7 @@ export function MobileApp({
           <>
             <div className="m2-section-head">
               <h2>
-                子目录<span className="tabular-nums">{childFolders.length}</span>
+                子图包<span className="tabular-nums">{childFolders.length}</span>
               </h2>
               <button className="m2-text-button" onClick={() => openPrompt({ kind: 'create-folder', folder: selectedFolder })}>
                 新建
@@ -1951,7 +1951,7 @@ export function MobileApp({
           {selectedFolder.childCount > 0 && (
             <button className={`m2-chip ${aggregate ? 'is-on' : ''}`} aria-pressed={aggregate} onClick={() => setAggregate((v) => !v)}>
               <MobileIcon name="layers" className="w-4 h-4" />
-              含子目录
+              含子图包
             </button>
           )}
           <button className="m2-icon-button" onClick={() => openDisplaySheet('images')} aria-label="显示选项">
@@ -1962,16 +1962,16 @@ export function MobileApp({
           <div className="m2-inline-empty">
             {selectedFolder.childCount > 0 && !aggregate ? (
               <>
-                <p>当前目录没有直接存放的图片。</p>
+                <p>当前图包没有直接存放的图片。</p>
                 <button className="m2-chip-button" onClick={() => setAggregate(true)}>
-                  显示子目录中的 {selectedFolder.imageCount} 张
+                  显示子图包中的 {selectedFolder.imageCount} 张
                 </button>
               </>
             ) : (
               <>
-                <p>这个目录还是空的。</p>
+                <p>这个图包还是空的。</p>
                 <button className="m2-chip-button" onClick={() => openPrompt({ kind: 'create-folder', folder: selectedFolder })}>
-                  新建子目录
+                  新建子图包
                 </button>
               </>
             )}
@@ -2480,7 +2480,7 @@ export function MobileApp({
                 }
                 body={
                   dialogDelete.kind === 'folder'
-                    ? `将从图库删除 ${dialogDelete.folder.imageCount} 张图片副本及全部子目录。源文件夹不受影响，但此操作无法撤销。`
+                    ? `将从图库删除 ${dialogDelete.folder.imageCount} 张图片副本及全部子图包。源文件夹不受影响，但此操作无法撤销。`
                     : '只删除图库中的副本，源文件夹不受影响。此操作无法撤销。'
                 }
                 confirmLabel={dialogDelete.kind === 'batch' ? `删除 ${dialogDelete.count} 张` : '删除'}
@@ -2497,10 +2497,10 @@ export function MobileApp({
                     : dialogPrompt.kind === 'rename-folder'
                       ? '重命名图包'
                       : dialogPrompt.kind === 'batch-move'
-                        ? `移动 ${dialogPrompt.count} 张图片到新文件夹`
-                        : `在「${dialogPrompt.folder.name || '图库'}」中新建子目录`
+                        ? `移动 ${dialogPrompt.count} 张图片到新图包`
+                        : `在「${dialogPrompt.folder.name || '图库'}」中新建子图包`
                 }
-                label={dialogPrompt.kind === 'create-folder' || dialogPrompt.kind === 'batch-move' ? '文件夹名称' : '新名称'}
+                label={dialogPrompt.kind === 'create-folder' || dialogPrompt.kind === 'batch-move' ? '图包名称' : '新名称'}
                 initialValue={
                   dialogPrompt.kind === 'rename-image'
                     ? dialogPrompt.image.name

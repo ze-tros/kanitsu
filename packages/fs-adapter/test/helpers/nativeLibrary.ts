@@ -67,7 +67,7 @@ function resolveFolder(native: { root: NativeFolder }, id: string): NativeFolder
   for (const part of id.split('/').filter(Boolean)) {
     if (cur.kind !== 'folder') throw new Error(`路径中存在同名文件，无法作为目录使用：${part}`);
     const next = cur.children.get(part);
-    if (!next) throw new Error(`未找到文件夹：${id}`);
+    if (!next) throw new Error(`未找到图包：${id}`);
     cur = next;
   }
   if (cur.kind !== 'folder') throw new Error(`不是目录：${id}`);
@@ -76,7 +76,7 @@ function resolveFolder(native: { root: NativeFolder }, id: string): NativeFolder
 
 function listChildren(native: { root: NativeFolder }, id: string): NativeEntry[] {
   const node = resolve(native, id);
-  if (!node || node.kind !== 'folder') throw new Error(`未找到文件夹：${id}`);
+  if (!node || node.kind !== 'folder') throw new Error(`未找到图包：${id}`);
   const out: NativeEntry[] = [];
   for (const [name, child] of node.children) {
     out.push(nodeToEntry(`${id === '/' ? '' : id}/${name}`, child));
@@ -89,7 +89,7 @@ function createFolder(native: { root: NativeFolder }, parentId: string, name: st
   const parent = resolveFolder(native, parentId);
   const existing = parent.children.get(name);
   if (existing) {
-    if (existing.kind !== 'folder') throw new Error(`已存在同名文件，无法创建文件夹：${name}`);
+    if (existing.kind !== 'folder') throw new Error(`已存在同名文件，无法创建图包：${name}`);
     return nodeToEntry(joinId(parentId, name), existing);
   }
   const folder: NativeFolder = { kind: 'folder', name, children: new Map() };

@@ -110,7 +110,7 @@ export class MemoryTree {
       p.children.set(name, child);
     } else if (child.kind !== 'folder') {
       // 真实平台会对「同名文件占位」抛 EEXIST/ENOTDIR，这里不能静默返回文件节点。
-      throw new Error(`已存在同名文件，无法创建文件夹：${name}`);
+      throw new Error(`已存在同名文件，无法创建图包：${name}`);
     }
     return child;
   }

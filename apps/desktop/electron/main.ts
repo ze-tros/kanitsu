@@ -1503,7 +1503,7 @@ function registerIpc(): void {
       defaultId: 0,
       cancelId: 1,
       noLink: true,
-      title: '导入文件夹',
+      title: '导入图包',
       message: `导入「${name}」？`,
       detail: `${selected}\n\n会把其中支持的图片复制到 Kanitsu 图库，源文件夹不会被修改。`,
     };

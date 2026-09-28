@@ -234,16 +234,16 @@ export function OrganizeDialog({
               {hasSubfolderImages && (
                 <div className="dk-org-scope">
                   <span className="dk-shrink">
-                    <b>包含子目录里的图片</b>
+                    <b>包含子图包里的图片</b>
                     <small>
                       {includeSubfolders
-                        ? `共 ${formatCount(folder.imageCount)} 张；子目录里命中的图片会移到新的子图包中`
-                        : `只整理直属的 ${formatCount(folder.directImageCount)} 张，子目录保持不变`}
+                        ? `共 ${formatCount(folder.imageCount)} 张；子图包里命中的图片会移到新的子图包中`
+                        : `只整理直属的 ${formatCount(folder.directImageCount)} 张，子图包保持不变`}
                     </small>
                   </span>
                   <Switch
                     checked={includeSubfolders}
-                    label="包含子目录里的图片"
+                    label="包含子图包里的图片"
                     onChange={(value) => {
                       setIncludeSubfolders(value);
                       setEdited(null);
@@ -272,7 +272,7 @@ export function OrganizeDialog({
                 <EmptyState
                   compact
                   title={images.length === 0 ? '这个图包没有直属图片可以整理' : '这条规则没有命中'}
-                  text={images.length === 0 ? '打开「包含子目录里的图片」后再试。' : '换一条规则试试，或者编写自定义规则。'}
+                  text={images.length === 0 ? '打开「包含子图包里的图片」后再试。' : '换一条规则试试，或者编写自定义规则。'}
                 />
               )}
             </div>

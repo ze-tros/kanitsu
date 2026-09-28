@@ -149,10 +149,10 @@ export function DisplaySheet({
         {childCount > 0 && (
           <div className="m2-opt-row">
             <span>
-              <strong>包含子目录图片</strong>
-              <small>把 {childCount} 个子目录的图片一起平铺</small>
+              <strong>包含子图包图片</strong>
+              <small>把 {childCount} 个子图包的图片一起平铺</small>
             </span>
-            <Switch checked={aggregate} onChange={onAggregate} label="包含子目录图片" />
+            <Switch checked={aggregate} onChange={onAggregate} label="包含子图包图片" />
           </div>
         )}
       </div>

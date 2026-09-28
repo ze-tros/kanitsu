@@ -10,8 +10,8 @@ import { Z_FULLSCREEN_MODAL } from './mobile/zindex';
 const PAGE_SIZE = 120;
 
 /**
- * 图包封面选择弹窗：层次化浏览 —— 展示当前目录的直属图片与子文件夹，
- * 可进入子文件夹挑选其中图片，也可点卡片上的 ⭐ 直接用该子文件夹的封面。
+ * 图包封面选择弹窗：层次化浏览 —— 展示当前目录的直属图片与子图包，
+ * 可进入子图包挑选其中图片，也可点卡片上的 ⭐ 直接用该子图包的封面。
  * 无论浏览到哪一层，最终设置的封面都属于发起设置的 folderId 目录。
  * onPick(null) 表示取消固定封面。
  */
@@ -27,7 +27,7 @@ export function CoverPickerModal({
   folderId: string;
   snapshot: LibrarySnapshot;
   store: LibraryStore;
-  /** 各目录已固定的封面 id，用于子文件夹卡片展示真实封面。 */
+  /** 各目录已固定的封面 id，用于子图包卡片展示真实封面。 */
   pinnedCovers?: Record<string, string>;
   currentCoverId: string | null;
   onPick: (imageId: string | null) => void;
@@ -84,7 +84,7 @@ export function CoverPickerModal({
   }, [onCancel]);
 
   // 与主视图同款低优先级预热：打开弹窗或切换浏览目录时，把当前目录的直属图片
-  // （优先级 1＝滚动方向预取档，仅次于可见）与子文件夹封面（优先级 3）排入同一
+  // （优先级 1＝滚动方向预取档，仅次于可见）与子图包封面（优先级 3）排入同一
   // 缓存/队列。外部已生成的缩略图（键一致）直接命中复用；未生成过的也提前后台
   // 生成，滚动/点选时即出图。
   useEffect(() => {
@@ -134,12 +134,12 @@ export function CoverPickerModal({
             ))}
           </ul>
         </nav>
-        <p className="text-xs opacity-70 mt-1 shrink-0">进入子文件夹挑选其中的图片，或点子文件夹卡片上的 ⭐ 直接用它的封面。</p>
+        <p className="text-xs opacity-70 mt-1 shrink-0">进入子图包挑选其中的图片，或点子图包卡片上的 ⭐ 直接用它的封面。</p>
 
         <div className="flex-1 min-h-0 overflow-y-auto mt-3">
         {childCards.length > 0 && (
           <section className="mt-3">
-            <h4 className="text-xs font-semibold opacity-70 mb-2">子文件夹</h4>
+            <h4 className="text-xs font-semibold opacity-70 mb-2">子图包</h4>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
               {childCards.map(({ folder, cover }) => (
                 <div key={folder.id} className="card bg-base-100 border border-base-300 overflow-hidden">
@@ -180,7 +180,7 @@ export function CoverPickerModal({
                       type="button"
                       className="btn btn-xs btn-circle btn-primary absolute top-1 right-1 shadow opacity-0 group-hover:opacity-100 focus:opacity-100 transition"
                       disabled={!cover}
-                      title={cover ? `将“${folder.name}”的封面用作本图包封面` : '该子文件夹暂无图片'}
+                      title={cover ? `将“${folder.name}”的封面用作本图包封面` : '该子图包暂无图片'}
                       onClick={(event) => {
                         event.stopPropagation();
                         if (cover) onPick(cover.imageId);
@@ -245,7 +245,7 @@ export function CoverPickerModal({
           ) : normalizedQuery ? (
             <p className="text-sm opacity-60 py-3 text-center">没有匹配的图片。</p>
           ) : (
-            <p className="text-sm opacity-60 py-3 text-center">本目录暂无图片，可进入子文件夹挑选。</p>
+            <p className="text-sm opacity-60 py-3 text-center">本目录暂无图片，可进入子图包挑选。</p>
           )}
           {hasMoreImages && (
             <div className="flex justify-center mt-3">

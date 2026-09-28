@@ -60,7 +60,7 @@ export async function renameImage(store: LibraryStore, image: ImageEntry, newNam
   const source = await resolveImageFileRef(store, image);
   if (!source) throw new Error(`未找到图片：${image.relPath}`);
   const folder = await resolveFolderRef(store, parentRelPath(image.relPath));
-  if (!folder) throw new Error(`未找到所在文件夹：${parentRelPath(image.relPath)}`);
+  if (!folder) throw new Error(`未找到所在图包：${parentRelPath(image.relPath)}`);
   if (await hasChild(store, folder, finalName, 'file')) throw new Error(`已存在同名文件：${finalName}`);
   const moved = await store.move(source, folder, finalName);
   if (moved.kind !== 'file') throw new Error(`重命名失败：${image.name}`);
@@ -78,8 +78,8 @@ export async function deleteImage(store: LibraryStore, image: ImageEntry): Promi
 export async function createSubfolder(store: LibraryStore, parentRel: string, name: string): Promise<FolderRef> {
   const clean = cleanEntryName(name);
   const parent = await resolveFolderRef(store, parentRel);
-  if (!parent) throw new Error(`未找到父文件夹：${parentRel}`);
-  if (await hasChild(store, parent, clean, 'folder')) throw new Error(`已存在同名文件夹：${clean}`);
+  if (!parent) throw new Error(`未找到父图包：${parentRel}`);
+  if (await hasChild(store, parent, clean, 'folder')) throw new Error(`已存在同名图包：${clean}`);
   return store.createFolder(parent, clean);
 }
 
@@ -90,10 +90,10 @@ export async function renameFolder(store: LibraryStore, folder: FolderNode, newN
   if (clean === folder.name) return { id: folder.id, name: folder.name, kind: 'folder' };
 
   const source = await resolveFolderRef(store, folder.relPath);
-  if (!source) throw new Error(`未找到文件夹：${folder.relPath}`);
+  if (!source) throw new Error(`未找到图包：${folder.relPath}`);
   const parent = await resolveFolderRef(store, parentRelPath(folder.relPath));
-  if (!parent) throw new Error(`未找到父文件夹：${parentRelPath(folder.relPath)}`);
-  if (await hasChild(store, parent, clean, 'folder')) throw new Error(`已存在同名文件夹：${clean}`);
+  if (!parent) throw new Error(`未找到父图包：${parentRelPath(folder.relPath)}`);
+  if (await hasChild(store, parent, clean, 'folder')) throw new Error(`已存在同名图包：${clean}`);
   const moved = await store.move(source, parent, clean);
   if (moved.kind !== 'folder') throw new Error(`重命名失败：${folder.name}`);
   return moved;

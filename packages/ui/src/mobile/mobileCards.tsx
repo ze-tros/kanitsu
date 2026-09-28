@@ -347,7 +347,7 @@ export function SubfolderCard({
       </div>
       <strong>{folder.name}</strong>
       <small className="tabular-nums">
-        {folder.imageCount} 张{folder.childCount > 0 ? ` · ${folder.childCount} 个子目录` : ''}
+        {folder.imageCount} 张{folder.childCount > 0 ? ` · ${folder.childCount} 个子图包` : ''}
       </small>
     </div>
   );

@@ -57,7 +57,7 @@ export async function moveEntries(
 ): Promise<MoveEntriesResult> {
   const targetRel = canonicalizeRelPath(targetRelPath);
   const target = await resolveFolderRef(store, targetRel);
-  if (!target) throw new Error(`未找到目标文件夹：${targetRel || '图库根目录'}`);
+  if (!target) throw new Error(`未找到目标图包：${targetRel || '图库根目录'}`);
 
   const folders: FolderNode[] = [];
   for (const id of selection.folderIds) {

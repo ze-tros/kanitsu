@@ -61,7 +61,7 @@ export function TitleBar({
       <div className="dk-spacer" />
       <div className="dk-tb-actions titlebar-no-drag">
         {taskButton}
-        <button type="button" className="dk-btn primary" disabled={importing} onClick={onImport} title="导入文件夹 (Ctrl+O)">
+        <button type="button" className="dk-btn primary" disabled={importing} onClick={onImport} title="导入图包 (Ctrl+O)">
           <UploadSimple size={16} />
           {importing ? '正在导入' : '导入'}
         </button>

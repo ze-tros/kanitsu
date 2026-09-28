@@ -266,7 +266,7 @@ export function MobileConfirmDialog({
   );
 }
 
-/** 输入对话框（重命名 / 新建文件夹）。 */
+/** 输入对话框（重命名 / 新建图包）。 */
 export function MobilePromptDialog({
   title,
   label,

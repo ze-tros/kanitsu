@@ -30,7 +30,7 @@ export async function deleteLibraryFolder(store: LibraryStore, relPath: string):
   const normalized = normalizeRelPath(relPath);
   if (!normalized) throw new Error('不能删除库根目录。');
   const folder = await resolveFolder(store, normalized);
-  if (!folder) throw new Error(`未找到文件夹：${normalized}`);
+  if (!folder) throw new Error(`未找到图包：${normalized}`);
   await store.remove(folder);
   return normalized;
 }

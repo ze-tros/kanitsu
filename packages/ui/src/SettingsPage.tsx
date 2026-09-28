@@ -470,7 +470,7 @@ const LEVEL_LABELS: ReadonlyArray<readonly [LogLevel, string]> = [
 ];
 
 /** 主进程多级队列的档位名，与 thumbnailCache.ts 的 THUMB_PRIORITY_* 一一对应。 */
-const QUEUE_PRIORITY_LABELS = ['可见', '滚动方向', '当前目录', '子文件夹', '预热'];
+const QUEUE_PRIORITY_LABELS = ['可见', '滚动方向', '当前目录', '子图包', '预热'];
 
 /** 帧率折线保留的样本数：监测器约 500ms 回调一次，60 个 ≈ 最近 30 秒。 */
 const FPS_HISTORY = 60;
@@ -657,7 +657,7 @@ function DebugPanel() {
         </div>
         <div className="dk-set-log-box">
           {logs.length === 0 ? (
-            <div className="dk-set-log-empty">暂无日志；切换文件夹/打开大目录后会有目录切换与预取事件。</div>
+            <div className="dk-set-log-empty">暂无日志；切换图包/打开大目录后会有目录切换与预取事件。</div>
           ) : (
             <table className="dk-set-log-table">
               <tbody>

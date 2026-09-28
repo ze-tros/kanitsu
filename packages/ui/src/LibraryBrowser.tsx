@@ -1897,7 +1897,7 @@ export function LibraryBrowser({
           { label: '按原比例', icon: <Rows size={16} />, checked: prefs.layout === 'justified', onSelect: () => setPref('layout', 'justified') },
           { label: '列表', icon: <List size={16} />, checked: prefs.layout === 'list', onSelect: () => setPref('layout', 'list') },
           { label: '显示文件名', icon: <Tag size={16} />, checked: prefs.showNames, separator: true, onSelect: () => setPref('showNames', !prefs.showNames) },
-          { label: '包含子目录', icon: <Stack size={16} />, checked: prefs.includeSubfolders, onSelect: () => setPref('includeSubfolders', !prefs.includeSubfolders) },
+          { label: '包含子图包', icon: <Stack size={16} />, checked: prefs.includeSubfolders, onSelect: () => setPref('includeSubfolders', !prefs.includeSubfolders) },
         ]);
   }, [createFolderIn, isRoot, openMenu, prefs.includeSubfolders, prefs.layout, prefs.packView, prefs.showNames, selectedFolder, setPref]);
 
@@ -2241,7 +2241,7 @@ export function LibraryBrowser({
   // ———————————————————— 命令 ————————————————————
   const paletteCommands = useMemo<PaletteCommand[]>(() => {
     const list: PaletteCommand[] = [
-      { id: 'import', label: '导入文件夹…', icon: <UploadSimple size={16} />, shortcut: 'Ctrl O', run: () => void runImport(), keywords: 'import' },
+      { id: 'import', label: '导入图包…', icon: <UploadSimple size={16} />, shortcut: 'Ctrl O', run: () => void runImport(), keywords: 'import' },
     ];
     if (!isRoot && selectedFolder) {
       list.push(
@@ -2516,14 +2516,14 @@ export function LibraryBrowser({
                 filterText
                   ? `没有文件名包含「${filterText}」的图片。`
                   : selectedFolder.childCount > 0
-                    ? '图片都在子图包里，可以打开「含子目录」一起浏览。'
-                    : '导入文件夹，或把其他图包里的图片移到这里。'
+                    ? '图片都在子图包里，可以打开「含子图包」一起浏览。'
+                    : '导入图包，或把其他图包里的图片移到这里。'
               }
               action={
                 filterText ? (
                   <button type="button" className="dk-btn" onClick={() => setFilterText('')}>清除筛选</button>
                 ) : selectedFolder.childCount > 0 && !prefs.includeSubfolders ? (
-                  <button type="button" className="dk-btn" onClick={() => setPref('includeSubfolders', true)}>显示子目录中的图片</button>
+                  <button type="button" className="dk-btn" onClick={() => setPref('includeSubfolders', true)}>显示子图包中的图片</button>
                 ) : undefined
               }
             />
