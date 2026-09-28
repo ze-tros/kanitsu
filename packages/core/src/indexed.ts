@@ -12,7 +12,7 @@ function openDb(): Promise<IDBDatabase> {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = () => {
       const db = req.result;
-      // v2 changed image id generation; drop any stale index rows so the next
+      // drop any stale index rows so the next
       // load falls back to a fresh disk scan instead of mixing old ids.
       for (const name of [FOLDERS, IMAGES, META]) {
         if (db.objectStoreNames.contains(name)) db.deleteObjectStore(name);

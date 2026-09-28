@@ -164,7 +164,7 @@ describe('目标位置已有同名目录 / 同名文件（三端语义对齐）'
     const root = await store.ensureLibraryRoot();
     const pack = await store.createFolder(root, 'Pack');
     await store.writeBlob(pack, 'x.jpg', new Blob(['x'], { type: 'image/svg+xml' }));
-    // 关键种子：目标位置是一个【目录】叫 a.jpg，里面还有文件（旧实现会静默覆盖整棵子树）。
+    // 关键种子：目标位置是一个【目录】叫 a.jpg，里面还有文件。
     const dir = await store.createFolder(pack, 'a.jpg');
     await store.writeBlob(dir, 'inner.jpg', new Blob(['inner'], { type: 'image/svg+xml' }));
 

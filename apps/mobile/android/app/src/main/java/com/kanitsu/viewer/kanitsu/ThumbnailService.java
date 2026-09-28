@@ -30,8 +30,7 @@ public final class ThumbnailService {
     public static final int GIF_PASSTHROUGH_BYTES = 256 * 1024;
     /** 超过该字节数的 GIF 不做「整读 + 动画缩略图」，只取静态首帧。整读前
      *  先由 file.length() 判断（绝不先读后拒），解码/编码并发又由信号量封顶
-     *  在 2 路，内存峰值可控；v1 曾设 4MB，导致较大 GIF 全部退化为静态首帧，
-     *  放宽到 16MB。 */
+     *  在 2 路，内存峰值可控。 */
     public static final int MAX_ANIMATED_GIF_BYTES = 16 * 1024 * 1024;
     /** 同时进行内存密集型解码/编码的通道数。快速滑动 + 各级预取会同时触发大量
      *  缩略图生成，每路都持有解码位图与编码缓冲；无界并发会瞬间打爆 256MB 堆

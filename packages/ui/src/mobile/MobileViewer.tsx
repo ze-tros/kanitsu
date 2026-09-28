@@ -199,7 +199,7 @@ export function MobileViewer({
       const map = new Map(prev);
       map.set(id, next);
       // LRU 淘汰：超过 MAX_PAGES 时移除最久未用且非「当前 ±2」的条目，并释放
-      // 其缩略图 object URL，防止翻阅几百张后内存无限膨胀（原 Map 无上限）。
+      // 其缩略图 object URL，防止翻阅几百张后内存无限膨胀。
       if (map.size > MAX_PAGES) {
         const keep = new Set<string>();
         const idx = indexRef.current;
@@ -399,7 +399,6 @@ export function MobileViewer({
     };
   }, [activeIndex, images, store]);
 
-  // 卸载释放全部 objectURL 与 viewer URL
   useEffect(() => {
     mountedRef.current = true;
     const urls = objectUrlsRef.current;
@@ -418,7 +417,6 @@ export function MobileViewer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [store]);
 
-  // 容器尺寸
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -542,7 +540,7 @@ export function MobileViewer({
   }, [activeIndex, resetTransform]);
 
   // —— 滑页偏移（翻页手势跟手 + 回弹动画）——
-  const [dragX, setDragX] = useState(0); // 手势中跟手偏移
+  const [dragX, setDragX] = useState(0);
   const [animating, setAnimating] = useState(false);
 
   const setDragPosition = (position: number): void => {
@@ -692,7 +690,6 @@ export function MobileViewer({
       const targetIndex = activeIndex + dir;
       const target = images[targetIndex];
       if (!target || !containerSize.w) {
-        // 边界：回弹
         if (prefersReducedMotion()) {
           setAnimating(false);
           setDragPosition(0);
@@ -846,7 +843,6 @@ export function MobileViewer({
     } else if (g.mode === 'swipe') {
       setDragPosition(g.startDragX + dx);
     } else if (g.mode === 'close') {
-      // 下滑：图片跟随下移，背景渐隐
       const ty = Math.max(0, dy);
       setDragPosition(0);
       viewRef.current = { scale: 1, tx: 0, ty };
@@ -873,7 +869,6 @@ export function MobileViewer({
       viewRef.current = readCurrentTransform();
       setTransformTransition('none');
       if (g.pointers.size === 1) {
-        // 剩余一指：转 pan/等待
         const [p] = [...g.pointers.values()];
         g.startX = p.x;
         g.startY = p.y;
@@ -881,7 +876,6 @@ export function MobileViewer({
         g.lastY = p.y;
         g.mode = viewRef.current.scale > 1.02 ? 'pan' : 'decide';
       } else if (g.pointers.size === 0) {
-        // 捏合结束：若缩放小于 1 回弹到适应
         const v = viewRef.current;
         if (v.scale < 1) {
           animateTransformTo({ scale: 1, tx: 0, ty: 0 }, 180);
@@ -924,14 +918,12 @@ export function MobileViewer({
       if (dy > CLOSE_THRESHOLD || vy > 0.5) {
         requestClose();
       } else {
-        // 回弹
         if (mask) (mask as HTMLElement).style.background = '';
         resetTransform();
       }
       return;
     }
 
-    // tap 判定
     const dist = Math.hypot(e.clientX - g.startX, e.clientY - g.startY);
     const dt = performance.now() - g.downTime;
     if (wasMode === 'decide' && dist < TAP_MAX_DIST && dt < TAP_MAX_MS) {
@@ -986,7 +978,6 @@ export function MobileViewer({
       className={`m-viewer-root fixed inset-0 flex flex-col select-none ${closing ? 'm-viewer-exit' : ''}`}
       style={{ touchAction: 'none', zIndex: Z_VIEWER }}
     >
-      {/* 手势层 + 图片页 */}
       <div
         ref={containerRef}
         className="m-viewer-stage flex-1 relative overflow-hidden"
@@ -1000,8 +991,8 @@ export function MobileViewer({
           const p = pages.get(img.id);
           const offsetPages = i - activeIndex;
           // Percentage translation is available on the first paint, before ResizeObserver
-          // reports the container width. Using the measured width here briefly stacked the
-          // current and adjacent pages at x=0 when opening the viewer.
+          // reports the container width. Using the measured width here would briefly stack
+          // the current and adjacent pages at x=0 when opening the viewer.
           const x = `calc(${offsetPages * 100}% + ${dragX}px)`;
           const isCurrent = i === activeIndex;
           const d = displayDims(p, containerSize.w, containerSize.h);
@@ -1153,7 +1144,6 @@ export function MobileViewer({
         </div>
       )}
 
-      {/* 顶部栏 */}
       <div
         className={`m-viewer-chrome m-viewer-top absolute top-0 left-0 right-0 z-10 transition-opacity duration-200 ${
           uiVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'
@@ -1246,7 +1236,6 @@ export function MobileViewer({
         </div>
       )}
 
-      {/* 底部：胶片条 + 动作栏 */}
       <div
         className={`m-viewer-chrome m-viewer-bottom absolute bottom-0 left-0 right-0 z-10 transition-opacity duration-200 ${
           uiVisible && !showInfo ? 'opacity-100' : 'opacity-0 pointer-events-none'

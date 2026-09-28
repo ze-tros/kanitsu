@@ -80,8 +80,7 @@ public class KanitsuPlugin extends Plugin {
     // ------------------------------------------------------------------
 
     /** 应用内主题切换时同步状态栏/导航栏底色与图标明暗（setSystemTheme: { dark, statusBarColor?, navBarColor? }）。
-     *  色值由 JS 从设计令牌算出后下发，这里同时持久化，供 MainActivity 冷启动预置
-     *  （不再按系统 uiMode 猜应用内偏好）。 */
+     *  色值由 JS 从设计令牌算出后下发，这里同时持久化，供 MainActivity 冷启动预置。 */
     @PluginMethod
     public void setSystemTheme(PluginCall call) {
         Boolean dark = call.getBoolean("dark");

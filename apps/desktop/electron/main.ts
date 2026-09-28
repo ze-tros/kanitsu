@@ -138,9 +138,8 @@ interface ClearCacheResult {
 // settings.json 保存数据目录指针（与内容分离），数据目录里写标记文件
 // 用于识别「这个目录由 Kanitsu 管理」。之所以要标记：目录里会被建出 albums 等
 // 应用子目录，若允许把用户自己的文件夹选成数据目录，会把无关文件卷进应用管理。
-// v2:rawViewMode 字段加入。v1 文件里的 rawViewMode 只可能来自一个未发布
-// 的中间构建(它把当时的默认值 camera 自动持久化了),因此 v2 起仅在文件
-// 版本 ≥2 时读取该字段,老文件按新默认 developed 处理。
+// v2:rawViewMode 字段加入。v2 起仅在文件版本 ≥2 时读取该字段,老文件按
+// 新默认 developed 处理。
 // v3:dataDir 字段加入；旧版 libraryRoot/libraryLocationConfirmed 字段不再读取
 // （不提供旧版升级迁移：旧数据留在原处，不再使用）。
 const SETTINGS_VERSION = 3;
@@ -678,8 +677,6 @@ async function listEntries(dirPath: string): Promise<DesktopFsEntry[]> {
 
 /**
  * 图库指纹：对整棵目录树（相对路径｜大小｜mtime）做 SHA1 摘要。
- * 旧的「根目录 mtime」方案在 NTFS 上对深层写入/删除不敏感（父目录 mtime 只在
- * 直接子项增删时更新），会导致缓存索引永不失效；摘要让任何一层变更都能触发重扫。
  * 应用私有目录（.kanitsu-cache 等）不参与：缩略图落盘不该触发全量重扫。
  */
 async function computeLibraryFingerprint(root: string): Promise<string> {
@@ -796,9 +793,7 @@ const thumbCache = createByteLruCache(512 * 1024 * 1024);
 /** 单条内存缓存上限。普通缩略图通常只有数十 KB，4MB 仅作异常输出兜底；
  *  总量仍由 512MB LRU 上限控制。 */
 const MAX_MEM_CACHE_ENTRY_BYTES = 4 * 1024 * 1024;
-// 缩略图输出策略版本。v3 恢复网格动画 GIF 缩略图（v2 曾改为静态首帧 JPEG
-// 以避免大量卡片同时动画解码和合成；恢复后动画输出典型几百 KB/张并落盘
-// 缓存，配合虚拟化挂载只有可见卡片参与动画）。版本变化使旧缓存整体失效。
+// 缩略图输出策略版本。版本变化使旧缓存整体失效。
 const THUMB_CACHE_VERSION = 3;
 
 function putThumbCache(cacheKey: string, data: Uint8Array): void {
@@ -846,8 +841,7 @@ async function writeThumbToDisk(hash: string, data: Uint8Array): Promise<void> {
     const part = path.join(dir, `${hash}.jpg.part`);
     await fs.writeFile(part, data);
     await fs.rename(part, path.join(dir, `${hash}.jpg`));
-    // 增量 prune：每 200 次落盘触发一次护栏检查，长时间会话里上限也能生效
-    // （此前只在启动时跑一次）。
+    // 增量 prune：每 200 次落盘触发一次护栏检查，长时间会话里上限也能生效。
     thumbWritesSincePrune++;
     if (thumbWritesSincePrune >= 200) {
       thumbWritesSincePrune = 0;
@@ -1393,7 +1387,7 @@ function enqueueAuxDerivative(sourcePath: string, auxMode: RawViewMode, auxPath:
  * 解码,只是不显示、不热替换);模式只决定「显示哪份派生」。
  * HEIF 无机内渲染替代(内嵌缩略图质量差),固定走 developed 管线。
  * camera 模式预览失败抛错(无内嵌预览即无法查看);developed 模式自动回退
- * 完整解码(旧行为)。
+ * 完整解码。
  */
 function ensureRawDerivative(file: DesktopFsEntry, mode: RawViewMode): Promise<string> {
   assertInsideLibrary(file.id);
@@ -1435,7 +1429,7 @@ function ensureRawDerivative(file: DesktopFsEntry, mode: RawViewMode): Promise<s
         const previewOk = await enqueueRawDerivativeJob({ sourcePath: file.id, derivPath, mode: 'preview' }).catch(() => false);
         if (previewOk) return true;
       }
-      // 2) 无内嵌预览:回退完整解码(原行为,等待完成)。
+      // 2) 无内嵌预览:回退完整解码(等待完成)。
       return await enqueueRawDerivativeJob({ sourcePath: file.id, derivPath, mode: 'full' });
     })();
     rawDerivativePending.set(derivPath, promise);
@@ -1691,7 +1685,6 @@ function registerIpc(): void {
 
   ipcMain.handle('library:readThumbnail', async (_event, file: DesktopFsEntry, maxSize: number, priority: number, gifAnimated: boolean | undefined): Promise<Uint8Array> => {
     assertInsideLibrary(file.id);
-    // 优先级：0 可见 > 1 当前目录 > 2 子文件夹 > 3 全库预热/无关。
     const level = Math.max(0, Math.min(THUMB_PRIORITIES - 1, priority || 0));
     const targetSize = Math.max(64, Math.min(maxSize || 512, 1024));
     // GIF 网格缩略图随「动画/静态首帧」设置走不同生成路径，缓存键随模式区分；
@@ -2196,7 +2189,6 @@ function startMainApp(): void {
     appProtocolsRegistered = true;
   }
   createWindow();
-  // 后台清理缩略图磁盘缓存（超限时删除最旧）。
   void pruneThumbCache();
 }
 

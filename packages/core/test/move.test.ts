@@ -81,7 +81,7 @@ describe('moveEntries', () => {
 
   test('image colliding with a same-name directory in the target is renamed, directory intact', async () => {
     const store = await seedStore();
-    // 目标目录里已有一个【目录】叫 photo.jpg（真实平台/旧 memory 实现会静默覆盖它）。
+    // 目标目录里已有一个【目录】叫 photo.jpg。
     const root = await store.ensureLibraryRoot();
     const packB = await store.createFolder(root, 'PackB');
     await store.writeBlob(packB, 'photo.jpg', new Blob(['photo'], { type: 'image/jpeg' }));

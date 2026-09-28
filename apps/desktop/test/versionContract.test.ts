@@ -1,8 +1,6 @@
 // 版本单一来源的强校验（进入 npm test --workspaces，即 CI 门禁的一部分）：
 // 发布 tag 与 desktop 包 version 一一对应（仓库发布约定），Android versionName /
-// versionCode 与 Web 构建注入的 KANITSU_VERSION 都从它派生。此前只有 build.gradle
-// 读取时的静默兜底，派生链路断掉（路径错、JSON 失败、正则失配）只会表现为
-// 「Android 显示 0.0.0」这类静默漂移——这里把整条链路钉进测试。
+// versionCode 与 Web 构建注入的 KANITSU_VERSION 都从它派生。
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';

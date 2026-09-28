@@ -386,7 +386,6 @@ export function LibraryBrowser({
     };
   }, []);
 
-  // 启动时把本地保存的日志等级同步给主进程。
   useEffect(() => {
     void window.kanitsuDesktop?.setLogLevel?.(getLogLevelPref());
   }, []);

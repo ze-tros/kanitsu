@@ -379,7 +379,6 @@ export function MobileSettingsScreen({
         </main>
       </div>
 
-      {/* 二级分类详情覆盖层 */}
       {detailPresence.present && shownMeta && (
         <div
           key={shownMeta.id}

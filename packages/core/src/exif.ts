@@ -960,8 +960,7 @@ export function parseExif(bytes: Uint8Array): ExifResult | null {
 
 /**
  * 补读负载的长度上限：EXIF 负载本体很小（JPEG APP1 上限 64KB，HEIF Exif item
- * 实际几十 KB），不再复用 8MB 的 MAX_PAYLOAD——容器声明超大 extent 时避免
- * 只为一个 Exif item 补读 8MB 过 IPC/桥。
+ * 实际几十 KB），容器声明超大 extent 时避免只为一个 Exif item 补读 8MB 过 IPC/桥。
  */
 const MAX_REFILL_BYTES = 1024 * 1024;
 

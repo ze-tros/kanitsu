@@ -1332,9 +1332,8 @@ html[data-theme='light'][data-accent='amber'] .mobile-studio { --m-accent: #9462
 html[data-theme='light'][data-accent='graphite'] .mobile-studio { --m-accent: #505a65; --m-accent-ink: #fff; --m-accent-text: #404a54; --m-accent-soft: rgba(80,90,101,.12); --m-accent-line: rgba(80,90,101,.35); }
 
 /* ============================================================================
-   正式版式的最终层（原 formal-overrides.css 全文搬入，未改任何声明）
-   它原本作为最后一个样式表加载以覆盖前面的旧值；搬到这里后仍是移动端样式表的
-   最后一段，而桌面树与移动树互不重叠，所以级联结果与搬移前完全一致。
+   正式版式最终层：必须保持为移动端样式表的最后一段（级联覆盖依赖此位置；
+   桌面树与移动树互不重叠）。
    ========================================================================== */
 /* The mobile shell shares the same visual rhythm but keeps touch targets. */
 .mobile-studio {

@@ -209,7 +209,7 @@ export async function applyOrganize(
 
   // Memoize folder resolution and target-folder file names across bindings so we
   // avoid re-walking/re-listing the same directories for every file. This is the
-  // dominant cost for large libraries (previously O(files × depth) directory scans).
+  // dominant cost for large libraries.
   const folderCache: FolderCache = new Map();
   const childNameCache: ChildNameCache = new Map();
   /** 本次调用【新建】的目录（按创建序）：结束后回收仍是空的，避免冲突

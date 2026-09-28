@@ -1,5 +1,5 @@
 // 动画 GIF 缩略图的自研纯逻辑（omggif 解码 + median-cut 量化 + 双线性缩放），
-// 从 thumbnailWorker 抽出：不依赖 sharp / worker 线程，可被 node:test 直接单测
+// 不依赖 sharp / worker 线程，可被 node:test 直接单测
 // （全透明图、单色图、1×1 目标、单帧 GIF 等分支最容易静默出错）。
 import { GifReader, GifWriter } from 'omggif';
 

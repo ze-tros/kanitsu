@@ -1,9 +1,7 @@
 /**
  * object URL 小池（性能优化 P4）。
  *
- * 旧实现每张图挂载时 `createObjectURL`、卸载时 `revokeObjectURL`，在快速
- * 滚动 / 目录切换下会持续创建与撤销 URL。这里对"近期展示过的 Blob"保留一个
- * 小的 LRU 池：
+ * 这里对"近期展示过的 Blob"保留一个小的 LRU 池：
  *  - 同一 Blob 永远复用同一个 URL（WeakMap 去重），切换回旧目录时零新建；
  *  - 组件卸载只把 URL "交还"池子，不立即撤销；
  *  - 引用计数保证正在 <img> 上展示的 URL 绝不会被撤掉（否则会破图）；
@@ -39,7 +37,6 @@ function drop(url: string): void {
 }
 
 function evict(): void {
-  // 收集需要淘汰的空闲条目（只淘汰 refs===0）。
   const droppable: string[] = [];
   let idle = 0;
   for (const entry of entries.values()) {
@@ -80,7 +77,6 @@ export function acquireObjectUrl(blob: Blob): string {
   if (existingUrl) {
     const entry = entries.get(existingUrl);
     if (entry) {
-      // 复用既有 URL：引用 +1，并刷新 LRU 顺序。
       entry.refs++;
       entry.lastUsed = performance.now();
       entries.delete(existingUrl);

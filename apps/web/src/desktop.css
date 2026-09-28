@@ -110,7 +110,6 @@ button.dk-sw { padding: 0; }
 .dk-empty p { margin: 0 0 16px; }
 .dk-empty.compact { padding: 36px 20px; }
 .dk-tree-tip { font-size: 12px; color: var(--desktop-muted); padding: 2px 10px; }
-/* 通用小工具类 */
 .dk-tip { font-size: 12px; color: var(--desktop-muted); }
 .dk-muted { color: var(--desktop-muted); }
 .dk-push { margin-left: auto; }
@@ -314,7 +313,7 @@ button.dk-sw { padding: 0; }
 /* 图片卡片：网格为正方形，按原比例时媒体高度由布局内联给出。 */
 .dk-grid-area { position: relative; padding: 4px 32px 12px; flex: 1 0 auto; user-select: none; }
 /* 占地贴住内容：底部只留少量呼吸空隙。90px 的多选浮条避让改为选中时才加
-   （浮条 absolute 悬浮在底部 44px，需要约 58px 净空），未选中时不再常年多出一段占地。 */
+   （浮条 absolute 悬浮在底部 44px，需要约 58px 净空）。 */
 .dk-root:has(.dk-selbar) .dk-grid-area { padding-bottom: 76px; }
 .dk-grid-area.list { padding-top: 0; }
 .dk-thumb { position: relative; aspect-ratio: 1; border-radius: var(--dk-rad, 9px); overflow: hidden; background: var(--desktop-surface-2); }

@@ -22,7 +22,7 @@ export function imageToFileRef(image: ImageEntry): FileRef {
   };
 }
 
-/** 手指位移超过该值即视为滚动而非长按（原实现移动 1px 就取消，网格里手抖变滚动）。 */
+/** 手指位移超过该值即视为滚动而非长按。 */
 const LONG_PRESS_MOVE_TOLERANCE = 10;
 
 /** 长按手势（移动端替代右键）。带位移阈值 + 触发前按压视觉反馈；多指触摸（捏合）不计长按。 */

@@ -292,8 +292,7 @@ export function applyCustomRule(fileName: string, rule: CustomOrganizeRule): Par
 
   // applyOrganize also validates paths, but keep the preview conservative.
   if (dir.split('/').some((segment) => segment === '..')) return null;
-  // 目录为空 = 无处可去：桌面端曾把这种绑定直接移动到容器根（预览却完全不显示），
-  // 移动端则静默丢弃。统一视为不匹配，回落到内置规则。
+  // 目录为空 = 无处可去：统一视为不匹配，回落到内置规则。
   if (!dir) return null;
 
   return {

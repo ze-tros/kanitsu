@@ -1,9 +1,8 @@
 /**
- * 共享 IntersectionObserver（性能优化 P1）。
- *
- * 旧实现里每张图片各自 `new IntersectionObserver`，几千张图 = 几千个观察器
- * 对象，内存与回调分发开销都很大。这里改成模块级单例：所有卡片 observe 同一
- * 个观察器，命中回调按 Element 分发到对应回调。
+ * 共享 IntersectionObserver：模块级单例，所有卡片 observe 同一个观察器，
+ * 命中回调按 Element 分发到对应回调。不要每张图片各自 `new
+ * IntersectionObserver`——几千张图就是几千个观察器对象，内存与回调分发
+ * 开销都很大。
  */
 const ROOT_MARGIN = '300px';
 

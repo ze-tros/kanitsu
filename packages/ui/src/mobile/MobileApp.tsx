@@ -203,7 +203,6 @@ export function MobileApp({
   const [settingsSection, setSettingsSection] = useState<SettingsSectionId | null>(null);
   const [showTasks, setShowTasks] = useState(false);
   const [tasksUnseen, setTasksUnseen] = useState(false);
-  // 多选 / 批量操作
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set());
   const [organizeFlow, setOrganizeFlow] = useState<{ folder: FolderNode; step: 1 | 2 } | null>(null);
@@ -275,7 +274,7 @@ export function MobileApp({
     });
   }, []);
 
-  // ===== 启动加载（失败进入错误态并可重试，不再只剩死转圈） =====
+  // ===== 启动加载（失败进入错误态并可重试） =====
   const loadLibrary = useCallback(async () => {
     setLoadError(null);
     try {
@@ -437,7 +436,6 @@ export function MobileApp({
     return sortImages(directImagesOf(snapshot, currentFolderId));
   }, [snapshot, currentFolderId, sortImages]);
 
-  // 聚合视图：当前目录 + 所有子目录的图片（imagesOf 递归收集）。
   const aggregateImages = useMemo(() => {
     if (!snapshot || !aggregate) return [];
     return sortImages(imagesOf(snapshot, currentFolderId));
@@ -838,7 +836,6 @@ export function MobileApp({
     };
   }, []);
 
-  // 切换目录/搜索开合后恢复滚动位置，并按新页面同步顶栏状态。
   useLayoutEffect(() => {
     const el = mainScrollRef.current;
     if (!el) return;
@@ -1465,7 +1462,6 @@ export function MobileApp({
           await refresh();
           notify(`已重命名为「${value}」`, 'success');
         } else if (prompt.kind === 'batch-move') {
-          // 批量移动：在当前目录新建子文件夹，把选中的图片移进去。
           const created = await createSubfolder(store, selectedFolder?.relPath ?? '', value);
           const targetRel = joinRelPath(selectedFolder?.relPath ?? '', value);
           const targets = selectedImages;
@@ -2315,7 +2311,6 @@ export function MobileApp({
         </button>
       )}
 
-      {/* 目录树 */}
       {drawerOpen && snapshot && (
         <FolderTreeSheet
           snapshot={snapshot}
@@ -2343,7 +2338,6 @@ export function MobileApp({
         />
       )}
 
-      {/* 显示选项 / 图包排列 */}
       {displaySheet === 'images' && (
         <DisplaySheet
           viewMode={viewMode}
@@ -2370,7 +2364,6 @@ export function MobileApp({
       )}
       {displaySheet === 'library' && <LibrarySortSheet prefs={libPrefs} onChange={updateLibPrefs} onClose={() => closeOverlay('display')} />}
 
-      {/* 查看器 */}
       {viewerOpen && (
         <MobileViewer
           key={viewerSessionId}
@@ -2389,7 +2382,6 @@ export function MobileApp({
         />
       )}
 
-      {/* 智能整理（两步全屏流程） */}
       {organizePresence.present && organizeFlowRef.current && snapshot && (
         <MobileOrganizeFlow
           folder={organizeFlowRef.current.folder}
@@ -2407,7 +2399,6 @@ export function MobileApp({
         />
       )}
 
-      {/* 封面选择（全屏化桌面组件） */}
       {coverPresence.present && coverFolderRef.current && snapshot && (() => {
         const coverFolder = coverFolderRef.current;
         return (
@@ -2429,7 +2420,6 @@ export function MobileApp({
         );
       })()}
 
-      {/* 任务中心 */}
       {tasksPresence.present && (
         <TasksScreen
           tasks={tasks}
@@ -2445,7 +2435,6 @@ export function MobileApp({
         />
       )}
 
-      {/* 设置 */}
       {settingsPresence.present && (
         <MobileSettingsScreen
           rules={customRules}
@@ -2457,7 +2446,6 @@ export function MobileApp({
         />
       )}
 
-      {/* 动作面板 */}
       {sheet && (
         <MobileActionSheet
           title={sheet.title}
@@ -2506,7 +2494,6 @@ export function MobileApp({
               />
             )}
 
-            {/* 输入对话框 */}
             {dialogPrompt && (
               <MobilePromptDialog
                 title={

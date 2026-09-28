@@ -277,12 +277,6 @@ function evict(): void {
 }
 
 /**
- * 读取缩略图 Blob。命中缓存时返回已缓存的 Promise（并发挂载共享同一请求），
- * 未命中则通过 store.readThumbnail 生成并缓存。
- * options.low 表示低优先级请求（如预加载），实现（Electron）会把它排在
- * 可见图片之后，避免预加载洪峰拖慢正在显示的缩略图。
- */
-/**
  * 同步窥探缓存的缩略图 Blob（仅在已解析时返回，否则 null）。
  * 用于 BlobImage 挂载时直接生成 object URL：命中即出图，不再闪一帧加载条。
  */
@@ -290,7 +284,6 @@ export function peekThumbnailBlob(file: FileRef, maxSize: number): Blob | null {
   const key = keyOf(file, maxSize);
   const hit = entries.get(key);
   if (!hit) return null;
-  // 刷新 LRU 顺序。
   entries.delete(key);
   entries.set(key, hit);
   return hit.blob;
@@ -344,6 +337,12 @@ function createJob(
   return job;
 }
 
+/**
+ * 读取缩略图 Blob。命中缓存时返回已缓存的 Promise（并发挂载共享同一请求），
+ * 未命中则通过 store.readThumbnail 生成并缓存。
+ * options.priority 是队列优先级（预加载等后台请求传低档），实现（Electron）
+ * 会把低优先级排在可见图片之后，避免预加载洪峰拖慢正在显示的缩略图。
+ */
 export function getThumbnailBlob(
   store: LibraryStore,
   file: FileRef,

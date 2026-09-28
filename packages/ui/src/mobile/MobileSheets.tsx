@@ -90,7 +90,6 @@ export function MobileActionSheet({
     if (closeTimerRef.current != null) window.clearTimeout(closeTimerRef.current);
   }, []);
 
-  // 面板下滑关闭
   const onHandleTouchStart = (e: React.TouchEvent) => {
     dragRef.current = { startY: e.touches[0].clientY, dy: 0 };
   };

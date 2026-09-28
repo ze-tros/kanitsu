@@ -2,7 +2,7 @@ import type { JSX, ReactNode } from 'react';
 
 /**
  * 移动端线性图标（24 栅格描边）。一律用受控图标名 MobileIconName：各 Android 版本
- * emoji 渲染差异大（部分显示方框），旧的 emoji 键调用点已全部迁移。
+ * emoji 渲染差异大（部分显示方框）。
  */
 
 const EYE = <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" />;
@@ -108,7 +108,6 @@ export type MobileIconName =
   | 'tag'
   | 'settings';
 
-/** 图标名 → SVG 内容。 */
 const ICON_PATHS: Record<MobileIconName, ReactNode> = {
   image: IMAGE,
   eye: EYE,
@@ -159,7 +158,6 @@ const ICON_PATHS: Record<MobileIconName, ReactNode> = {
   settings: SETTINGS,
 };
 
-/** 渲染一个受控图标。 */
 export function MobileIcon({ name, className = 'w-5 h-5' }: { name: MobileIconName; className?: string }): JSX.Element {
   return (
     <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

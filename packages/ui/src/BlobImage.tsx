@@ -122,10 +122,7 @@ export function BlobImage({
     // 由按显示尺寸比例的 CSS 高斯兜底（与成品同观感），隐私不降级。
     // blur 必须在依赖里：切换隐私要重新交付。开启时内存命中同步换糊化图；
     // 未命中（首次开启全体冷生成）先同步交源图 + 同强度 CSS 兜底再异步热替
-    // 换——此前固定 18px 兜底比成品重 2~3 倍，且移动端全量挂载下几百张排队
-    // 生成要数秒，观感即「缩略图消失然后重新出现模糊版」；取消时同步换回
-    // 源缩略图。此前 blur 不在依赖里，取消后 src 仍是糊化 Blob，只能靠滚动
-    // 重挂载恢复清晰。
+    // 换；取消时同步换回源缩略图。
     const deliver = (source: Blob) => {
       if (!blur || !thumbnail) {
         commit(source, false);
@@ -137,7 +134,7 @@ export function BlobImage({
         return;
       }
       // CSS 兜底半径按显示边长 × 4%（与烘焙预览的等效 σ 一致，见
-      // blurPreview.ts 的 BLUR_PREVIEW_CSS_FRACTION），小格子不再比成品重。
+      // blurPreview.ts 的 BLUR_PREVIEW_CSS_FRACTION）。
       const el = containerRef.current;
       const cssPx =
         el && el.clientWidth > 0 ? Math.max(2, Math.round(el.clientWidth * BLUR_PREVIEW_CSS_FRACTION)) : null;

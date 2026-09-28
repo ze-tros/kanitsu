@@ -106,8 +106,7 @@ public final class AlbumLibrary {
         return AndroidEntry.file(out.getAbsolutePath(), out.getName(), bytes, out.lastModified(), 0, 0);
     }
 
-    /** 在 dir 下构造条目 File：名字必须过 sanitize（write 此前是唯一漏掉清洗的写路径，
-     *  SAF 提供方或渲染端传来的 `../x` 会由 OS 解析越界），且最终路径必须仍在库内。 */
+    /** 在 dir 下构造条目 File：名字必须过 sanitize（SAF 提供方或渲染端传来的 `../x` 会由 OS 解析越界），且最终路径必须仍在库内。 */
     private File fileIn(File dir, String name) throws IOException {
         File out = new File(dir, sanitize(name));
         assertInside(out);

@@ -103,7 +103,6 @@ export function loadViewPrefs(): DesktopViewPrefs {
   try {
     const raw = localStorage.getItem(PREFS_KEY);
     const p = raw ? (JSON.parse(raw) as Partial<DesktopViewPrefs>) : {};
-    // 旧版只有「网格 / 列表」两种视图，沿用其选择。
     const legacyList = !raw && localStorage.getItem('kanitsu-view-mode') === 'list';
     return {
       layout: p.layout === 'justified' || p.layout === 'list' || p.layout === 'grid' ? p.layout : legacyList ? 'list' : DEFAULT_PREFS.layout,
@@ -124,7 +123,6 @@ export function loadViewPrefs(): DesktopViewPrefs {
 export function saveViewPrefs(prefs: DesktopViewPrefs): void {
   try {
     localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
-    // 新偏好落盘后旧版的视图键不会再被读取，顺手清掉。
     localStorage.removeItem('kanitsu-view-mode');
   } catch {
     // 偏好只是便利功能，存储失败静默忽略。

@@ -1,14 +1,11 @@
 /**
  * 隐私模糊预览：小画布真高斯（downscale → Gaussian → upscale）。
  *
- * 最初的方案是 CSS `filter: blur()` 高斯模糊：每张卡都要在显示分辨率下做
- * 一次卷积光栅化，隐私模式整屏滚动时是稳定的掉帧来源。第一版替代方案是
- * 降采样重采样（缩到 24px 再放大），性能达标但"糊"来自插值核，观感是
- * "低分辨率图被拉伸"而非失焦。现在把高斯从显示路径挪到生成路径：普通尺寸
- * 缩略图（默认 512px）先缩到 BLUR_PREVIEW_IN_PX 级别，在这个微小画布上做
- * 一次真·高斯（ctx.filter blur，几万像素的卷积，微秒级），再平滑放大到
- * OUT 级别——观感回到真高斯的磨砂/失焦质感。展示端是普通 <img>，无
- * filter 光栅化，快速滚动零持续开销。
+ * 高斯做在生成路径而不是显示路径：普通尺寸缩略图（默认 512px）先缩到
+ * BLUR_PREVIEW_IN_PX 级别，在这个微小画布上做一次真·高斯（ctx.filter
+ * blur，几万像素的卷积，微秒级），再平滑放大到 OUT 级别——观感是真高斯
+ * 的磨砂/失焦质感。展示端是普通 <img>，无 filter 光栅化，快速滚动零持续
+ * 开销。
  *
  * 结果按「文件身份（id/mtime/size）+ 管线版本」记忆，不按 Blob 对象身份：
  * 缩略图 LRU 淘汰重读、封面/单元格等不同入口拿到的是不同的 Blob 对象，
@@ -30,7 +27,7 @@ const BLUR_PREVIEW_QUALITY = 0.85;
  * 高斯强度按长边比例定义：blur 参数 = 长边 × SIGMA_FRACTION × 2（σ = 长边的
  * 2%）。源是普通尺寸缩略图（默认 512px，检查器/封面可能是别的尺寸），缩到
  * IN 后长边不一定恰好等于 IN_PX，固定像素半径会让观感随源尺寸漂移。σ 占比
- * 锚定旧的降采样方案并略轻——同等 σ 下真高斯的观感比插值糊更重。
+ * 取值略轻：同等 σ 下真高斯的观感比插值糊更重。
  */
 const BLUR_PREVIEW_SIGMA_FRACTION = 0.02;
 /**
@@ -38,9 +35,7 @@ const BLUR_PREVIEW_SIGMA_FRACTION = 0.02;
  * ctx.filter blur 参数 = 128×2%×2 ≈ 5.12px，σ=参数一半 → 放大 2 倍出 256px）
  * 在显示边长 S 下的等效 σ = 2.56×2×(S/256) = 0.02·S；CSS blur(P) 的 σ=P/2，
  * 故 CSS 参数取 S×4% 时与成品观感一致。BlobImage 的冷路径兜底按实际
- * clientWidth × 此系数取半径——此前固定 18px 在小格子上比成品重 2~3 倍，
- * 首次开启（全体冷生成）时整屏先重度糊再逐张换轻糊，观感是「缩略图消失
- * 然后重新出现模糊版」。
+ * clientWidth × 此系数取半径。
  */
 export const BLUR_PREVIEW_CSS_FRACTION = 0.04;
 /** 管线版本：任何影响输出的参数 / 步骤变化都要 bump，持久层旧条目整体失效。 */
@@ -63,7 +58,6 @@ function previewKey(identity: string): string {
 function memGet(key: string): Blob | null {
   const hit = previews.get(key);
   if (!hit) return null;
-  // 刷新 LRU 顺序。
   previews.delete(key);
   previews.set(key, hit);
   return hit;

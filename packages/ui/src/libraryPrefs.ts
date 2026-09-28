@@ -51,7 +51,7 @@ export function savePinnedCovers(covers: Record<string, string>): void {
 
 export function loadBlurredImages(): ReadonlySet<string> {
   try {
-    // 旧版按相册（文件夹）存储，现改为逐图标记，作废旧键。
+    // 旧版按相册（文件夹）存储的键已废弃，读取前清除。
     localStorage.removeItem('kanitsu-blurred-albums');
     const raw = localStorage.getItem(BLUR_STORAGE_KEY);
     return new Set<string>(raw ? (JSON.parse(raw) as string[]) : []);

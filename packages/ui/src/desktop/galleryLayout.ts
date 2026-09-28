@@ -221,9 +221,9 @@ export interface RowWindow {
 
 /**
  * 与视口相交的行区间 [first, last)：取「block 对齐后的可见域」与「像素 overscan
- * 域」的并集。小行高（列表视图 ~56px/行）时像素 overscan 已是十来行，原实现
- * 再对含 overscan 的像素窗口做 block 取整，两端各多挂最多 block-1 行、挂载量
- * 放大数倍；取并集后扩展量是两者中较宽者，网格视图的 block 批量重渲行为不变。
+ * 域」的并集。小行高（列表视图 ~56px/行）时像素 overscan 已是十来行，若再对含
+ * overscan 的像素窗口做 block 取整，两端各多挂最多 block-1 行、挂载量放大数倍；
+ * 取并集后扩展量是两者中较宽者，网格视图的 block 批量重渲行为不变。
  * localTop 为视口顶部相对布局内容顶部的偏移，可为负（布局尚在视口下方）。
  */
 export function rowWindow(layout: GalleryLayout, localTop: number, viewportH: number, overscanPx: number, block = 4): RowWindow {

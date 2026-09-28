@@ -9,8 +9,7 @@ const webDir = path.dirname(fileURLToPath(import.meta.url));
 const packagesDir = path.resolve(webDir, '../../packages');
 
 // 应用版本单一来源：desktop 包的 version（发布 tag 与它一一对应，见仓库发布约定）。
-// 构建期注入到 import.meta.env.KANITSU_VERSION，移动端「关于」页据此显示，
-// 替换过去散落的 0.1.0 / 1.0 写死副本。
+// 构建期注入到 import.meta.env.KANITSU_VERSION，移动端「关于」页据此显示。
 const desktopPackage = JSON.parse(
   readFileSync(path.resolve(webDir, '../desktop/package.json'), 'utf8'),
 ) as { version?: string };
