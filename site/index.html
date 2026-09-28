@@ -1,858 +1,665 @@
 <!doctype html>
-<html lang="zh-CN" data-theme="dark">
+<html lang="zh-CN">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-<meta name="theme-color" content="#111112" />
-<meta name="color-scheme" content="dark light" />
-<meta name="description" content="Kanitsu 是一款本地优先的图片管理与看图应用，面向 Windows 与 Android。导入即复制副本，源目录不动；默认不联网、不上传、无遥测。" />
-<title>Kanitsu — 本地优先的图包管理与看图应用</title>
+<meta name="theme-color" content="#0a0a0c" />
+<meta name="color-scheme" content="dark" />
+<meta name="description" content="Kanitsu 是一款图包管理与看图应用：导入即复制副本，源目录只读；不联网、不上传、无遥测。Windows 与 Android 可用，主流 RAW 与 HEIC 直接看。" />
+<title>Kanitsu · 把散落的图片，收进井井有条的图包库</title>
 <link rel="icon" type="image/svg+xml" href="assets/kanitsu-icon.svg" />
 <link rel="icon" type="image/png" sizes="256x256" href="assets/kanitsu-icon.png" />
 <link rel="apple-touch-icon" href="assets/kanitsu-icon.png" />
 <meta property="og:type" content="website" />
-<meta property="og:title" content="Kanitsu — 本地优先的图包管理与看图应用" />
-<meta property="og:description" content="导入即复制副本，源目录不动；默认不联网、不上传。面向 Windows 与 Android 的图包管理与看图应用。" />
+<meta property="og:title" content="Kanitsu · 把散落的图片，收进井井有条的图包库" />
+<meta property="og:description" content="导入即复制副本，源目录只读；不联网、不上传、无遥测。面向 Windows 与 Android 的图包管理与看图应用。" />
 <meta property="og:image" content="assets/kanitsu-icon.png" />
 <script>
-  // 首帧前应用已保存的主题，避免深色用户看到一闪而过的浅色底。
-  // 键名与 apps/web/index.html 的 kanitsu-theme 保持一致。
-  (function () {
-    try {
-      var root = document.documentElement;
-      var mode = localStorage.getItem('kanitsu-theme');
-      if (mode !== 'dark' && mode !== 'light') {
-        mode = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
-      }
-      root.dataset.theme = mode;
-      root.style.colorScheme = mode === 'light' ? 'light' : 'dark';
-    } catch (error) {
-      // 存储不可用时保持 :root 的深色默认值。
-    }
-  })();
+  // 标记 js 可用：滚动显现动画只在 .js 下隐藏元素，无 JS 环境内容照常可见。
+  document.documentElement.classList.add('js');
 </script>
 <style>
-  /* 设计令牌与 apps/web/src/styles/theme.css 的 --desktop-* 一一对应，仅去掉前缀。 */
+  /* ============ 设计基调 ============ */
+  /* 展厅式深色画廊：照片在近黑底色上自己发光，珊瑚色是唯一强调色。 */
+  /* 字体沿用产品的 Fluent 栈（Segoe UI Variable Display），与站内应用观感一致；
+     CJK 走系统字体，零外部请求，对大陆访客无字体加载风险。 */
   :root {
-    --font-sans: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif;
-    --font-display: "Segoe UI Variable Display", "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif;
-    --font-mono: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+    --font-sans: "Segoe UI Variable Text", "Segoe UI", "PingFang SC", "Microsoft YaHei UI", system-ui, sans-serif;
+    --font-display: "Segoe UI Variable Display", "Segoe UI", "PingFang SC", "Microsoft YaHei UI", system-ui, sans-serif;
+    --font-mono: "Cascadia Mono", ui-monospace, "SF Mono", Consolas, monospace;
 
-    --app: #111112;
-    --canvas: #121213;
-    --surface-1: #18181a;
-    --surface-2: #202023;
-    --surface-3: #29292c;
-    --surface-4: #333337;
-    --line: rgba(255, 255, 255, .085);
-    --line-strong: rgba(255, 255, 255, .17);
-
-    --text: #f3f0eb;
-    --text-soft: #d3cfca;
-    --muted: #a09b9b;
-    --faint: #6f6b70;
+    --bg: #0a0a0c;
+    --frame: #101013;
+    --text: #f4f1ec;
+    --text-soft: #cfcac4;
+    --muted: #9d98a0;
+    --faint: #66626c;
 
     --accent-fill: #ff785e;
     --accent-ink: #241411;
     --accent-text: #ff9b89;
-    --accent-soft: rgba(255, 120, 94, .14);
-    --accent-line: rgba(255, 120, 94, .42);
-    --danger: #ff8f82;
-    --warn: #e2ad55;
-    --ok: #7fcf9a;
+    --accent-soft: rgba(255, 120, 94, .13);
+    --accent-line: rgba(255, 120, 94, .38);
 
-    --shadow-pop: 0 14px 38px rgba(0, 0, 0, .45), 0 0 0 1px var(--line-strong);
+    --hairline: rgba(255, 255, 255, .08);
+    --hairline-strong: rgba(255, 255, 255, .15);
 
-    --r-panel: 12px;
-    --r-control: 9px;
-    --r-tight: 6px;
-    --toolbar-h: 52px;
-
-    --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
-    --ease-standard: cubic-bezier(0.2, 0, 0, 1);
-  }
-
-  html[data-theme="light"] {
-    --app: #e9ebee;
-    --canvas: #f1f3f5;
-    --surface-1: #fbfcfd;
-    --surface-2: #f0f2f4;
-    --surface-3: #e5e8ec;
-    --surface-4: #d8dce2;
-    --line: rgba(25, 31, 39, .11);
-    --line-strong: rgba(25, 31, 39, .2);
-
-    --text: #20242a;
-    --text-soft: #454b54;
-    --muted: #69717d;
-    --faint: #8b929c;
-
-    --accent-fill: #c45444;
-    --accent-ink: #ffffff;
-    --accent-text: #a84437;
-    --accent-soft: rgba(196, 84, 68, .12);
-    --accent-line: rgba(196, 84, 68, .35);
-    --danger: #c23b2f;
-    --warn: #94620e;
-    --ok: #2f8a52;
-
-    --shadow-pop: 0 14px 38px rgba(30, 36, 46, .18), 0 0 0 1px var(--line-strong);
+    --ease-fluid: cubic-bezier(.32, .72, 0, 1);
+    --ease-out: cubic-bezier(.16, 1, .3, 1);
   }
 
   * { box-sizing: border-box; }
 
   html {
-    background: var(--app);
+    background: var(--bg);
     scroll-behavior: smooth;
-    scroll-padding-top: calc(var(--toolbar-h) + 20px);
+    scroll-padding-top: 110px;
   }
 
   body {
     margin: 0;
-    background: var(--app);
+    background: var(--bg);
     color: var(--text);
     font-family: var(--font-sans);
-    font-size: 15px;
-    line-height: 1.6;
+    font-size: 15.5px;
+    line-height: 1.7;
     font-variant-numeric: tabular-nums;
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
+    overflow-x: clip;
   }
 
   ::selection { background: var(--accent-fill); color: var(--accent-ink); }
 
-  a { color: var(--accent-text); text-decoration: none; }
-  a:hover { text-decoration: underline; text-underline-offset: 3px; }
+  a { color: inherit; text-decoration: none; }
+  a:hover { text-decoration: none; }
 
-  /* 标题字重与字距照抄产品：h1 700、其余 650，字距 -.01em。 */
-  h1 { font-family: var(--font-display); font-weight: 700; letter-spacing: -.01em; }
-  h2, h3 { font-family: var(--font-display); font-weight: 650; letter-spacing: -.01em; }
-
-  code, .mono { font-family: var(--font-mono); font-size: .92em; font-variant-numeric: tabular-nums; }
-
-  pre {
+  h1, h2, h3 {
+    font-family: var(--font-display);
+    text-wrap: balance;
     margin: 0;
-    font-family: var(--font-mono);
-    font-size: 13px;
-    line-height: 1.7;
-    overflow-x: auto;
-    white-space: pre-wrap;
-    word-break: break-all;
   }
+  h1 { font-weight: 700; letter-spacing: -.025em; }
+  h2, h3 { font-weight: 650; letter-spacing: -.015em; }
 
-  :focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; border-radius: 3px; }
+  :focus-visible { outline: 2px solid var(--accent-text); outline-offset: 3px; border-radius: 6px; }
 
-  @media (prefers-reduced-motion: reduce) {
-    html { scroll-behavior: auto; }
-    *, *::before, *::after {
-      animation-duration: .01ms !important;
-      animation-iteration-count: 1 !important;
-      transition-duration: .01ms !important;
-    }
+  /* 胶片颗粒：固定层、不响应指针，给深色底一点物理质感。 */
+  body::after {
+    content: "";
+    position: fixed; inset: 0; z-index: 4;
+    pointer-events: none;
+    opacity: .04;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    background-size: 240px;
   }
 
   .skip-link {
-    position: absolute; left: 12px; top: -60px; z-index: 30;
-    padding: 9px 16px; background: var(--accent-fill); color: var(--accent-ink);
-    border-radius: var(--r-control); font-weight: 600;
-    transition: top 180ms var(--ease-standard);
+    position: absolute; left: 16px; top: -64px; z-index: 60;
+    padding: 10px 18px; border-radius: 999px;
+    background: var(--accent-fill); color: var(--accent-ink); font-weight: 600;
+    transition: top .25s var(--ease-out);
   }
-  .skip-link:focus { top: 12px; text-decoration: none; }
+  .skip-link:focus { top: 16px; }
 
-  .wrap { width: 100%; max-width: 1100px; margin: 0 auto; padding: 0 24px; }
+  .wrap { width: 100%; max-width: 1200px; margin: 0 auto; padding: 0 32px; }
 
-  /* ---------- 顶部栏 ---------- */
-  /* 基色用 canvas（与产品吸顶工具条一致），不是更暗一档的 app，否则吸顶栏与内容之间会有明度断层。 */
-  .topbar {
-    position: sticky; top: 0; z-index: 20;
-    background: color-mix(in srgb, var(--canvas) 88%, transparent);
-    backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
-    border-bottom: 1px solid var(--line);
-  }
-  .topbar-inner { height: var(--toolbar-h); display: flex; align-items: center; gap: 14px; }
-
-  .brand {
-    display: flex; align-items: center; gap: 11px;
-    color: var(--text); font-family: var(--font-display);
-    font-weight: 650; font-size: 16px; letter-spacing: -.01em; flex: none;
-  }
-  .brand:hover { text-decoration: none; }
-  .brand img { width: 28px; height: 28px; border-radius: 7px; display: block; }
-
-  .topnav { display: flex; align-items: center; gap: 2px; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
-  .topnav::-webkit-scrollbar { display: none; }
-  .topnav a {
-    color: var(--muted); font-size: 13.5px; padding: 6px 10px; border-radius: var(--r-tight);
+  /* ============ 悬浮玻璃导航 ============ */
+  .nav {
+    position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+    z-index: 50;
+    display: flex; align-items: center; gap: 4px;
+    height: 54px; padding: 0 10px 0 20px;
+    border-radius: 999px;
+    background: rgba(16, 16, 19, .55);
+    backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .07), 0 12px 40px rgba(0, 0, 0, .4);
+    border: 1px solid var(--hairline);
     white-space: nowrap;
-    transition: color 180ms var(--ease-standard), background 180ms var(--ease-standard);
   }
-  .topnav a:hover { color: var(--text); background: var(--surface-2); text-decoration: none; }
-
-  .topbar-right { margin-left: auto; display: flex; align-items: center; gap: 8px; flex: none; }
-
-  /* ---------- 按钮 ---------- */
-  .btn {
-    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-    height: 32px; padding: 0 14px; border-radius: var(--r-control);
-    border: 1px solid transparent;
-    font-family: inherit; font-size: 13.5px; font-weight: 500;
-    cursor: pointer; white-space: nowrap;
-    transition: background 180ms var(--ease-standard), color 180ms var(--ease-standard),
-                border-color 180ms var(--ease-standard), box-shadow 180ms var(--ease-standard),
-                transform 180ms var(--ease-out);
+  .nav-brand {
+    display: flex; align-items: center; gap: 10px;
+    font-family: var(--font-display); font-weight: 650; font-size: 15.5px; letter-spacing: -.01em;
+    margin-right: 10px;
   }
-  .btn:hover { text-decoration: none; }
-  .btn:active { transform: translateY(1px); }
-
-  .btn-ghost { background: var(--surface-2); border-color: var(--line); color: var(--text-soft); }
-  .btn-ghost:hover { background: var(--surface-3); color: var(--text); border-color: var(--line-strong); }
-
-  .btn-primary { background: var(--accent-fill); color: var(--accent-ink); font-weight: 600; }
-  .btn-primary:hover { background: color-mix(in srgb, var(--accent-fill) 88%, #fff); }
-
-  .btn-lg { height: 42px; padding: 0 20px; font-size: 14.5px; }
-
-  .btn-icon { width: 34px; height: 34px; padding: 0; border-radius: 7px; font-size: 15px; }
-
-  /* ---------- Hero ---------- */
-  .hero {
-    position: relative; overflow: hidden;
-    border-bottom: 1px solid var(--line);
-    background: var(--canvas);
+  .nav-brand img { width: 24px; height: 24px; border-radius: 6px; display: block; }
+  .nav-rule { width: 1px; height: 18px; background: var(--hairline-strong); margin: 0 8px; }
+  .nav-link {
+    padding: 7px 13px; border-radius: 999px;
+    color: var(--muted); font-size: 13.5px;
+    transition: color .4s var(--ease-fluid), background .4s var(--ease-fluid);
   }
-  /* 唯一的视觉焦点：珊瑚色低透明度光晕。 */
-  .hero::before {
-    content: ""; position: absolute; top: -320px; left: 50%; transform: translateX(-50%);
-    width: 940px; height: 660px; pointer-events: none; z-index: 0;
-    background: radial-gradient(closest-side, rgba(255, 120, 94, .16), rgba(255, 120, 94, .045) 58%, transparent 78%);
-  }
-  html[data-theme="light"] .hero::before {
-    background: radial-gradient(closest-side, rgba(196, 84, 68, .11), rgba(196, 84, 68, .03) 58%, transparent 78%);
-  }
-
-  .hero-inner {
-    position: relative; z-index: 1;
-    display: grid; grid-template-columns: minmax(0, 1fr);
-    gap: 32px; align-items: center;
-    padding: 64px 24px 56px;
-  }
-
-  .hero-copy { min-width: 0; }
-
-  .badge-v {
+  .nav-link:hover { color: var(--text); background: rgba(255, 255, 255, .06); }
+  .nav-gh {
     display: inline-flex; align-items: center; gap: 8px;
-    height: 26px; padding: 0 11px; border-radius: var(--r-tight);
-    background: var(--accent-soft); border: 1px solid var(--accent-line);
-    color: var(--accent-text); font-size: 12.5px; font-weight: 600;
+    margin-left: 8px; padding: 5px 6px 5px 15px;
+    border-radius: 999px; border: 1px solid var(--hairline);
+    background: rgba(255, 255, 255, .05);
+    color: var(--text-soft); font-size: 13px; font-weight: 550;
+    transition: background .4s var(--ease-fluid), border-color .4s var(--ease-fluid);
   }
-  .badge-v .mono { font-weight: 500; }
+  .nav-gh .orb {
+    width: 24px; height: 24px; border-radius: 999px;
+    display: grid; place-items: center;
+    background: rgba(255, 255, 255, .08); color: var(--text-soft);
+    transition: transform .5s var(--ease-fluid), background .5s var(--ease-fluid);
+  }
+  .nav-gh:hover { background: rgba(255, 255, 255, .09); border-color: var(--hairline-strong); }
+  .nav-gh:hover .orb { transform: translate(1px, -1px); background: var(--accent-soft); color: var(--accent-text); }
+
+  /* ============ 按钮：药丸 + 内嵌圆形箭头 ============ */
+  .btn {
+    display: inline-flex; align-items: center; gap: 14px;
+    height: 54px; padding: 0 9px 0 30px;
+    border-radius: 999px; border: 1px solid transparent;
+    font-family: inherit; font-size: 15px; font-weight: 600; letter-spacing: .01em;
+    cursor: pointer; white-space: nowrap;
+    transition: transform .5s var(--ease-fluid), background .5s var(--ease-fluid),
+                border-color .5s var(--ease-fluid), box-shadow .5s var(--ease-fluid);
+  }
+  .btn:active { transform: scale(.975); }
+  .btn .orb {
+    width: 36px; height: 36px; border-radius: 999px; flex: none;
+    display: grid; place-items: center;
+    transition: transform .5s var(--ease-fluid), background .5s var(--ease-fluid);
+  }
+  .btn-primary {
+    background: var(--accent-fill); color: var(--accent-ink);
+    box-shadow: 0 18px 50px -14px rgba(255, 120, 94, .5);
+  }
+  .btn-primary .orb { background: rgba(20, 8, 5, .16); color: var(--accent-ink); }
+  .btn-primary:hover { background: #ff8a70; box-shadow: 0 22px 60px -12px rgba(255, 120, 94, .6); }
+  .btn-primary:hover .orb { transform: translate(2px, -2px) scale(1.05); background: rgba(20, 8, 5, .22); }
+  .btn-ghost {
+    background: rgba(255, 255, 255, .05); border-color: var(--hairline); color: var(--text-soft);
+  }
+  .btn-ghost .orb { width: 34px; height: 34px; background: rgba(255, 255, 255, .07); color: var(--muted); }
+  .btn-ghost:hover { background: rgba(255, 255, 255, .09); border-color: var(--hairline-strong); color: var(--text); }
+  .btn-ghost:hover .orb { transform: translate(2px, -2px); color: var(--text); }
+
+  /* ============ 区块骨架：只靠留白分段，不画分隔线 ============ */
+  .sec { position: relative; padding: clamp(96px, 13vw, 176px) 0; }
+
+  .eyebrow {
+    display: inline-flex; align-items: center; gap: 9px;
+    height: 27px; padding: 0 14px; border-radius: 999px;
+    background: rgba(255, 255, 255, .04); border: 1px solid var(--hairline);
+    color: var(--muted); font-size: 12px; font-weight: 550; letter-spacing: .14em;
+  }
+  .eyebrow::before {
+    content: ""; width: 5px; height: 5px; border-radius: 999px;
+    background: var(--accent-fill);
+    box-shadow: 0 0 10px rgba(255, 120, 94, .8);
+  }
+
+  .sec-title { font-size: clamp(30px, 4.2vw, 50px); line-height: 1.15; }
+  .sec-lead { margin: 20px 0 0; max-width: 46ch; color: var(--muted); font-size: 16px; line-height: 1.85; }
+
+  /* ============ Hero ============ */
+  .hero {
+    position: relative;
+    min-height: 100dvh;
+    display: flex; flex-direction: column; justify-content: center;
+    padding: 150px 0 90px;
+  }
+  /* 唯一的背景焦点：主视觉后方一团低透珊瑚色光晕。 */
+  .hero::before {
+    content: ""; position: absolute; z-index: 0; pointer-events: none;
+    top: 24%; left: 50%; transform: translateX(-50%);
+    width: min(1100px, 100vw); height: 780px;
+    background: radial-gradient(closest-side, rgba(255, 120, 94, .13), rgba(255, 120, 94, .035) 55%, transparent 75%);
+  }
+  .hero-inner { position: relative; z-index: 1; text-align: center; }
 
   .hero h1 {
-    margin: 18px 0 0;
-    font-size: clamp(30px, 5.2vw, 46px);
-    line-height: 1.15;
+    margin: 30px auto 0;
+    font-size: clamp(40px, 6.6vw, 82px);
+    line-height: 1.1;
   }
-
   .hero-lead {
-    margin: 16px 0 0; max-width: 56ch;
-    color: var(--text-soft); font-size: 16px; line-height: 1.7;
+    margin: 26px auto 0; max-width: 42ch;
+    color: var(--muted); font-size: clamp(15px, 1.6vw, 17.5px); line-height: 1.85;
+  }
+  .hero-actions {
+    display: flex; flex-wrap: wrap; justify-content: center; gap: 14px;
+    margin-top: 42px;
   }
 
-  .hero-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 26px; }
-
-  .cta-notes {
-    margin: 24px 0 0; padding: 0; list-style: none;
-    display: grid; gap: 7px;
-    color: var(--muted); font-size: 13px;
+  /* 主视觉：双层边框相框 —— 外壳是machined托盘，内芯才是照片。 */
+  .hero-stage { position: relative; max-width: 1060px; margin: 96px auto 0; }
+  .shot-shell {
+    padding: 10px; border-radius: 26px;
+    background: linear-gradient(180deg, rgba(255, 255, 255, .08), rgba(255, 255, 255, .02)), var(--frame);
+    border: 1px solid var(--hairline);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, .09),
+      0 60px 130px -30px rgba(0, 0, 0, .65),
+      0 24px 50px -20px rgba(0, 0, 0, .5);
   }
-  .cta-notes li { position: relative; padding-left: 18px; }
-  .cta-notes li::before {
-    content: ""; position: absolute; left: 4px; top: .62em;
-    width: 5px; height: 5px; border-radius: 1.5px; background: var(--accent-fill);
+  .shot-core {
+    overflow: hidden; border-radius: 16px;
+    border: 1px solid rgba(0, 0, 0, .5);
+    background: #0d0d0f;
   }
-
-  /* Hero 配图：桌面端置于文字右侧，窄屏改为文字在上、图标在下，避免图标抢占首屏。 */
-  .hero-art { display: none; }
-  .hero-art img {
-    width: 100%; height: auto; max-width: 330px; display: block; margin: 0 auto;
-    filter: drop-shadow(0 26px 54px rgba(0, 0, 0, .42));
-  }
-  html[data-theme="light"] .hero-art img { filter: drop-shadow(0 22px 44px rgba(30, 36, 46, .18)); }
-
-  @media (min-width: 880px) {
-    .hero-inner { grid-template-columns: minmax(0, 1fr) 330px; gap: 56px; padding: 84px 24px 72px; }
-    .hero-art { display: block; }
-  }
-
-  /* ---------- 区块骨架 ---------- */
-  section { padding: 64px 0; border-bottom: 1px solid var(--line); }
-  section:last-of-type { border-bottom: 0; }
-  .sec-alt { background: var(--canvas); }
-
-  .sec-head { max-width: 680px; margin-bottom: 30px; }
-  .sec-head h2 { margin: 0; font-size: 25px; line-height: 1.25; }
-  .sec-head p { margin: 10px 0 0; color: var(--muted); font-size: 14.5px; }
-
-  /* ---------- 下载矩阵 ---------- */
-  .matrix { border: 1px solid var(--line); border-radius: var(--r-panel); overflow: hidden; background: var(--surface-1); }
-  .matrix-scroll { overflow-x: auto; }
-  table { width: 100%; border-collapse: collapse; font-size: 14px; }
-
-  thead th {
-    text-align: left; font-size: 11.5px; font-weight: 600;
-    letter-spacing: .04em; color: var(--faint);
-    padding: 12px 18px; background: var(--surface-2);
-    border-bottom: 1px solid var(--line); white-space: nowrap;
-  }
-  tbody th, tbody td {
-    text-align: left; padding: 18px; vertical-align: top;
-    border-bottom: 1px solid var(--line);
-  }
-  tbody tr:last-child th, tbody tr:last-child td { border-bottom: 0; }
-
-  tbody th {
-    font-weight: 650; font-size: 14.5px; color: var(--text);
-    font-family: var(--font-display); letter-spacing: -.01em;
-    white-space: nowrap;
-  }
-  tbody td { color: var(--text-soft); }
-  td[data-label="可用性"] { white-space: nowrap; }
-
-  .cellnote { display: block; margin-top: 6px; color: var(--muted); font-size: 12px; }
-  .cell-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-
-  .sd {
-    display: inline-block; width: 7px; height: 7px; border-radius: 50%;
-    margin-right: 8px; vertical-align: 1px; flex: none;
-  }
-  .sd-ok { background: var(--ok); }
-  .sd-test { background: var(--warn); }
-  .sd-demo { background: var(--faint); }
-
-  .scroll-hint { display: none; margin: 8px 0 0; color: var(--faint); font-size: 12px; }
-  @media (max-width: 820px) {
-    .scroll-hint { display: block; }
-    .matrix-scroll table { min-width: 680px; }
-  }
-
-  /* 下载直链的静态写法 */
-  .note {
-    margin-top: 22px; padding: 18px 20px;
-    border: 1px solid var(--line); border-left: 3px solid var(--accent-line);
-    border-radius: var(--r-control); background: var(--surface-1);
-    color: var(--text-soft); font-size: 13.5px;
-  }
-  .note h3 { margin: 0 0 8px; font-size: 14px; color: var(--text); }
-  .note p { margin: 0; }
-  .note p + p { margin-top: 8px; }
-  .note code {
-    display: inline-block; padding: 2px 6px; border-radius: 5px;
-    background: var(--surface-3); color: var(--text); font-size: 12.5px;
-  }
-
-  /* ---------- 能力卡片 ---------- */
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(288px, 1fr)); gap: 12px; }
-
-  .card {
-    padding: 20px 22px;
-    border: 1px solid var(--line); border-radius: var(--r-panel);
-    background: var(--surface-1);
-    transition: background 180ms var(--ease-standard), border-color 180ms var(--ease-standard),
-                box-shadow 180ms var(--ease-standard), transform 180ms var(--ease-out);
+  .shot-core img { display: block; width: 100%; height: auto; }
+  /* 悬停时窗口缓缓回正，把视线交还给截图细节。 */
+  .hero-tilt {
+    transform: perspective(1800px) rotateX(2deg);
+    transition: transform 1.2s var(--ease-fluid);
   }
   @media (hover: hover) {
-    .card:hover {
-      border-color: var(--line-strong); background: var(--surface-2);
-      transform: translateY(-2px); box-shadow: var(--shadow-pop);
+    .hero-stage:hover .hero-tilt { transform: perspective(1800px) rotateX(.4deg); }
+  }
+
+  /* 玻璃浮层：产品 toast 的重绘，压在相框边沿。
+     高不透明度实底代替 backdrop-blur —— 模糊只留给固定导航，滚动区不做实时重绘。 */
+  .hero-chip {
+    position: absolute; left: -26px; bottom: 42px; z-index: 2;
+    display: flex; align-items: center; gap: 10px;
+    padding: 12px 18px;
+    border-radius: 16px;
+    background: rgba(21, 21, 24, .92);
+    border: 1px solid var(--hairline-strong);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06), 0 20px 50px -18px rgba(0, 0, 0, .7);
+    font-size: 13px; color: var(--text-soft);
+    pointer-events: none;
+  }
+  .hero-chip svg { flex: none; color: #7fcf9a; }
+  .hero-chip .undo { color: var(--accent-text); font-weight: 600; }
+
+  .cue { display: flex; justify-content: center; margin-top: 84px; }
+  .cue-line {
+    width: 1px; height: 56px; overflow: hidden;
+    background: rgba(255, 255, 255, .07);
+  }
+  .cue-line::after {
+    content: ""; display: block; width: 100%; height: 40%;
+    background: linear-gradient(180deg, transparent, var(--accent-text));
+    animation: cue 2.6s var(--ease-fluid) infinite;
+  }
+  @keyframes cue {
+    0% { transform: translateY(-110%); }
+    60%, 100% { transform: translateY(280%); }
+  }
+
+  /* ============ 能力清单：四条极简事实 ============ */
+  .facts {
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    gap: 48px 44px;
+  }
+  .fact { border-top: 1px solid var(--hairline-strong); padding-top: 24px; }
+  .fact-idx {
+    font-family: var(--font-mono); font-size: 12.5px; font-weight: 600;
+    color: var(--accent-text); letter-spacing: .08em;
+  }
+  .fact h3 { margin-top: 16px; font-size: 18px; line-height: 1.4; }
+  .fact p { margin: 10px 0 0; color: var(--muted); font-size: 13.5px; line-height: 1.8; }
+
+  /* ============ 界面：Z 轴级联相框 ============ */
+  .gal-head { max-width: 640px; margin-bottom: 90px; }
+  .gal { display: flex; flex-direction: column; }
+
+  .frame { margin: 0; position: relative; }
+  .frame figcaption {
+    display: flex; align-items: baseline; gap: 14px;
+    margin-top: 20px; padding-left: 6px;
+    font-size: 13.5px; color: var(--muted); line-height: 1.6;
+  }
+  .frame figcaption b { color: var(--text); font-weight: 600; flex: none; }
+  .frame figcaption span { color: var(--faint); }
+  /* 相框右倾叠加时，图注跟去右侧，避开下一张的占位。 */
+  .frame-b figcaption { justify-content: flex-end; text-align: right; padding-left: 0; padding-right: 6px; }
+
+  .frame-a { z-index: 1; width: 100%; }
+  .frame-b {
+    z-index: 2; width: 74%;
+    margin: -120px 0 0 auto;
+    --r: 1.1deg;
+  }
+  .frame-c {
+    z-index: 3; width: 60%;
+    margin: -110px auto 0 0;
+    --r: -1.3deg;
+  }
+  .frame-b .shot-shell, .frame-c .shot-shell { box-shadow: inset 0 1px 0 rgba(255,255,255,.09), 0 50px 110px -28px rgba(0,0,0,.72); }
+  /* 每个相框带一点静态倾斜，悬停回正 —— 像展台上可以扶正的相片。 */
+  .frame-tilt {
+    rotate: var(--r, 0deg);
+    transition: rotate 1s var(--ease-fluid), translate .6s var(--ease-fluid);
+  }
+  @media (hover: hover) {
+    .frame:hover .frame-tilt { rotate: 0deg; translate: 0 -4px; }
+  }
+
+  /* ============ 隐私 ============ */
+  .pv { position: relative; text-align: center; }
+  .pv::before {
+    content: ""; position: absolute; z-index: 0; pointer-events: none;
+    top: 8%; left: 50%; transform: translateX(-50%);
+    width: min(900px, 100vw); height: 620px;
+    background: radial-gradient(closest-side, rgba(255, 120, 94, .09), rgba(255, 120, 94, .025) 55%, transparent 75%);
+  }
+  .pv-inner { position: relative; z-index: 1; }
+  .pv h2 {
+    margin: 30px auto 0;
+    font-size: clamp(42px, 6.4vw, 78px);
+    line-height: 1.08;
+  }
+  .pv-lead {
+    margin: 24px auto 0; max-width: 40ch;
+    color: var(--muted); font-size: 16.5px; line-height: 1.85;
+  }
+  .claims {
+    display: grid; grid-template-columns: repeat(3, 1fr);
+    gap: 40px; margin-top: 84px; text-align: left;
+  }
+  .claim { border-top: 1px solid var(--hairline-strong); padding-top: 22px; }
+  .claim h3 { font-size: 16.5px; }
+  .claim p { margin: 9px 0 0; color: var(--muted); font-size: 13.5px; line-height: 1.8; }
+  .pv-stage { max-width: 1000px; margin: 96px auto 0; }
+  .pv-stage figcaption {
+    margin-top: 18px; color: var(--faint); font-size: 13px; text-align: left; padding-left: 6px;
+  }
+
+  /* ============ 下载 ============ */
+  .dl { text-align: center; }
+  .dl-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 14px; margin-top: 44px; }
+  .dl-note {
+    margin: 40px auto 0; max-width: 60ch;
+    color: var(--faint); font-size: 12.5px; line-height: 2;
+  }
+
+  /* ============ 页脚 ============ */
+  footer { padding: 40px 0 56px; }
+  .foot {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 16px 36px;
+    border-top: 1px solid var(--hairline); padding-top: 36px;
+    color: var(--faint); font-size: 13px;
+  }
+  .foot-brand { display: flex; align-items: center; gap: 10px; color: var(--text-soft); font-weight: 600; }
+  .foot-brand img { width: 20px; height: 20px; border-radius: 5px; }
+  .foot-links { margin-left: auto; display: flex; flex-wrap: wrap; gap: 6px 26px; }
+  .foot-links a { color: var(--faint); transition: color .4s var(--ease-fluid); }
+  .foot-links a:hover { color: var(--accent-text); }
+
+  /* ============ 动效编排 ============ */
+  /* 进场级联：hero 由 CSS 动画直接播放；下方区块交给 IntersectionObserver 显现。
+     全部走 transform / opacity（外加一次性 blur 归零），不触发重排。 */
+  @media (prefers-reduced-motion: no-preference) {
+    @keyframes rise {
+      from { opacity: 0; transform: translateY(28px); filter: blur(10px); }
+      to { opacity: 1; transform: none; filter: blur(0); }
     }
+    .js .rise { opacity: 0; animation: rise 1s var(--ease-fluid) forwards; animation-delay: var(--d, 0s); }
+    .js .rise-img { opacity: 0; animation: rise-img 1.2s var(--ease-fluid) forwards; animation-delay: var(--d, 0s); }
+    @keyframes rise-img {
+      from { opacity: 0; transform: translateY(36px); }
+      to { opacity: 1; transform: none; }
+    }
+
+    .js .reveal {
+      opacity: 0; transform: translateY(30px); filter: blur(8px);
+      transition: opacity 1s var(--ease-fluid), transform 1s var(--ease-fluid), filter 1s var(--ease-fluid);
+      transition-delay: var(--d, 0s);
+    }
+    .js .reveal.in { opacity: 1; transform: none; filter: blur(0); }
   }
-  .card h3 { margin: 0 0 7px; font-size: 15px; line-height: 1.4; }
-  .card p { margin: 0; color: var(--muted); font-size: 13.5px; line-height: 1.65; }
-
-  /* 领先卡：靠通栏 + 更大的字号与留白建立权重，不只靠换底色。 */
-  .card-lead { grid-column: 1 / -1; padding: 26px 28px; }
-  .card-lead h3 { font-size: 19px; }
-  .card-lead p { font-size: 14.5px; }
-
-  /* ---------- 原则 ---------- */
-  .rules { display: grid; grid-template-columns: repeat(auto-fit, minmax(248px, 1fr)); gap: 22px 30px; }
-  .rule { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 14px; }
-  .rule-n {
-    width: 30px; height: 30px; border-radius: var(--r-control);
-    display: grid; place-items: center;
-    background: var(--surface-2); border: 1px solid var(--line);
-    color: var(--accent-text); font-weight: 650; font-size: 13px;
-    font-family: var(--font-display);
-  }
-  .rule h3 { margin: 5px 0 6px; font-size: 15px; }
-  .rule p { margin: 0; color: var(--muted); font-size: 13.5px; line-height: 1.65; }
-
-  /* ---------- 格式 ---------- */
-  .fmt-group + .fmt-group { margin-top: 26px; }
-  .fmt-group h3 { margin: 0 0 10px; font-size: 14px; color: var(--text-soft); }
-  .chips { margin: 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 7px; }
-  .chips li {
-    padding: 4px 10px; border-radius: var(--r-tight);
-    border: 1px solid var(--line); background: var(--surface-1);
-    color: var(--text-soft); font-size: 12.5px;
-  }
-  .chips li.off { color: var(--faint); border-style: dashed; }
-
-  /* ---------- 安装 ---------- */
-  .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
-  .step {
-    padding: 20px 22px;
-    border: 1px solid var(--line); border-radius: var(--r-panel); background: var(--surface-1);
-  }
-  .step h3 { margin: 0 0 12px; font-size: 15px; }
-  .step ol, .step ul { margin: 0; padding-left: 20px; color: var(--muted); font-size: 13.5px; line-height: 1.75; }
-  .step li + li { margin-top: 6px; }
-  .step code { color: var(--text-soft); }
-
-  .codeblock {
-    margin-top: 12px; padding: 14px 16px;
-    border: 1px solid var(--line); border-radius: var(--r-control);
-    background: var(--app); color: var(--text-soft);
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .js .reveal { opacity: 1; transform: none; filter: none; }
+    .cue-line::after { animation: none; }
   }
 
-  .warn {
-    display: flex; gap: 12px; margin-top: 20px; padding: 16px 18px;
-    border: 1px solid var(--line); border-left: 3px solid var(--warn);
-    border-radius: var(--r-control); background: var(--surface-1);
-    font-size: 13.5px; color: var(--text-soft);
+  /* ============ 响应式 ============ */
+  @media (max-width: 960px) {
+    .facts { grid-template-columns: repeat(2, 1fr); gap: 40px 36px; }
+    .frame-b, .frame-c { width: 100%; margin: 44px 0 0; --r: 0deg; }
+    .frame-a + .frame-b { margin-top: 56px; }
   }
-  .warn strong { color: var(--text); }
-  .warn p { margin: 0; }
-
-  /* ---------- 页脚 ---------- */
-  footer { padding: 44px 0 56px; border-top: 1px solid var(--line); }
-  .foot-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 26px 32px; }
-  .foot-grid h3 {
-    margin: 0 0 10px; font-size: 11.5px; font-weight: 600;
-    letter-spacing: .04em; color: var(--faint);
-  }
-  .foot-grid ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 7px; }
-  .foot-grid li { color: var(--muted); font-size: 13.5px; }
-  .foot-grid a { color: var(--text-soft); }
-  .foot-grid a:hover { color: var(--accent-text); }
-
-  .foot-base {
-    margin-top: 34px; padding-top: 20px; border-top: 1px solid var(--line);
-    display: flex; flex-wrap: wrap; gap: 8px 18px;
-    color: var(--faint); font-size: 12.5px;
-  }
-
-  @media (max-width: 620px) {
-    .topnav { display: none; }
-    section { padding: 48px 0; }
-    tbody th, tbody td { padding: 14px 16px; }
+  @media (max-width: 640px) {
+    .wrap { padding: 0 20px; }
+    .nav { height: 48px; top: 14px; padding: 0 8px 0 16px; }
+    .nav-link, .nav-rule { display: none; }
+    .hero { padding: 128px 0 64px; }
+    .hero-stage { margin-top: 64px; }
+    .hero-chip { left: 12px; bottom: 12px; }
+    .facts, .claims { grid-template-columns: 1fr; gap: 30px; }
+    .claims { margin-top: 60px; }
+    .cue { margin-top: 56px; }
   }
 </style>
 </head>
 <body>
 <a class="skip-link" href="#main">跳到主要内容</a>
 
-<header class="topbar">
-  <div class="wrap topbar-inner">
-    <a class="brand" href="#top">
-      <img src="assets/kanitsu-icon.svg" width="28" height="28" alt="" aria-hidden="true" />
-      <span>Kanitsu</span>
-    </a>
-    <nav class="topnav" aria-label="页面导航">
-      <a href="#download">下载</a>
-      <a href="#features">能力</a>
-      <a href="#principles">原则</a>
-      <a href="#formats">格式</a>
-      <a href="#install">安装与校验</a>
-    </nav>
-    <div class="topbar-right">
-      <a class="btn btn-ghost" href="https://github.com/ze-tros/kanitsu" rel="noopener">GitHub</a>
-      <button class="btn btn-ghost btn-icon" id="theme-toggle" type="button" aria-label="切换深浅主题">
-        <span id="theme-glyph" aria-hidden="true">◐</span>
-      </button>
-    </div>
-  </div>
-</header>
+<nav class="nav" aria-label="页面导航">
+  <a class="nav-brand" href="#top">
+    <img src="assets/kanitsu-icon.svg" width="24" height="24" alt="" aria-hidden="true" />
+    <span>Kanitsu</span>
+  </a>
+  <span class="nav-rule" aria-hidden="true"></span>
+  <a class="nav-link" href="#gallery">界面</a>
+  <a class="nav-link" href="#privacy">隐私</a>
+  <a class="nav-link" href="#download">下载</a>
+  <a class="nav-gh" href="https://github.com/ze-tros/kanitsu" rel="noopener">
+    GitHub
+    <span class="orb" aria-hidden="true">
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M9 7h8v8"/></svg>
+    </span>
+  </a>
+</nav>
 
 <main id="main">
   <a id="top"></a>
 
-  <div class="hero">
+  <!-- Hero：一句主张 + 一张主视觉，别无他物 -->
+  <header class="hero">
     <div class="wrap hero-inner">
-      <div class="hero-copy">
-        <p class="badge-v">最新稳定版 <span class="mono">v0.3.1</span></p>
-        <h1>本地优先的图包<br />管理与看图应用</h1>
-        <p class="hero-lead">
-          导入源文件夹后，Kanitsu 把图片复制到自己的图包库；此后浏览、整理、重命名和删除只作用于这份副本，
-          源目录始终保持原样。默认不联网、不上传，也没有遥测。
-        </p>
-        <div class="hero-actions">
-          <a class="btn btn-primary btn-lg" href="https://github.com/ze-tros/kanitsu/releases/latest" rel="noopener">下载 Windows 版</a>
-          <a class="btn btn-ghost btn-lg" href="#download">查看全部平台</a>
+      <h1 class="rise" style="--d: .08s;">把散落的图片，<br />收进井井有条的图包库</h1>
+      <p class="hero-lead rise" style="--d: .16s;">
+        导入即复制副本，源目录只读。此后的一切整理与查看，都发生在你自己的设备上。
+      </p>
+      <div class="hero-actions rise" style="--d: .24s;">
+        <a class="btn btn-primary" href="https://github.com/ze-tros/kanitsu/releases/latest" rel="noopener">
+          下载 Windows 版
+          <span class="orb" aria-hidden="true">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M9 7h8v8"/></svg>
+          </span>
+        </a>
+        <a class="btn btn-ghost" href="https://github.com/ze-tros/kanitsu" rel="noopener">GitHub 源码</a>
+      </div>
+
+      <!-- 真实应用截图：测试构建导入无版权素材后实拍；浮层是产品 toast 的玻璃化重绘。 -->
+      <div class="hero-stage rise-img" style="--d: .34s;">
+        <div class="hero-tilt">
+          <figure class="shot-shell" style="margin: 0;">
+            <div class="shot-core">
+              <img src="assets/previews/hero.jpg" width="1800" height="1125" fetchpriority="high"
+                   alt="Kanitsu 图库：侧栏图包列表、缩略图网格、右侧图包详情与智能整理入口" />
+            </div>
+          </figure>
         </div>
-        <ul class="cta-notes">
-          <li>提供 Portable（免安装单 EXE）与 Setup（NSIS 安装向导）两种形态，均发布于最新稳定版。</li>
-          <li>Portable 每次启动需先解压到 <span class="mono">%TEMP%</span>，启动明显慢于 Setup；对速度敏感建议用 Setup。</li>
-          <li>产物不做代码签名（既定策略），SmartScreen 首次运行可能提示风险。</li>
-        </ul>
+        <div class="hero-chip" aria-hidden="true">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+          已整理 22 张
+          <span class="undo">撤销</span>
+        </div>
       </div>
-      <div class="hero-art" aria-hidden="true">
-        <img src="assets/kanitsu-icon.svg" width="330" height="330" alt="" />
-      </div>
+
+      <div class="cue rise-img" style="--d: .6s;" aria-hidden="true"><span class="cue-line"></span></div>
     </div>
-  </div>
+  </header>
 
-  <section id="download" class="sec-alt" aria-labelledby="dl-title">
+  <!-- 能力：四条事实，一段标题都省了 -->
+  <section class="sec" aria-label="核心能力">
     <div class="wrap">
-      <div class="sec-head">
-        <h2 id="dl-title">平台支持与下载</h2>
-        <p>三端状态如实列出。Windows 可直接下载安装；Android 的签名 APK 通过 Actions Artifact 分发。</p>
-      </div>
-
-      <div class="matrix">
-        <div class="matrix-scroll">
-          <table>
-            <caption class="dk-sr-only" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)">各平台状态与下载入口</caption>
-            <thead>
-              <tr>
-                <th scope="col">平台</th>
-                <th scope="col">可用性</th>
-                <th scope="col">说明</th>
-                <th scope="col">下载</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <th scope="row">Windows x64</th>
-                <td data-label="可用性"><span class="sd sd-ok" aria-hidden="true"></span>可发货</td>
-                <td>
-                  功能最完整的一端。Electron 原生目录导入、虚拟化大库滚动、沉浸式查看器、RAW 与 HEIF/HEIC 解码均已就绪。
-                  <span class="cellnote mono">Kanitsu-Portable-&lt;version&gt;-x64.exe ／ Kanitsu-Setup-&lt;version&gt;-x64.exe</span>
-                </td>
-                <td>
-                  <div class="cell-actions">
-                    <a class="btn btn-primary" href="https://github.com/ze-tros/kanitsu/releases/latest" rel="noopener">Setup 安装向导</a>
-                    <a class="btn btn-ghost" href="https://github.com/ze-tros/kanitsu/releases/latest" rel="noopener">Portable 单 EXE</a>
-                  </div>
-                </td>
-              </tr>
-              <tr>
-                <th scope="row">Android</th>
-                <td data-label="可用性"><span class="sd sd-test" aria-hidden="true"></span>测试中</td>
-                <td>
-                  通过 SAF 导入、原生图库与手势查看器。已具备签名 release APK 的构建流程，但需要仓库先配置签名密钥 secrets；
-                  未配置时该工作流会直接失败，不会产出未签名的产物。开发进度中「Android 发布工程」仍标为进行中。
-                  <span class="cellnote mono">Artifact: Kanitsu-Android-Release（保留 14 天）</span>
-                </td>
-                <td>
-                  <div class="cell-actions">
-                    <a class="btn btn-ghost" href="https://github.com/ze-tros/kanitsu/actions/workflows/android-release.yml" rel="noopener">在 Actions 获取</a>
-                  </div>
-                  <span class="cellnote">Artifact 需登录 GitHub，且仅保留 14 天。</span>
-                </td>
-              </tr>
-              <tr>
-                <th scope="row">Web</th>
-                <td data-label="可用性"><span class="sd sd-demo" aria-hidden="true"></span>演示模式</td>
-                <td>
-                  使用内存文件系统，仅用于界面与核心流程的开发演示，<strong>不是产品形态</strong>，也不提供下载。
-                  演示端不收录 RAW 与 HEIF/HEIC；导入这类文件会被跳过。
-                </td>
-                <td><span class="cellnote">不提供下载</span></td>
-              </tr>
-            </tbody>
-          </table>
+      <div class="facts">
+        <div class="fact reveal">
+          <span class="fact-idx">01</span>
+          <h3>万级图库，顺滑到底</h3>
+          <p>网格、原比例、列表三种布局，按行虚拟化，几万张一滑到底。</p>
         </div>
-      </div>
-      <p class="scroll-hint">表格可横向滚动查看完整内容。</p>
-
-      <div class="note">
-        <h3>下载链接的写法</h3>
-        <p>
-          上面的下载按钮指向本仓库的 <code>/releases/latest</code> 页面，也就是 GitHub 认定的<b>最新正式版</b>。
-          页面的附件文件名里内嵌版本号（如 <code>Kanitsu-Setup-0.3.1-x64.exe</code>），因此本页不写死任何具体版本的直链——
-          那样会在下个版本发布后立即失效。
-        </p>
-        <p>
-          同理，<code>SHA256SUMS.txt</code> 也在同一位置，与安装包来自同一次构建，可用于校验下载损坏或非预期替换。
-        </p>
-      </div>
-    </div>
-  </section>
-
-  <section id="features" aria-labelledby="ft-title">
-    <div class="wrap">
-      <div class="sec-head">
-        <h2 id="ft-title">产品能力</h2>
-        <p>以下均为已实现并可在桌面端使用的能力。</p>
-      </div>
-
-      <div class="grid">
-        <article class="card card-lead">
-          <h3>导入即复制副本，源目录不动</h3>
-          <p>
-            选择源文件夹后，应用把图片复制进自己的图包库。之后的浏览、整理、重命名与删除只作用于这份副本，
-            源目录不会被改动——这是产品的第一条约束，不是可选项。
-          </p>
-        </article>
-
-        <article class="card">
-          <h3>整理前先预览分组</h3>
-          <p>命名规则整理走「解析 → 预览 → 确认 → 落盘」四步，确认前不移动任何文件，落盘后可一键撤销。</p>
-        </article>
-
-        <article class="card">
-          <h3>三种布局的大库滚动</h3>
-          <p>网格、按原比例、列表三种图片布局，统一按行虚拟化：只挂载可视窗口，万级图片的目录也能保持滚动流畅。</p>
-        </article>
-
-        <article class="card">
-          <h3>沉浸式查看器</h3>
-          <p>缩放、平移、旋转、胶片条与键盘导航，鼠标侧键也能翻页；缩略图与原图叠层替换，加载过程不改变页面位置。</p>
-        </article>
-
-        <article class="card">
-          <h3>隐私预览遮挡</h3>
-          <p>对敏感图片开启模糊遮挡，网格、封面与查看器三处同步生效，取消遮挡才显示内容。</p>
-        </article>
-
-        <article class="card">
-          <h3>查看拍摄信息</h3>
-          <p>查看器内可直接调出 EXIF 摘要，无需外部工具即可确认拍摄时间、机型与曝光参数。</p>
-        </article>
-
-        <article class="card">
-          <h3>ZIP 导出</h3>
-          <p>流式导出保留目录结构，并附带 <span class="mono">index.json</span> 元数据；导出过程有进度，可随时取消。</p>
-        </article>
-
-        <article class="card">
-          <h3>任务中心</h3>
-          <p>导入、整理、导出与批量操作统一收敛到一处，进行中可取消，完成后可用 Snackbar 撤销或打开结果。</p>
-        </article>
-
-        <article class="card">
-          <h3>拖入文件夹导入</h3>
-          <p>把文件夹直接拖进窗口即可导入，由主进程完成原生确认后才授权该目录，不会静默取得额外访问权限。</p>
-        </article>
-      </div>
-    </div>
-  </section>
-
-  <section id="principles" class="sec-alt" aria-labelledby="pr-title">
-    <div class="wrap">
-      <div class="sec-head">
-        <h2 id="pr-title">核心原则</h2>
-        <p>这些约束写在设计文档里，也体现在实现的选择上。</p>
-      </div>
-
-      <div class="rules">
-        <div class="rule">
-          <span class="rule-n" aria-hidden="true">01</span>
-          <div>
-            <h3>副本隔离</h3>
-            <p>导入后不修改源文件夹，应用只管理自己的图库。删除、重命名与整理都发生在副本上。</p>
-          </div>
+        <div class="fact reveal" style="--d: .07s;">
+          <span class="fact-idx">02</span>
+          <h3>RAW 与 HEIC 直接看</h3>
+          <p>主流格式白名单开箱即认，缩略图取自内嵌预览，无需转换工具。</p>
         </div>
-        <div class="rule">
-          <span class="rule-n" aria-hidden="true">02</span>
-          <div>
-            <h3>离线可用</h3>
-            <p>默认不上传图片，不依赖在线服务。没有账号体系，也没有遥测上报。</p>
-          </div>
+        <div class="fact reveal" style="--d: .14s;">
+          <span class="fact-idx">03</span>
+          <h3>整理先预览，可撤销</h3>
+          <p>命名规则先出分组预览，确认之前不写一块磁盘。</p>
         </div>
-        <div class="rule">
-          <span class="rule-n" aria-hidden="true">03</span>
-          <div>
-            <h3>目录即图包</h3>
-            <p>每个目录都是可浏览、可整理、可导出、可设置封面的相册节点，不需要先建库再导入。</p>
-          </div>
-        </div>
-        <div class="rule">
-          <span class="rule-n" aria-hidden="true">04</span>
-          <div>
-            <h3>大库可用</h3>
-            <p>缩略图、虚拟化、预取与缓存是基础能力，不是后期补丁。优先级分五级，可见内容永远优先。</p>
-          </div>
+        <div class="fact reveal" style="--d: .21s;">
+          <span class="fact-idx">04</span>
+          <h3>导出即打包</h3>
+          <p>ZIP 流式导出保留目录结构，附带 index.json 索引。</p>
         </div>
       </div>
     </div>
   </section>
 
-  <section id="formats" aria-labelledby="fm-title">
+  <!-- 界面：三张实拍级联，像展台上的相片 -->
+  <section id="gallery" class="sec" aria-labelledby="gal-title">
     <div class="wrap">
-      <div class="sec-head">
-        <h2 id="fm-title">格式支持</h2>
-        <p>基础格式全平台一致；RAW 与 HEIF 仅在桌面端与 Android 端收录。</p>
-      </div>
+      <header class="gal-head reveal">
+        <p class="eyebrow">界面</p>
+        <h2 id="gal-title" class="sec-title" style="margin-top: 26px;">每一屏，都为看图而生</h2>
+      </header>
 
-      <div class="fmt-group">
-        <h3>全平台基础格式</h3>
-        <ul class="chips">
-          <li>JPG</li><li>JPEG</li><li>PNG</li><li>WebP</li><li>AVIF</li><li>BMP</li><li>GIF</li>
-        </ul>
-        <p class="cellnote">GIF 在网格中按设置显示动态或静态首帧。</p>
-      </div>
+      <div class="gal">
+        <figure class="frame frame-a reveal">
+          <div class="frame-tilt">
+            <div class="shot-shell">
+              <div class="shot-core">
+                <img src="assets/previews/viewer.jpg" width="1600" height="1000" loading="lazy"
+                     alt="查看器打开一张照片，底部是缩略图胶片条，右侧是图片信息面板" />
+              </div>
+            </div>
+          </div>
+          <figcaption><b>沉浸式查看器</b><span>缩放 · 旋转 · 胶片条</span></figcaption>
+        </figure>
 
-      <div class="fmt-group">
-        <h3>桌面 + Android 额外收录</h3>
-        <ul class="chips">
-          <li>CR2</li><li>CR3</li><li>NEF</li><li>NRW</li><li>ARW</li><li>DNG</li><li>RAF</li>
-          <li>ORF</li><li>RW2</li><li>PEF</li><li>SRW</li>
-          <li>HEIC</li><li>HEIF</li><li>HIF</li>
-        </ul>
-        <p class="cellnote">
-          RAW 缩略图取相机内嵌预览，查看器做完整解码；HEIF/HEIC 在桌面由 libheif 解码，Android 端缩略图原生解码、全图经原生派生。
-        </p>
-      </div>
+        <figure class="frame frame-b reveal">
+          <div class="frame-tilt">
+            <div class="shot-shell">
+              <div class="shot-core">
+                <img src="assets/previews/organize.jpg" width="1600" height="1000" loading="lazy"
+                     alt="智能整理弹窗：左侧是命名规则列表，右侧是文件名映射预览" />
+              </div>
+            </div>
+          </div>
+          <figcaption><b>智能整理</b><span>规则预览先行，落盘之前一切可撤</span></figcaption>
+        </figure>
 
-      <div class="fmt-group">
-        <h3>暂不支持</h3>
-        <ul class="chips">
-          <li class="off">TIFF</li>
-          <li class="off">在线同步</li>
-        </ul>
-        <p class="cellnote">未来的同步能力将通过独立 provider 接入，不会侵入本地库的核心流程。</p>
+        <figure class="frame frame-c reveal">
+          <div class="frame-tilt">
+            <div class="shot-shell">
+              <div class="shot-core">
+                <img src="assets/previews/light.jpg" width="1600" height="1000" loading="lazy"
+                     alt="浅色主题下的图库首页：图包封面、继续浏览与库内统计" />
+              </div>
+            </div>
+          </div>
+          <figcaption><b>浅色主题</b><span>同样克制，同样安静</span></figcaption>
+        </figure>
       </div>
     </div>
   </section>
 
-  <section id="install" class="sec-alt" aria-labelledby="in-title">
-    <div class="wrap">
-      <div class="sec-head">
-        <h2 id="in-title">安装与校验</h2>
-        <p>两种形态都无需管理员权限即可安装或运行。</p>
+  <!-- 隐私：一句话 + 三条事实 + 一张实拍 -->
+  <section id="privacy" class="sec pv" aria-labelledby="pv-title">
+    <div class="wrap pv-inner">
+      <p class="eyebrow reveal">隐私</p>
+      <h2 id="pv-title" class="reveal" style="--d: .07s;">照片，不出门。</h2>
+      <p class="pv-lead reveal" style="--d: .14s;">整理照片的前提，是照片从未离开你的设备。</p>
+
+      <div class="claims">
+        <div class="claim reveal">
+          <h3>源目录只读</h3>
+          <p>导入即复制副本，整理只发生在自己的库内，从不回写原文件夹。</p>
+        </div>
+        <div class="claim reveal" style="--d: .07s;">
+          <h3>不联网，不上传</h3>
+          <p>没有账号体系，没有遥测，断网也能完整使用。</p>
+        </div>
+        <div class="claim reveal" style="--d: .14s;">
+          <h3>敏感图随手遮挡</h3>
+          <p>网格、封面与查看器同步模糊，想看再点开。</p>
+        </div>
       </div>
 
-      <div class="steps">
-        <div class="step">
-          <h3>Setup（NSIS 安装向导）</h3>
-          <ol>
-            <li>从 Release 附件下载 <span class="mono">Kanitsu-Setup-&lt;version&gt;-x64.exe</span>。</li>
-            <li>运行安装向导，可选择安装目录；默认按用户安装，不需要管理员权限。</li>
-            <li>桌面快捷方式是可选项，开始菜单快捷方式始终创建。</li>
-          </ol>
-          <p class="cellnote">推荐形态：启动速度明显快于 Portable。</p>
-        </div>
-
-        <div class="step">
-          <h3>Portable（免安装单 EXE）</h3>
-          <ol>
-            <li>从 Release 附件下载 <span class="mono">Kanitsu-Portable-&lt;version&gt;-x64.exe</span>。</li>
-            <li>直接双击运行，无需安装。</li>
-          </ol>
-          <p class="cellnote">
-            它是自解压程序，每次启动都要把运行时解压到 <span class="mono">%TEMP%</span> 再启动，因此明显慢于 Setup。
-          </p>
-        </div>
-
-        <div class="step">
-          <h3>校验 SHA-256</h3>
-          <ol>
-            <li>在同一 Release 下载 <span class="mono">SHA256SUMS.txt</span>。</li>
-            <li>在 PowerShell 中比对哈希：</li>
-          </ol>
-          <div class="codeblock">
-<pre>$exe = '.\Kanitsu-Setup-0.3.1-x64.exe'
-$expected = ((Get-Content -Raw '.\SHA256SUMS.txt') -split '\s+')[0]
-$actual = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash
-if ($actual -ne $expected.ToUpper()) { throw "SHA-256 mismatch" }</pre>
+      <figure class="pv-stage reveal">
+        <div class="shot-shell">
+          <div class="shot-core">
+            <img src="assets/previews/blur.jpg" width="1600" height="1000" loading="lazy"
+                 alt="开启隐私预览后的图库：整面缩略图网格呈模糊状态" />
           </div>
-          <p class="cellnote">校验文件与安装包来自同一次构建。</p>
         </div>
-      </div>
+        <figcaption>隐私预览开启后的图库，一处开关，整面模糊。</figcaption>
+      </figure>
+    </div>
+  </section>
 
-      <div class="warn">
-        <span aria-hidden="true">⚠</span>
-        <p>
-          <strong>产物不做代码签名。</strong>这是既定的发布策略，不是待补齐的能力。EXE 的 Authenticode 状态为
-          <span class="mono">NotSigned</span>，Windows SmartScreen 首次运行可能提示风险，需要通过「更多信息 → 仍要运行」放行。
-          建议只从本页指向的官方 Release 下载，并核对 SHA-256。
-        </p>
+  <!-- 下载：一个主按钮，两行小字 -->
+  <section id="download" class="sec dl" aria-labelledby="dl-title">
+    <div class="wrap">
+      <p class="eyebrow reveal">下载</p>
+      <h2 id="dl-title" class="sec-title reveal" style="--d: .07s; margin-top: 26px;">Windows 今天就能用</h2>
+      <p class="sec-lead reveal" style="--d: .14s; margin-left: auto; margin-right: auto;">
+        免安装、免管理员权限，下载按钮始终指向最新稳定版。
+      </p>
+      <div class="dl-actions reveal" style="--d: .21s;">
+        <a class="btn btn-primary" href="https://github.com/ze-tros/kanitsu/releases/latest" rel="noopener">
+          下载 Setup 安装版
+          <span class="orb" aria-hidden="true">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M9 7h8v8"/></svg>
+          </span>
+        </a>
+        <a class="btn btn-ghost" href="https://github.com/ze-tros/kanitsu/releases/latest" rel="noopener">下载 Portable 便携版</a>
       </div>
-
-      <div class="note">
-        <h3>关于数据目录</h3>
-        <p>
-          Portable 的「免安装」指单 EXE、无需安装，<b>不表示数据随 EXE 携带</b>。数据保存在用户首次启动时选定的数据目录里
-          （图库在其 <span class="mono">albums</span> 子目录，缩略图缓存在图库的 <span class="mono">.kanitsu-cache</span> 子目录），
-          不会随 EXE 移动。系统应用数据目录只保留一个小的 <span class="mono">settings.json</span>。
-        </p>
-      </div>
+      <p class="dl-note reveal" style="--d: .28s;">
+        Android 客户端测试中，签名 APK 由 GitHub Actions 构建分发。<br />
+        产物未签名，首次运行请选「更多信息 → 仍要运行」；各版本附带 SHA256SUMS.txt 供校验。
+      </p>
     </div>
   </section>
 </main>
 
 <footer>
   <div class="wrap">
-    <div class="foot-grid">
-      <div>
-        <h3>项目</h3>
-        <ul>
-          <li><a href="https://github.com/ze-tros/kanitsu" rel="noopener">源码仓库</a></li>
-          <li><a href="https://github.com/ze-tros/kanitsu/releases" rel="noopener">全部 Release</a></li>
-          <li><a href="https://github.com/ze-tros/kanitsu/issues" rel="noopener">问题反馈</a></li>
-        </ul>
-      </div>
-      <div>
-        <h3>分发方式</h3>
-        <ul>
-          <li>Windows：GitHub Release 附件</li>
-          <li>Android：Actions 的签名 APK Artifact</li>
-          <li>不在任何应用商店分发</li>
-        </ul>
-      </div>
-      <div>
-        <h3>隐私</h3>
-        <ul>
-          <li>默认不联网、不上传</li>
-          <li>无账号、无遥测</li>
-          <li>源目录只读，绝不改动</li>
-        </ul>
-      </div>
-      <div>
-        <h3>当前版本</h3>
-        <ul>
-          <li>最新稳定版 <span class="mono">v0.3.1</span></li>
-          <li><a href="https://github.com/ze-tros/kanitsu/releases/latest" rel="noopener">查看发布说明</a></li>
-        </ul>
-      </div>
-    </div>
-
-    <div class="foot-base">
-      <span>Kanitsu</span>
-      <span>本地优先的图包管理与看图应用</span>
-      <span>Windows · Android</span>
+    <div class="foot">
+      <span class="foot-brand">
+        <img src="assets/kanitsu-icon.svg" width="20" height="20" alt="" aria-hidden="true" />
+        Kanitsu
+      </span>
+      <span>图包管理与看图应用</span>
+      <nav class="foot-links" aria-label="页脚链接">
+        <a href="https://github.com/ze-tros/kanitsu" rel="noopener">源码仓库</a>
+        <a href="https://github.com/ze-tros/kanitsu/releases" rel="noopener">全部 Release</a>
+        <a href="https://github.com/ze-tros/kanitsu/issues" rel="noopener">问题反馈</a>
+      </nav>
+      <span>© 2026 Kanitsu</span>
     </div>
   </div>
 </footer>
 
 <script>
   (function () {
-    var root = document.documentElement;
-    var toggle = document.getElementById('theme-toggle');
-    var glyph = document.getElementById('theme-glyph');
-    if (!toggle) return;
-
-    function sync() {
-      var dark = root.dataset.theme !== 'light';
-      // 显示的是"切换到哪一侧"，而不是当前状态。
-      glyph.textContent = dark ? '☀' : '◐';
-      toggle.setAttribute('aria-label', dark ? '切换到浅色主题' : '切换到深色主题');
-      var color = dark ? '#111112' : '#e9ebee';
-      var meta = document.querySelector('meta[name="theme-color"]');
-      if (meta) meta.setAttribute('content', color);
+    // 滚动显现：IntersectionObserver 一次性触发，尊重系统减弱动态设置。
+    var reveals = document.querySelectorAll('.reveal');
+    var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduce || !('IntersectionObserver' in window)) {
+      reveals.forEach(function (el) { el.classList.add('in'); });
+      return;
     }
-
-    toggle.addEventListener('click', function () {
-      var next = root.dataset.theme === 'light' ? 'dark' : 'light';
-      root.dataset.theme = next;
-      root.style.colorScheme = next;
-      try { localStorage.setItem('kanitsu-theme', next); } catch (error) { /* 存储不可用时仅本次生效 */ }
-      sync();
-    });
-
-    sync();
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (!entry.isIntersecting) return;
+        entry.target.classList.add('in');
+        io.unobserve(entry.target);
+      });
+    }, { threshold: 0.12, rootMargin: '0px 0px -60px 0px' });
+    reveals.forEach(function (el) { io.observe(el); });
   })();
 </script>
 </body>
