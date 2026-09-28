@@ -158,7 +158,8 @@ button.dk-sw { padding: 0; }
 .dk-body { flex: 1; min-height: 0; display: flex; position: relative; }
 .dk-side { flex: none; display: flex; flex-direction: column; min-height: 0; background: var(--desktop-app); border-right: 1px solid var(--desktop-line); position: relative; z-index: 20; }
 .dk-side.overlay { position: absolute; top: 0; bottom: 0; left: 0; z-index: 60; box-shadow: var(--desktop-shadow-raised); }
-.dk-side-scroll { flex: 1; min-height: 0; padding: 8px 8px 12px; }
+/* scrollbar-gutter: stable 常驻预留滚动条槽位，避免条目随滚动条出现/消失被挤压变窄。 */
+.dk-side-scroll { flex: 1; min-height: 0; padding: 8px 8px 12px; scrollbar-gutter: stable; }
 .dk-lbl { display: flex; align-items: center; justify-content: space-between; font-size: 11.5px; font-weight: 600; color: var(--desktop-faint); letter-spacing: .04em; padding: 14px 10px 6px; }
 .dk-lbl .dk-ib { width: 24px; height: 24px; color: var(--desktop-faint); }
 .dk-nav-i { width: 100%; height: 32px; display: flex; align-items: center; gap: 10px; padding: 0 10px; border-radius: 7px; color: var(--desktop-text-soft); font-size: 13.5px; text-align: left; }

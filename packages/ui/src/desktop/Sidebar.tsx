@@ -46,6 +46,36 @@ export function buildFolderChildren(snapshot: LibrarySnapshot): ReadonlyMap<stri
   return children;
 }
 
+/** 收集 folderId 子树内全部后代目录 id（不含自身），供侧栏「全部展开/收起」使用。 */
+export function collectFolderDescendants(
+  children: ReadonlyMap<string, readonly FolderNode[]>,
+  folderId: string,
+): string[] {
+  const out: string[] = [];
+  const stack = [...(children.get(folderId) ?? [])];
+  while (stack.length > 0) {
+    const folder = stack.pop()!;
+    out.push(folder.id);
+    const next = children.get(folder.id);
+    if (next) stack.push(...next);
+  }
+  return out;
+}
+
+/**
+ * 「全部展开/收起」当前应提供哪个动作：目录自身已展开就提供「收起」，否则提供「展开」
+ * （根目录不作为行渲染，改看是否存在已展开的后代）。动作始终作用于整棵子树。
+ */
+export function isSubtreeCollapsible(
+  folderId: string,
+  isLibRoot: boolean,
+  expanded: ReadonlySet<string>,
+  descendants: readonly string[],
+): boolean {
+  if (isLibRoot) return descendants.some((id) => expanded.has(id));
+  return expanded.has(folderId);
+}
+
 export function flattenFolderTree(
   folderId: string,
   children: ReadonlyMap<string, readonly FolderNode[]>,
@@ -206,7 +236,18 @@ export const FolderTree = memo(function FolderTree({
                   disabled={disabled}
                   aria-label={`${folder.name}，${formatCount(folder.imageCount)} 张图片`}
                   aria-current={!pick && active ? 'page' : undefined}
-                  onClick={() => (pick?.onPick ? pick.onPick(folder) : onSelect(folder))}
+                  onClick={() => {
+                    if (pick?.onPick) {
+                      pick.onPick(folder);
+                      return;
+                    }
+                    // 再次点击已选中的已展开图包：收起子树；已选中但收起时仍走 onSelect，由其自动展开。
+                    if (hasChildren && active && expanded) {
+                      onToggleFolder(folder.id);
+                      return;
+                    }
+                    onSelect(folder);
+                  }}
                 >
                   <span className="dk-mt">
                     {cover && <BlobImage store={store} fileRef={imageFileRef(cover)} alt="" className="dk-art" thumbnail lazy blur={coverBlurred} />}

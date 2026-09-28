@@ -20,8 +20,8 @@ import {
   ArrowClockwise,
   ArrowCounterClockwise,
   ArrowsLeftRight,
-  CaretDown,
-  CaretRight,
+  CaretDoubleDown,
+  CaretDoubleRight,
   CheckSquare,
   Copy,
   Eye,
@@ -163,7 +163,7 @@ import {
   type SubPackData,
 } from './desktop/pageParts';
 import { Inspector, type OrganizeHint } from './desktop/Inspector';
-import { Sidebar } from './desktop/Sidebar';
+import { buildFolderChildren, collectFolderDescendants, isSubtreeCollapsible, Sidebar } from './desktop/Sidebar';
 import { TitleBar } from './desktop/TitleBar';
 import { TaskButton, TaskPopover, type DesktopTask } from './desktop/TaskCenter';
 import { Snackbar, type SnackAction, type SnackMessage } from './desktop/Snackbar';
@@ -1808,7 +1808,7 @@ export function LibraryBrowser({
     ];
   }, [batchMenu, blurredImages, copyPath, isRoot, openViewer, pinnedCovers, renameImageAction, requestDelete, requestMerge, requestMove, selection, selectionCount, toggleImageBlur, toggleImagePin, viewerImageId]);
 
-  const folderMenu = useCallback((folder: FolderNode): ContextMenuItem[] => {
+  const folderMenu = useCallback((folder: FolderNode, inSidebar = false): ContextMenuItem[] => {
     if (selection.has(folderKey(folder.id)) && selectionCount > 1) return batchMenu();
     const snap = snapshotRef.current;
     const images = snap ? imagesOf(snap, folder.id) : [];
@@ -1818,11 +1818,23 @@ export function LibraryBrowser({
       { label: '打开', icon: <FolderOpen size={16} />, onSelect: () => (isLibRoot ? goRoot('all') : openFolder(folder)) },
       { label: isLibRoot ? '新建图包…' : '新建子图包…', icon: <FolderPlus size={16} />, onSelect: () => createFolderIn(folder) },
     ];
-    if (folder.relPath && folder.childCount > 0) {
+    // 仅侧栏右键提供「全部展开/收起」：按目录自身展开态显示动作，作用于整棵子树。
+    if (inSidebar && folder.childCount > 0) {
+      const descendants = snap ? collectFolderDescendants(buildFolderChildren(snap), folder.id) : [];
+      const subtreeIds = isLibRoot ? descendants : [folder.id, ...descendants];
+      const collapsible = isSubtreeCollapsible(folder.id, isLibRoot, expandedFolders, descendants);
       items.push({
-        label: expandedFolders.has(folder.id) ? '在侧栏中收起' : '在侧栏中展开',
-        icon: expandedFolders.has(folder.id) ? <CaretDown size={16} /> : <CaretRight size={16} />,
-        onSelect: () => toggleFolderExpanded(folder.id),
+        label: collapsible ? '全部收起' : '全部展开',
+        icon: collapsible ? <CaretDoubleDown size={16} /> : <CaretDoubleRight size={16} />,
+        onSelect: () =>
+          setExpandedFolders((prev) => {
+            const next = new Set(prev);
+            for (const id of subtreeIds) {
+              if (collapsible) next.delete(id);
+              else next.add(id);
+            }
+            return next;
+          }),
       });
     }
     if (!isLibRoot) {
@@ -1844,7 +1856,7 @@ export function LibraryBrowser({
     );
     if (!isLibRoot) items.push({ label: '删除…', icon: <Trash size={16} />, danger: true, separator: true, onSelect: () => requestDelete([], [folder]) });
     return items;
-  }, [batchMenu, blurredImages, copyPath, createFolderIn, expandedFolders, exportFolder, exporting, goRoot, openFolder, renameFolderAction, requestDelete, requestMove, selection, selectionCount, toggleFolderBlur, toggleFolderExpanded]);
+  }, [batchMenu, blurredImages, copyPath, createFolderIn, expandedFolders, exportFolder, exporting, goRoot, openFolder, renameFolderAction, requestDelete, requestMove, selection, selectionCount, toggleFolderBlur]);
 
   const imageSortMenu = useCallback((anchor: HTMLElement) => {
     const sorts: [ImageSort, ReactNode][] = [
@@ -2621,10 +2633,10 @@ export function LibraryBrowser({
                 onToggleFolder={toggleFolderExpanded}
                 onSelectFolder={openFolder}
                 onSelectFilter={goRoot}
-                onFolderContextMenu={(event, folder) => openMenu(event, folderMenu(folder))}
+                onFolderContextMenu={(event, folder) => openMenu(event, folderMenu(folder, true))}
                 onRootContextMenu={(event) => {
                   const root = snapshot?.folders[rootId];
-                  if (root) openMenu(event, folderMenu(root));
+                  if (root) openMenu(event, folderMenu(root, true));
                 }}
                 onNewFolder={() => {
                   const parent = !isRoot && selectedFolder ? selectedFolder : snapshot?.folders[rootId];
