@@ -211,10 +211,6 @@ export function BlobImage({
         className={imageClass}
         style={fallbackStyle}
         loading="eager"
-        // 解码不阻塞首帧光栅化：切换大图包时几十张新 img 若同步解码，会把首帧
-        // 激活拖过截止时间，合成器呈现未光栅化的底色（整屏闪一下画布色）。
-        // async 让画面先出占位、图片就绪后由 onLoad 交接（shown 门控不变）。
-        decoding="async"
         onLoad={() => setShownKey(resourceKey)}
         onError={() => setFailedKey(resourceKey)}
       />
