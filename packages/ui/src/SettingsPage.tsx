@@ -79,7 +79,7 @@ const TAB_LEADS: Record<SettingsTabId, string> = {
   cache: '缓存可随时清理，重新浏览时会按需重新生成。',
   diagnostics: '只在本机记录，用于排查滚动卡顿与缩略图加载问题。',
   shortcuts: '桌面端常用的键盘操作速查。',
-  about: '本地优先的图片管理与查看应用。',
+  about: '图片管理与查看应用。',
 };
 
 export type SettingsPageProps = {
@@ -470,7 +470,7 @@ function AboutPanel({ runtimeLabel }: { runtimeLabel?: string }) {
       <SettingRow label="运行环境">
         <code className="dk-set-code">{runtimeLabel ?? '—'}</code>
       </SettingRow>
-      <SettingRow label="离线" description="默认不联网、不上传、不遥测图片内容">
+      <SettingRow label="隐私" description="默认不联网、不上传、不遥测图片内容">
         <CheckCircle size={18} weight="fill" className="dk-set-ok" role="img" aria-label="已启用" />
       </SettingRow>
       <SettingRow label="副本隔离" description="导入后不修改源文件夹">
