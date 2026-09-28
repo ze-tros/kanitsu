@@ -26,9 +26,14 @@ if (desktopPackageFile.exists()) {
 }
 def versionSegments = desktopVersion.tokenize('.')
 // tokenize 返回 ArrayList，取长度用 size()（Groovy 列表没有 length 属性）。
-def derivedVersionCode = (versionSegments[0].toInteger() * 10000)
-        + (versionSegments.size() > 1 ? versionSegments[1].toInteger() * 100 : 0)
-        + (versionSegments.size() > 2 ? versionSegments[2].toInteger() : 0)
+// 求和拆成独立 def：Groovy 中前一行以完整表达式收尾时语句即结束，
+// 下一行行首的 + 是一元运算符（另起语句），跨行连加不会累加进结果。
+// versionCode 必须为正整数，占位值（0.0.0 → 0）经 Math.max 保底为 1。
+def versionMajor = versionSegments[0].toInteger() * 10000
+def versionMinor = versionSegments.size() > 1 ? versionSegments[1].toInteger() * 100 : 0
+def versionPatch = versionSegments.size() > 2 ? versionSegments[2].toInteger() : 0
+def derivedVersionCode = Math.max(1, versionMajor + versionMinor + versionPatch)
+println "KanitsuVersion: versionName=${desktopVersion} versionCode=${derivedVersionCode}"
 
 android {
     namespace "com.kanitsu.viewer"
