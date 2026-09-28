@@ -349,13 +349,6 @@
     margin: 24px auto 0; max-width: 40ch;
     color: var(--muted); font-size: 16.5px; line-height: 1.85;
   }
-  .claims {
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-    gap: 40px; margin-top: 84px; text-align: left;
-  }
-  .claim { border-top: 1px solid var(--hairline-strong); padding-top: 22px; }
-  .claim h3 { font-size: 16.5px; }
-  .claim p { margin: 9px 0 0; color: var(--muted); font-size: 13.5px; line-height: 1.8; }
   .pv-stage { max-width: 1000px; margin: 96px auto 0; }
   .pv-stage figcaption {
     margin-top: 18px; color: var(--faint); font-size: 13px; text-align: left; padding-left: 6px;
@@ -423,8 +416,7 @@
     .hero { padding: 128px 0 64px; }
     .hero-stage { margin-top: 64px; }
     .hero-chip { left: 12px; bottom: 12px; }
-    .facts, .claims { grid-template-columns: 1fr; gap: 30px; }
-    .claims { margin-top: 60px; }
+    .facts { grid-template-columns: 1fr; gap: 30px; }
     .cue { margin-top: 56px; }
   }
 </style>
@@ -564,19 +556,12 @@
     </div>
   </section>
 
-  <!-- 隐私：一句话 + 三条事实 + 一张实拍 -->
+  <!-- 隐私：遮挡能力 + 一张实拍 -->
   <section id="privacy" class="sec pv" aria-labelledby="pv-title">
     <div class="wrap pv-inner">
       <p class="eyebrow reveal">隐私</p>
-      <h2 id="pv-title" class="reveal" style="--d: .07s;">照片，不出门。</h2>
-      <p class="pv-lead reveal" style="--d: .14s;">整理照片的前提，是照片从未离开你的设备。</p>
-
-      <div class="claims">
-        <div class="claim reveal">
-          <h3>敏感图随手遮挡</h3>
-          <p>网格、封面与查看器同步模糊，想看再点开。</p>
-        </div>
-      </div>
+      <h2 id="pv-title" class="reveal" style="--d: .07s;">敏感图，随手遮挡。</h2>
+      <p class="pv-lead reveal" style="--d: .14s;">网格、封面与查看器同步模糊，想看再点开。</p>
 
       <figure class="pv-stage reveal">
         <div class="shot-shell">
