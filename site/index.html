@@ -600,6 +600,9 @@
         Android 客户端测试中，签名 APK 由 GitHub Actions 构建分发。<br />
         产物未签名，首次运行请选「更多信息 → 仍要运行」；各版本附带 SHA256SUMS.txt 供校验。
       </p>
+      <p class="dl-note" id="accel-note" hidden>
+        当前网络直连 GitHub 不畅，已切换加速节点中转；文件与官方 Release 一致，可对照其 SHA256SUMS.txt 校验。
+      </p>
     </div>
   </section>
 </main>
@@ -645,19 +648,93 @@
     // 下载按钮直连最新稳定版产物：附件名带版本号（形如 Kanitsu-Setup-0.3.3-x64.exe），
     // 无法用固定的 latest/download 直链，改为加载后经 GitHub API 把按钮改写到对应附件；
     // API 不可用（限流、网络受限）时静默保留 releases/latest 页面链接兜底。
+    var REPO = 'ze-tros/kanitsu';
     var buttons = document.querySelectorAll('[data-release-asset]');
     if (!buttons.length) return;
-    fetch('https://api.github.com/repos/ze-tros/kanitsu/releases/latest')
+
+    function setHrefs(map) {
+      buttons.forEach(function (a) {
+        var prefix = a.getAttribute('data-release-asset');
+        var asset = (map.assets || []).find(function (item) {
+          return item.name.indexOf(prefix) === 0;
+        });
+        if (asset && asset.browser_download_url) {
+          a.setAttribute('href', asset.browser_download_url);
+        }
+      });
+    }
+
+    // 加速择路：附件 CDN（objects.githubusercontent.com）在部分地区不可达或极慢。
+    // 大陆时区访客默认走加速节点；其余访客先探测官方直连，失败再按序探测节点。
+    // 节点是前缀拼接式的公共代理，仅做 URL 级中转；失效或新增时改 MIRRORS 即可。
+    var MIRRORS = [
+      'https://ghfast.top/',
+      'https://gh-proxy.com/',
+      'https://ghproxy.net/'
+    ];
+
+    function probe(url, ms) {
+      return new Promise(function (resolve) {
+        var settled = false;
+        var ctl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+        var timer = setTimeout(function () { finish(false); }, ms);
+        function finish(reachable) {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          if (ctl) ctl.abort();
+          resolve(reachable);
+        }
+        fetch(url, { method: 'GET', mode: 'no-cors', cache: 'no-store', signal: ctl ? ctl.signal : undefined })
+          .then(function () { finish(true); })
+          .catch(function () { finish(false); });
+      });
+    }
+
+    function likelyCN() {
+      try {
+        var tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        return tz === 'Asia/Shanghai' || tz === 'Asia/Urumqi';
+      } catch (error) {
+        return false;
+      }
+    }
+
+    function viaMirror(mirror) {
+      buttons.forEach(function (a) {
+        var href = a.getAttribute('href');
+        if (href.indexOf('https://github.com/') === 0) {
+          a.setAttribute('href', mirror + href);
+        }
+      });
+      var note = document.getElementById('accel-note');
+      if (note) note.hidden = false;
+    }
+
+    fetch('https://api.github.com/repos/' + REPO + '/releases/latest')
       .then(function (res) { if (!res.ok) throw new Error('HTTP ' + res.status); return res.json(); })
       .then(function (release) {
-        buttons.forEach(function (a) {
-          var prefix = a.getAttribute('data-release-asset');
-          var asset = (release.assets || []).find(function (item) {
-            return item.name.indexOf(prefix) === 0;
+        setHrefs(release);
+        var sample = (release.assets || []).find(function (item) {
+          return item.name.indexOf('Kanitsu-') === 0;
+        });
+        if (!sample) return;
+
+        var decide = likelyCN()
+          ? Promise.resolve(false)
+          : probe(sample.browser_download_url, 3000);
+        decide.then(function (directOk) {
+          if (directOk) return; // 官方直连可达，保持直连
+          var chain = Promise.resolve(false);
+          MIRRORS.forEach(function (mirror) {
+            chain = chain.then(function (swapped) {
+              if (swapped) return true;
+              return probe(mirror + sample.browser_download_url, 3000).then(function (alive) {
+                if (alive) viaMirror(mirror);
+                return alive;
+              });
+            });
           });
-          if (asset && asset.browser_download_url) {
-            a.setAttribute('href', asset.browser_download_url);
-          }
         });
       })
       .catch(function () { /* 保持兜底链接 */ });
