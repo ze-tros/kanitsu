@@ -101,7 +101,7 @@ export const SETTINGS_TABS: ReadonlyArray<SettingsTab> = [
     label: '关于',
     title: '关于',
     keywords: [
-      'Kanitsu', '版本', '运行环境', '隐私', '离线', '不联网', '不上传', '遥测',
+      'Kanitsu', '版本', '运行环境', '隐私', '不联网', '不上传', '遥测',
       '副本隔离', '源文件夹',
     ],
   },

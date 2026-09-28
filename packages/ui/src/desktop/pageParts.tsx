@@ -582,7 +582,7 @@ export function FirstRun({ canDrop, importing, onImport }: { canDrop: boolean; i
       </div>
       <div className="dk-three">
         <div><b><Copy size={16} />只复制</b>源文件夹不会被改名、移动或删除。</div>
-        <div><b><CloudSlash size={16} />完全离线</b>不联网、不上传，也没有遥测。</div>
+        <div><b><CloudSlash size={16} />隐私</b>不联网、不上传，也没有遥测。</div>
         <div><b><ArrowCounterClockwise size={16} />可撤销</b>整理先预览再落盘，最近一次可以撤销。</div>
       </div>
     </div>
