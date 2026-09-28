@@ -45,7 +45,7 @@ export const SETTINGS_TABS: ReadonlyArray<SettingsTab> = [
     title: '图库与数据',
     keywords: [
       '数据目录', '保存位置', '保存路径', '复制一份', 'albums',
-      '图库占用', '文件数', '运行环境', '自定义整理规则',
+      '图库占用', '文件数', '自定义整理规则',
     ],
   },
   {
@@ -101,8 +101,7 @@ export const SETTINGS_TABS: ReadonlyArray<SettingsTab> = [
     label: '关于',
     title: '关于',
     keywords: [
-      'Kanitsu', '版本', '运行环境', '隐私', '不联网', '不上传', '遥测',
-      '副本隔离', '源文件夹',
+      'Kanitsu', '版本',
     ],
   },
 ];

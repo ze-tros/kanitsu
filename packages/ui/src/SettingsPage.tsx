@@ -7,7 +7,6 @@ import {
 } from 'react';
 import {
   ArrowLeft,
-  CheckCircle,
   Database,
   Gauge,
   HardDrives,
@@ -71,15 +70,11 @@ const TAB_ICONS: Record<SettingsTabId, typeof Palette> = {
 };
 
 /** 页标题下的一句说明；只写当前实现真实成立的事实。 */
-const TAB_LEADS: Record<SettingsTabId, string> = {
-  appearance: '界面模式与主题色，修改后立即生效并保存在本机。',
+const TAB_LEADS: Partial<Record<SettingsTabId, string>> = {
   library: '导入时图片会复制到数据目录里的图库副本；之后的整理、重命名、删除只作用于这份副本。',
-  viewer: '原图与 RAW 文件在查看器里的显示方式。',
-  rules: '内置规则按顺序匹配；自定义规则用正则表达式捕获目标目录，先于内置规则生效，保存在本机。',
+  rules: '内置规则按顺序匹配；自定义规则用正则表达式捕获目标目录，先于内置规则生效。',
   cache: '缓存可随时清理，重新浏览时会按需重新生成。',
-  diagnostics: '只在本机记录，用于排查滚动卡顿与缩略图加载问题。',
-  shortcuts: '桌面端常用的键盘操作速查。',
-  about: '图片管理与查看应用。',
+  diagnostics: '用于排查滚动卡顿与缩略图加载问题。',
 };
 
 export type SettingsPageProps = {
@@ -196,7 +191,7 @@ export function SettingsPage({
       <main className="dk-set-scroll" ref={scrollRef}>
         <div className="dk-set-main">
           <h1 className="dk-set-title">{pageTitle}</h1>
-          <p className="dk-set-lead">{TAB_LEADS[activeTab]}</p>
+          {TAB_LEADS[activeTab] && <p className="dk-set-lead">{TAB_LEADS[activeTab]}</p>}
 
           {activeTab === 'appearance' && (
             <AppearancePanel
@@ -208,7 +203,6 @@ export function SettingsPage({
           )}
           {activeTab === 'library' && (
             <LibraryPanel
-              runtimeLabel={runtimeLabel}
               libraryBytes={libraryBytes}
               libraryFileCount={libraryFileCount}
               ruleCount={rules.length}
@@ -334,13 +328,11 @@ function AppearancePanel({
 /* ===== 图库与数据 ===== */
 
 function LibraryPanel({
-  runtimeLabel,
   libraryBytes,
   libraryFileCount,
   ruleCount,
   onOpenRules,
 }: {
-  runtimeLabel?: string;
   libraryBytes: number;
   libraryFileCount: number;
   ruleCount: number;
@@ -359,10 +351,7 @@ function LibraryPanel({
         </div>
       </section>
       <section className="dk-set-card">
-        <SettingRow label="运行环境">
-          <code className="dk-set-code">{runtimeLabel ?? '—'}</code>
-        </SettingRow>
-        <SettingRow label="自定义整理规则" description="用于智能整理的本机规则">
+        <SettingRow label="自定义整理规则">
           <span className="dk-set-value">{ruleCount} 条</span>
           <button type="button" className="dk-btn sm" onClick={onOpenRules}>管理</button>
         </SettingRow>
@@ -463,18 +452,9 @@ function AboutPanel({ runtimeLabel }: { runtimeLabel?: string }) {
   const version = window.kanitsuDesktop?.version;
   return (
     <section className="dk-set-card">
-      <SettingRow label="Kanitsu" description={runtimeLabel === 'Electron' ? '本地图片管理与查看 · Windows 版' : '本地图片管理与查看'} />
+      <SettingRow label="Kanitsu" description={runtimeLabel === 'Electron' ? '图片管理与查看 · Windows 版' : '图片管理与查看'} />
       <SettingRow label="版本">
         <code className="dk-set-code">{version ? `v${version}` : '—'}</code>
-      </SettingRow>
-      <SettingRow label="运行环境">
-        <code className="dk-set-code">{runtimeLabel ?? '—'}</code>
-      </SettingRow>
-      <SettingRow label="隐私" description="默认不联网、不上传、不遥测图片内容">
-        <CheckCircle size={18} weight="fill" className="dk-set-ok" role="img" aria-label="已启用" />
-      </SettingRow>
-      <SettingRow label="副本隔离" description="导入后不修改源文件夹">
-        <CheckCircle size={18} weight="fill" className="dk-set-ok" role="img" aria-label="已启用" />
       </SettingRow>
     </section>
   );
@@ -810,7 +790,7 @@ function CachePanel() {
             description="Web/演示模式无主进程数据；Electron 模式请确认应用已重启加载最新构建。"
           />
         )}
-        <SettingRow label="清除主进程缓存" description="内存 + 磁盘；重新浏览时会重新生成（测试用）">
+        <SettingRow label="清除主进程缓存" description="内存 + 磁盘；重新浏览时会重新生成">
           <button type="button" className="dk-btn sm" onClick={() => void handleClearMainCache()}>
             清除主进程（内存+磁盘）
           </button>

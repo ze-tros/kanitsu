@@ -1746,10 +1746,6 @@ export function MobileApp({
           源文件夹不会被修改
         </li>
         <li>
-          <MobileIcon name="cloud-off" className="w-[18px] h-[18px]" />
-          不联网、不上传，也不申请全盘存储权限
-        </li>
-        <li>
           <MobileIcon name="aperture" className="w-[18px] h-[18px]" />
           JPG / PNG / WebP / AVIF / GIF{enableRaw ? '，以及 RAW' : ''}
           {enableHeif ? ' 与 HEIC' : ''}
@@ -1801,7 +1797,6 @@ export function MobileApp({
           <>
             <div className="m2-section-head">
               <h2>继续浏览</h2>
-              <span className="m2-section-note">仅记录在本机</span>
             </div>
             <div className="m2-continue-strip">
               {continueItems.map((item) => {
@@ -2041,7 +2036,7 @@ export function MobileApp({
               </div>
             </>
           )}
-          <p className="m2-empty-line">搜索图包名或文件名，匹配不区分大小写。搜索记录只保存在本机。</p>
+          <p className="m2-empty-line">搜索图包名或文件名，匹配不区分大小写。</p>
         </>
       );
     }

@@ -290,8 +290,7 @@ export function TasksScreen({
           finished.map((t) => <TaskCard key={t.id} task={t} onCancel={onCancel} onUndo={onUndo} onOpenFolder={onOpenFolder} />)
         )}
         <div className="m2-privacy-note">
-          <MobileIcon name="cloud-off" className="w-[18px] h-[18px] shrink-0" />
-          <span>导入、整理、导出都在本机执行，图片不会上传。删除只作用于图库副本，源文件夹不受影响。</span>
+          <span>删除只作用于图库副本，源文件夹不受影响。</span>
         </div>
       </main>
     </div>

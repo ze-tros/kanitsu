@@ -228,7 +228,6 @@ export function CommandPalette({
         <div className="dk-pal-f">
           <span><kbd className="dk-kbd">↑</kbd><kbd className="dk-kbd">↓</kbd>选择</span>
           <span><kbd className="dk-kbd">Enter</kbd>打开</span>
-          <span className="dk-push">只在本机索引中搜索</span>
         </div>
       </div>
     </>

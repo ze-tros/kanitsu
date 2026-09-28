@@ -5,14 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <meta name="theme-color" content="#0a0a0c" />
 <meta name="color-scheme" content="dark" />
-<meta name="description" content="Kanitsu 是一款图包管理与看图应用：导入即复制副本，源目录只读；不联网、不上传、无遥测。Windows 与 Android 可用，主流 RAW 与 HEIC 直接看。" />
+<meta name="description" content="Kanitsu 是一款图包管理与看图应用：导入即复制副本。Windows 与 Android 可用，主流 RAW 与 HEIC 直接看。" />
 <title>Kanitsu · 把散落的图片，收进井井有条的图包库</title>
 <link rel="icon" type="image/svg+xml" href="assets/kanitsu-icon.svg" />
 <link rel="icon" type="image/png" sizes="256x256" href="assets/kanitsu-icon.png" />
 <link rel="apple-touch-icon" href="assets/kanitsu-icon.png" />
 <meta property="og:type" content="website" />
 <meta property="og:title" content="Kanitsu · 把散落的图片，收进井井有条的图包库" />
-<meta property="og:description" content="导入即复制副本，源目录只读；不联网、不上传、无遥测。面向 Windows 与 Android 的图包管理与看图应用。" />
+<meta property="og:description" content="导入即复制副本。面向 Windows 与 Android 的图包管理与看图应用。" />
 <meta property="og:image" content="assets/kanitsu-icon.png" />
 <script>
   // 标记 js 可用：滚动显现动画只在 .js 下隐藏元素，无 JS 环境内容照常可见。
@@ -350,7 +350,7 @@
     color: var(--muted); font-size: 16.5px; line-height: 1.85;
   }
   .claims {
-    display: grid; grid-template-columns: repeat(3, 1fr);
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
     gap: 40px; margin-top: 84px; text-align: left;
   }
   .claim { border-top: 1px solid var(--hairline-strong); padding-top: 22px; }
@@ -456,9 +456,7 @@
   <header class="hero">
     <div class="wrap hero-inner">
       <h1 class="rise" style="--d: .08s;">把散落的图片，<br />收进井井有条的图包库</h1>
-      <p class="hero-lead rise" style="--d: .16s;">
-        导入即复制副本，源目录只读。此后的一切整理与查看，都发生在你自己的设备上。
-      </p>
+      <p class="hero-lead rise" style="--d: .16s;">导入即复制副本。</p>
       <div class="hero-actions rise" style="--d: .24s;">
         <a class="btn btn-primary" href="https://github.com/ze-tros/kanitsu/releases/latest" rel="noopener">
           下载 Windows 版
@@ -502,7 +500,7 @@
         <div class="fact reveal" style="--d: .07s;">
           <span class="fact-idx">02</span>
           <h3>RAW 与 HEIC 直接看</h3>
-          <p>主流格式白名单开箱即认，缩略图取自内嵌预览，无需转换工具。</p>
+          <p>主流格式白名单开箱即认，缩略图取自内嵌预览。</p>
         </div>
         <div class="fact reveal" style="--d: .14s;">
           <span class="fact-idx">03</span>
@@ -575,14 +573,6 @@
 
       <div class="claims">
         <div class="claim reveal">
-          <h3>源目录只读</h3>
-          <p>导入即复制副本，整理只发生在自己的库内，从不回写原文件夹。</p>
-        </div>
-        <div class="claim reveal" style="--d: .07s;">
-          <h3>不联网，不上传</h3>
-          <p>没有账号体系，没有遥测，断网也能完整使用。</p>
-        </div>
-        <div class="claim reveal" style="--d: .14s;">
           <h3>敏感图随手遮挡</h3>
           <p>网格、封面与查看器同步模糊，想看再点开。</p>
         </div>
@@ -606,7 +596,7 @@
       <p class="eyebrow reveal">下载</p>
       <h2 id="dl-title" class="sec-title reveal" style="--d: .07s; margin-top: 26px;">Windows 今天就能用</h2>
       <p class="sec-lead reveal" style="--d: .14s; margin-left: auto; margin-right: auto;">
-        免安装、免管理员权限，下载按钮始终指向最新稳定版。
+        下载按钮始终指向最新稳定版。
       </p>
       <div class="dl-actions reveal" style="--d: .21s;">
         <a class="btn btn-primary" href="https://github.com/ze-tros/kanitsu/releases/latest" rel="noopener">

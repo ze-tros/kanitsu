@@ -9,7 +9,6 @@ import {
   CaretUp,
   CaretRight,
   CheckCircle,
-  CloudSlash,
   Copy,
   DotsThree,
   EyeSlash,
@@ -23,7 +22,6 @@ import {
   Minus,
   Plus,
   PushPin,
-  ShieldCheck,
   SidebarSimple,
   SortAscending,
   SquaresFour,
@@ -164,8 +162,6 @@ export function ContinueBrowsing({
     <>
       <div className="dk-sec-h">
         <h2>继续浏览</h2>
-        <span className="dk-spacer" />
-        <span className="dk-hint-inline"><ShieldCheck size={13} />位置只记录在本机</span>
       </div>
       <div className="dk-cont">
         {items.map((item) => {
@@ -582,7 +578,6 @@ export function FirstRun({ canDrop, importing, onImport }: { canDrop: boolean; i
       </div>
       <div className="dk-three">
         <div><b><Copy size={16} />只复制</b>源文件夹不会被改名、移动或删除。</div>
-        <div><b><CloudSlash size={16} />隐私</b>不联网、不上传，也没有遥测。</div>
         <div><b><ArrowCounterClockwise size={16} />可撤销</b>整理先预览再落盘，最近一次可以撤销。</div>
       </div>
     </div>

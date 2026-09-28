@@ -610,7 +610,7 @@ html[data-theme="light"] .dk-snack { background: #262a30; }
 .dk-first h2 { margin: 0; font: 650 22px var(--desktop-font-display); }
 .dk-first p { color: var(--desktop-muted); margin: 8px 0 20px; }
 .dk-first .dk-fmts { font-size: 12px; color: var(--desktop-faint); margin-top: 16px; }
-.dk-first .dk-three { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 22px; text-align: left; }
+.dk-first .dk-three { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-top: 22px; text-align: left; }
 .dk-first .dk-three div { padding: 14px; border-radius: 12px; background: var(--desktop-surface-1); border: 1px solid var(--desktop-line); font-size: 12.5px; color: var(--desktop-muted); }
 .dk-first .dk-three b { display: flex; gap: 8px; align-items: center; color: var(--desktop-text); font-size: 13px; margin-bottom: 4px; }
 

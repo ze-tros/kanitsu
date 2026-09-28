@@ -192,7 +192,7 @@ export function OrganizeRulesManager({
     <div className={`organize-rules-manager flex flex-col gap-6 ${className ?? ''}`}>
       {showIntro && (
         <p className="organize-rules-intro text-sm opacity-70">
-          内置规则固定生效；自定义规则会优先于内置规则匹配，并自动保存到本机。
+          内置规则固定生效；自定义规则会优先于内置规则匹配，并自动保存。
         </p>
       )}
 
@@ -226,7 +226,7 @@ export function OrganizeRulesManager({
 
         {rules.length === 0 ? (
           <p className="organize-rules-empty text-sm opacity-70 border border-dashed border-base-300 rounded-box p-4 mb-4">
-            还没有自定义规则。用下面的表单添加第一条，它会保存在本机，下次打开仍可使用。
+            还没有自定义规则。用下面的表单添加第一条，它会自动保存，下次打开仍可使用。
           </p>
         ) : (
           <div className="organize-rules-list flex flex-col gap-2 mb-4">

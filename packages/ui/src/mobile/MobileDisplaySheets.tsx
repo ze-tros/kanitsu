@@ -73,7 +73,7 @@ export function DisplaySheet({
   onClose: () => void;
 }) {
   return (
-    <MobileBottomSheet title="显示" subtitle="只影响本机的浏览方式" onClose={onClose}>
+    <MobileBottomSheet title="显示" subtitle="只影响浏览方式" onClose={onClose}>
       <div className="m2-opt-group">
         <h4>布局</h4>
         <Segmented

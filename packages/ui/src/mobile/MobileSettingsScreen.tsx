@@ -356,7 +356,7 @@ export function MobileSettingsScreen({
           <section className="m2-set-card" aria-label="存储">
             <h4>存储</h4>
             <StorageInline onOpenDetail={() => onSectionChange('cache')} />
-            <SettingsItem icon="folder" title="图库位置" subtitle="应用私有目录（Android/data/…/files/albums），无需存储权限" />
+            <SettingsItem icon="folder" title="图库位置" subtitle="应用私有目录（Android/data/…/files/albums）" />
           </section>
 
           <section className="m2-set-card" aria-label="整理与诊断">
@@ -372,7 +372,6 @@ export function MobileSettingsScreen({
 
           <section className="m2-set-card" aria-label="关于">
             <h4>关于</h4>
-            <SettingsItem icon="shield" title="隐私" subtitle="不联网、不上传；只访问你授权的文件夹，导入后不修改源文件夹" />
             {/* 版本号由构建期注入（desktop package.json 单一来源）；缺失时省略而不是显示写死的错误值。 */}
             <SettingsItem icon="info" title="Kanitsu" subtitle={androidBridge()?.version ? `Android 版 · v${androidBridge()!.version}` : 'Android 版'} />
           </section>
@@ -503,7 +502,7 @@ function RulesCard({ rules, onChange }: { rules: CustomOrganizeRule[]; onChange:
         <span className="m-settings-row-icon"><SettingsGlyph name="rules" /></span>
         <span className="m-settings-row-copy">
           <strong>文件名匹配</strong>
-          <span>内置规则固定生效；自定义规则优先匹配并自动保存到本机。</span>
+          <span>内置规则固定生效；自定义规则优先匹配并自动保存。</span>
         </span>
       </div>
       <OrganizeRulesManager

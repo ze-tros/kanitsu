@@ -2384,7 +2384,7 @@ export function LibraryBrowser({
         <EmptyState
           icon={libFilter === 'pinned' ? <PushPin size={24} /> : <UploadSimple size={24} />}
           title={libFilter === 'pinned' ? '还没有固定封面的图包' : '最近 7 天没有导入图包'}
-          text={libFilter === 'pinned' ? '在图包上右键「设置封面…」固定一张图，它会出现在这里。' : '导入记录只保存在本机。'}
+          text={libFilter === 'pinned' ? '在图包上右键「设置封面…」固定一张图，它会出现在这里。' : '导入图包后，最近 7 天的记录会显示在这里。'}
         />
       )}
     </>

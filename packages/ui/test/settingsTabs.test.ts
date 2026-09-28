@@ -52,8 +52,8 @@ test('设置页正文里的文案都能搜到对应标签页', () => {
     ['命令面板', 'shortcuts'],
     ['重命名', 'shortcuts'],
     ['胶片条', 'shortcuts'],
-    ['不联网', 'about'],
-    ['源文件夹', 'about'],
+    ['Kanitsu', 'about'],
+    ['版本', 'about'],
   ] as const) {
     const otherTab = SETTINGS_TABS.find((tab) => tab.id !== expected)!.id;
     assert.ok(
