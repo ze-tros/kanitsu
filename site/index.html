@@ -451,7 +451,8 @@
       <h1 class="rise" style="--d: .08s;">把散落的图片，<br />收进井井有条的图包库</h1>
       <p class="hero-lead rise" style="--d: .16s;">导入即复制副本，此后的整理与查看都发生在这份副本上。</p>
       <div class="hero-actions rise" style="--d: .24s;">
-        <a class="btn btn-primary" href="https://github.com/ze-tros/kanitsu/releases/latest" rel="noopener">
+        <a class="btn btn-primary" href="https://github.com/ze-tros/kanitsu/releases/latest" rel="noopener"
+           data-release-asset="Kanitsu-Setup-">
           下载 Windows 版
           <span class="orb" aria-hidden="true">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M9 7h8v8"/></svg>
@@ -585,13 +586,15 @@
         下载按钮始终指向最新稳定版。
       </p>
       <div class="dl-actions reveal" style="--d: .21s;">
-        <a class="btn btn-primary" href="https://github.com/ze-tros/kanitsu/releases/latest" rel="noopener">
+        <a class="btn btn-primary" href="https://github.com/ze-tros/kanitsu/releases/latest" rel="noopener"
+           data-release-asset="Kanitsu-Setup-">
           下载 Setup 安装版
           <span class="orb" aria-hidden="true">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M9 7h8v8"/></svg>
           </span>
         </a>
-        <a class="btn btn-ghost" href="https://github.com/ze-tros/kanitsu/releases/latest" rel="noopener">下载 Portable 便携版</a>
+        <a class="btn btn-ghost" href="https://github.com/ze-tros/kanitsu/releases/latest" rel="noopener"
+           data-release-asset="Kanitsu-Portable-">下载 Portable 便携版</a>
       </div>
       <p class="dl-note reveal" style="--d: .28s;">
         Android 客户端测试中，签名 APK 由 GitHub Actions 构建分发。<br />
@@ -636,6 +639,28 @@
       });
     }, { threshold: 0.12, rootMargin: '0px 0px -60px 0px' });
     reveals.forEach(function (el) { io.observe(el); });
+  })();
+
+  (function () {
+    // 下载按钮直连最新稳定版产物：附件名带版本号（形如 Kanitsu-Setup-0.3.3-x64.exe），
+    // 无法用固定的 latest/download 直链，改为加载后经 GitHub API 把按钮改写到对应附件；
+    // API 不可用（限流、网络受限）时静默保留 releases/latest 页面链接兜底。
+    var buttons = document.querySelectorAll('[data-release-asset]');
+    if (!buttons.length) return;
+    fetch('https://api.github.com/repos/ze-tros/kanitsu/releases/latest')
+      .then(function (res) { if (!res.ok) throw new Error('HTTP ' + res.status); return res.json(); })
+      .then(function (release) {
+        buttons.forEach(function (a) {
+          var prefix = a.getAttribute('data-release-asset');
+          var asset = (release.assets || []).find(function (item) {
+            return item.name.indexOf(prefix) === 0;
+          });
+          if (asset && asset.browser_download_url) {
+            a.setAttribute('href', asset.browser_download_url);
+          }
+        });
+      })
+      .catch(function () { /* 保持兜底链接 */ });
   })();
 </script>
 </body>
