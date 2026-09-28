@@ -23,14 +23,13 @@ const root = repoRoot();
 const desktopPackage = JSON.parse(readFileSync(join(desktopDir, 'package.json'), 'utf8')) as { version?: string };
 const rootPackage = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { version?: string };
 
-/** 按 build.gradle 的派生公式复算 versionCode（maj*10000 + min*100 + patch）。 */
+/** 按 build.gradle 的派生公式复算 versionCode（maj*10000 + min*100 + patch，占位值保底为 1）。 */
 function deriveVersionCode(version: string): number {
   const segments = version.split('.');
-  return (
-    Number(segments[0]) * 10000 +
-    (segments.length > 1 ? Number(segments[1]) * 100 : 0) +
-    (segments.length > 2 ? Number(segments[2]) : 0)
-  );
+  const major = Number(segments[0]) * 10000;
+  const minor = segments.length > 1 ? Number(segments[1]) * 100 : 0;
+  const patch = segments.length > 2 ? Number(segments[2]) : 0;
+  return Math.max(1, major + minor + patch);
 }
 
 describe('版本单一来源契约（tag ↔ desktop ↔ Android/Web 派生）', () => {
@@ -58,7 +57,8 @@ describe('版本单一来源契约（tag ↔ desktop ↔ Android/Web 派生）',
     // 派生公式若被改动，测试里的复算会失真：公式形态变化时这里直接失败提醒同步。
     assert.match(gradle, /versionCode derivedVersionCode/);
     assert.match(gradle, /versionName desktopVersion/);
-    assert.match(gradle, /\* 10000\)/, 'versionCode 公式（maj*10000 + min*100 + patch）已被改动，请同步本测试');
+    assert.match(gradle, /\* 10000/, 'versionCode 公式（maj*10000 + min*100 + patch）已被改动，请同步本测试');
+    assert.match(gradle, /Math\.max\(1,/, 'versionCode 占位值保底（Math.max(1, …)）已被改动，请同步本测试');
     const version = desktopPackage.version ?? '0.0.0';
     const code = deriveVersionCode(version);
     assert.ok(Number.isInteger(code) && code > 0, `versionCode 派生结果非法：${version} → ${code}`);
