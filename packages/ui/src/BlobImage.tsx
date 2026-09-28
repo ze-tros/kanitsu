@@ -8,6 +8,39 @@ import { logDebug } from './debugLog';
 
 type LoadedImage = { key: string; url: string; degraded: boolean };
 
+/**
+ * 缓存键契约（纯函数，供回归测试钉住）：
+ * - 键由「文件身份（id/mtime/size）+ 资源档位」组成：重命名 / 移动 / 内容替换
+ *   都会换键——缓存只会 miss 而不会误命中旧条目；
+ * - 缩略图与全图、不同缩略图尺寸的键互不相同；
+ * - 糊化预览的身份不含尺寸段：不同尺寸入口共享同一份糊化结果（见 blurPreview.ts）。
+ */
+export function blobImageResourceKey(
+  fileRef: Pick<FileRef, 'id' | 'mtime' | 'size'>,
+  thumbnail: boolean,
+  thumbnailSize: number,
+): string {
+  return `${fileRef.id}\u0000${fileRef.mtime ?? ''}\u0000${fileRef.size ?? ''}\u0000${thumbnail ? `thumb-${thumbnailSize}` : 'full'}`;
+}
+
+export function blurPreviewIdentity(fileRef: Pick<FileRef, 'id' | 'mtime' | 'size'>): string {
+  return `${fileRef.id}\u0000${fileRef.mtime ?? ''}\u0000${fileRef.size ?? ''}`;
+}
+
+/** BlobImage 的三态机：骨架（未就绪）/ 图（URL 交付）/ 失败占位。 */
+export type BlobImagePhase = 'skeleton' | 'image' | 'failed';
+
+export function blobImagePhase(
+  loaded: { key: string; url: string; degraded: boolean } | null,
+  failedKey: string | null,
+  resourceKey: string,
+): BlobImagePhase {
+  // 成功交付会清除同资源的失败态（见 commit），二者同时命中时按「已交付」算。
+  if (loaded?.key === resourceKey) return 'image';
+  if (failedKey === resourceKey) return 'failed';
+  return 'skeleton';
+}
+
 export function BlobImage({
   store,
   fileRef,
@@ -33,10 +66,10 @@ export function BlobImage({
   // 生成路径完成（缩到 128px 小画布做真高斯），展示端无 filter 光栅化。
   const peekCachedThumb = (): Blob | null =>
     thumbnail ? peekThumbnailBlob(fileRef, thumbnailSize) : null;
-  const resourceKey = `${fileRef.id}\u0000${fileRef.mtime ?? ''}\u0000${fileRef.size ?? ''}\u0000${thumbnail ? `thumb-${thumbnailSize}` : 'full'}`;
+  const resourceKey = blobImageResourceKey(fileRef, thumbnail, thumbnailSize);
   // 模糊预览的缓存身份（不含尺寸段）：不同尺寸入口拿到的缩略图 Blob 对象
   // 不同，糊化结果视为同一份，按文件身份命中（见 blurPreview.ts）。
-  const blurIdentity = `${fileRef.id}\u0000${fileRef.mtime ?? ''}\u0000${fileRef.size ?? ''}`;
+  const blurIdentity = blurPreviewIdentity(fileRef);
   const [loaded, setLoaded] = useState<LoadedImage | null>(null);
   const [failedKey, setFailedKey] = useState<string | null>(null);
   const [shownKey, setShownKey] = useState<string | null>(null);
@@ -50,8 +83,9 @@ export function BlobImage({
   // 一两帧内开始加载；回看不再重载由组件常驻保证（visible 只置真、不回退）。
   const [visible, setVisible] = useState(() => !lazy);
   const containerRef = useRef<HTMLDivElement>(null);
-  const url = loaded?.key === resourceKey ? loaded.url : null;
-  const failed = failedKey === resourceKey;
+  const phase = blobImagePhase(loaded, failedKey, resourceKey);
+  const url = phase === 'image' ? loaded?.url ?? null : null;
+  const failed = phase === 'failed';
   const shouldLoad = !lazy || visible;
 
   // Lazily start loading only when the element scrolls near the viewport.
@@ -177,6 +211,10 @@ export function BlobImage({
         className={imageClass}
         style={fallbackStyle}
         loading="eager"
+        // 解码不阻塞首帧光栅化：切换大图包时几十张新 img 若同步解码，会把首帧
+        // 激活拖过截止时间，合成器呈现未光栅化的底色（整屏闪一下画布色）。
+        // async 让画面先出占位、图片就绪后由 onLoad 交接（shown 门控不变）。
+        decoding="async"
         onLoad={() => setShownKey(resourceKey)}
         onError={() => setFailedKey(resourceKey)}
       />

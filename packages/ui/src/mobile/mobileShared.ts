@@ -9,6 +9,11 @@ export {
   loadBlurredImages,
   saveBlurredImages,
   isImageBlurred,
+  blurredPathRemap,
+  folderPrefixRemap,
+  pruneBlurredPaths,
+  relPathPairsFromActions,
+  remapBlurredPaths,
   skippedReasonLabel,
   conflictReasonLabel,
 } from '../libraryPrefs';

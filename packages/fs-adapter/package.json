@@ -9,7 +9,7 @@
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
-    "test": "esbuild test/zip.test.ts --bundle --platform=node --format=esm --external:yauzl --outfile=.test-build/zip.test.mjs && node .test-build/zip.test.mjs"
+    "test": "esbuild test/zip.test.ts --bundle --platform=node --format=esm --external:yauzl --outfile=.test-build/zip.test.mjs && esbuild test/contract.test.ts --bundle --platform=node --format=esm --outfile=.test-build/contract.test.mjs && esbuild test/androidBridge.test.ts --bundle --platform=node --format=esm --alias:@capacitor/core=./test/helpers/capacitorMock.ts --outfile=.test-build/androidBridge.test.mjs && node .test-build/zip.test.mjs && node .test-build/contract.test.mjs && node .test-build/androidBridge.test.mjs"
   },
   "devDependencies": {
     "yauzl": "^2.10.0"

@@ -125,21 +125,44 @@ declare global {
   }
 }
 
-function b64ToBytes(b64: string): Uint8Array {
+/**
+ * 分块 base64 解码：原生桥对整张图都返回单个 base64 串，若一次性 `atob` 成
+ * 整段二进制串再逐字节拷出，峰值 ≈ 输入串(1.33×) + bin(1×) + 输出(1×)。
+ * 按 4 字符对齐分块解码后，bin 只有块大小，峰值降到 输入串 + 输出。
+ * 供测试复用。
+ */
+export function b64ToBytes(b64: string): Uint8Array {
   if (typeof atob !== 'function') throw new Error('当前环境不支持 base64 解码。');
-  const bin = atob(b64);
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  // 输出长度按 padding 折算（Java 侧 NO_WRAP 编码不含空白；末尾 '=' 至多 2 个）。
+  let pad = 0;
+  for (let i = b64.length - 1; i >= 0 && b64[i] === '='; i--) pad++;
+  const bytes = new Uint8Array(Math.max(0, (b64.length / 4) * 3 - pad));
+  // 0x8000 是 4 的倍数：任意整块都能独立解码（padding 只出现在最后一块）。
+  const CHUNK = 0x8000;
+  let o = 0;
+  for (let i = 0; i < b64.length; i += CHUNK) {
+    const bin = atob(b64.substr(i, Math.min(CHUNK, b64.length - i)));
+    for (let j = 0; j < bin.length; j++) bytes[o++] = bin.charCodeAt(j);
+  }
   return bytes;
 }
 
-function bytesToB64(bytes: Uint8Array): string {
-  let bin = '';
-  const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk) {
-    bin += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunk)));
+/**
+ * base64 编码：按 3 字节对齐分块直接产出 base64 片段再拼接——中间不再构造
+ * 等大的二进制串，`apply` 直接收 TypedArray（array-like）避免 `Array.from`
+ * 的数字数组副本。当前 Android 导入走 importSourceTree 原生快路径，写路径
+ * 无常规调用方；保留本函数与整块协议，供 readBlob 兜底与未来用途。
+ * 供测试复用。
+ */
+export function bytesToB64(bytes: Uint8Array): string {
+  // 3 字节对齐的分块（块间无 padding 混流），同时留出 apply 参数数量的安全余量。
+  const CHUNK = 0x8000 - (0x8000 % 3);
+  const parts: string[] = [];
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    const end = Math.min(i + CHUNK, bytes.length);
+    parts.push(btoa(String.fromCharCode.apply(null, bytes.subarray(i, end) as unknown as number[])));
   }
-  return btoa(bin);
+  return parts.join('');
 }
 
 function toFolderRef(entry: AndroidFsEntry): FolderRef {

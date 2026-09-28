@@ -62,7 +62,7 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json",
     "pack": "npm run build && electron-builder --win nsis",
-    "test": "esbuild test/gifQuantize.test.ts --bundle --platform=node --format=esm --outfile=.test-build/gifQuantize.test.mjs && esbuild test/extWhitelist.test.ts --bundle --platform=node --format=esm --outfile=.test-build/extWhitelist.test.mjs && node .test-build/gifQuantize.test.mjs && node .test-build/extWhitelist.test.mjs"
+    "test": "esbuild test/gifQuantize.test.ts --bundle --platform=node --format=esm --outfile=.test-build/gifQuantize.test.mjs && esbuild test/extWhitelist.test.ts --bundle --platform=node --format=esm --outfile=.test-build/extWhitelist.test.mjs && esbuild test/versionContract.test.ts --bundle --platform=node --format=esm --outfile=.test-build/versionContract.test.mjs && node .test-build/gifQuantize.test.mjs && node .test-build/extWhitelist.test.mjs && node .test-build/versionContract.test.mjs"
   },
   "dependencies": {
     "archiver": "^5.3.2",

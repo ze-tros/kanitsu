@@ -61,6 +61,7 @@ import {
   loadOrScan,
   mergeIntoNewPack,
   moveEntries,
+  parentRelPath,
   readSnapshotMirror,
   renameFolder,
   renameImage,
@@ -188,7 +189,7 @@ import {
   type LibraryFilter,
   type PackSort,
 } from './desktop/shared';
-import { loadBlurredImages, loadPinnedCovers, saveBlurredImages, savePinnedCovers } from './libraryPrefs';
+import { loadBlurredImages, blurredPathRemap, folderPrefixRemap, loadPinnedCovers, pruneBlurredPaths, relPathPairsFromActions, remapBlurredPaths, saveBlurredImages, savePinnedCovers } from './libraryPrefs';
 
 
 type ResolvedTheme = 'light' | 'dark';
@@ -1359,6 +1360,11 @@ export function LibraryBrowser({
     setBusy(true);
     try {
       const result = await undoOrganize(store, last.manifest);
+      if (result.errors.length === 0) {
+        // 全部还原成功：隐私标记按清单反向迁移（部分失败时路径仍停在 to 侧，不能盲迁）。
+        const reverse = new Map([...relPathPairsFromActions(last.manifest.actions)].map(([from, to]) => [to, from]));
+        if (reverse.size > 0) setBlurredImages((prev) => remapBlurredPaths(prev, blurredPathRemap(reverse)));
+      }
       setLastUndo(null);
       setTasks((prev) => prev.map((t) => (t.id === last.taskId ? { ...t, undoable: false, result: `${t.result ?? ''} · 已撤销` } : t)));
       await refresh();
@@ -1406,6 +1412,9 @@ export function LibraryBrowser({
         openFolderId: folder.id,
       });
       replaceUndo(undoable ? { taskId, kind: 'organize', manifest: result.manifest } : null);
+      // 已移动图片的隐私标记迁移到新路径。
+      const organizePairs = relPathPairsFromActions(result.manifest.actions);
+      if (organizePairs.size > 0) setBlurredImages((prev) => remapBlurredPaths(prev, blurredPathRemap(organizePairs)));
       await refresh();
       notify(
         result.canceled
@@ -1484,6 +1493,11 @@ export function LibraryBrowser({
             setBusy(true);
             try {
               const renamed = await renameImage(store, image, name);
+              // 隐私标记跟着文件走：否则新路径不糊、旧路径残留死标记。
+              const newRel = joinRelPath(parentRelPath(image.relPath), renamed.name);
+              if (newRel !== image.relPath) {
+                setBlurredImages((prev) => remapBlurredPaths(prev, (p) => (p === image.relPath ? newRel : null)));
+              }
               await refresh();
               notify(`已重命名为「${renamed.name}」`, 'success');
             } catch (err) {
@@ -1513,6 +1527,10 @@ export function LibraryBrowser({
             setBusy(true);
             try {
               await renameFolder(store, folder, name);
+              // 图包重命名：子树内全部隐私标记按前缀迁移。
+              setBlurredImages((prev) =>
+                remapBlurredPaths(prev, folderPrefixRemap(new Map([[folder.relPath, joinRelPath(parentRelPath(folder.relPath), name)]]))),
+              );
               await refresh();
               notify(`已重命名为「${name}」`, 'success');
             } catch (err) {
@@ -1556,12 +1574,16 @@ export function LibraryBrowser({
     const failures: string[] = [];
     /** 实际删除成功的图片 id（含被删目录覆盖到的图片），查看器列表据此收缩。 */
     const deletedIds = new Set<string>();
+    /** 实际删除成功的路径：图片精确 relPath / 图包目录 relPath，隐私标记据此清理。 */
+    const deletedImageRels = new Set<string>();
+    const deletedFolderRels = new Set<string>();
     try {
       for (const image of request.images) {
         try {
           await deleteImage(store, image);
           ok++;
           deletedIds.add(image.id);
+          deletedImageRels.add(image.relPath);
         } catch (err) {
           failed++;
           if (failures.length < 3) failures.push(`${image.name}：${String(err).replace(/^Error: /, '')}`);
@@ -1574,11 +1596,24 @@ export function LibraryBrowser({
           ok++;
           // 目录删掉了，它覆盖的图片也一并从查看器列表剔除。
           if (snap) for (const img of imagesOf(snap, folder.id)) deletedIds.add(img.id);
+          deletedFolderRels.add(folder.relPath);
         } catch (err) {
           failed++;
           if (failures.length < 3) failures.push(`${folder.name}：${String(err).replace(/^Error: /, '')}`);
         }
         if (taskId) patchTask(taskId, { done: ok + failed });
+      }
+      // 删除成功的路径上的隐私标记一并清理，避免残留死标记被后续同名新文件误命中。
+      if (deletedImageRels.size > 0 || deletedFolderRels.size > 0) {
+        setBlurredImages((prev) =>
+          pruneBlurredPaths(prev, (p) => {
+            if (deletedImageRels.has(p)) return false;
+            for (const pre of deletedFolderRels) {
+              if (p === pre || p.startsWith(`${pre}/`)) return false;
+            }
+            return true;
+          }),
+        );
       }
       // 查看器跳转按【实际删除结果】计算：当前图删成功了才切到相邻一张，
       // 删除失败（或整个目录删除失败）时当前图仍在，保持不动。
@@ -1644,6 +1679,18 @@ export function LibraryBrowser({
       const failText = result.failures.length ? ` · ${result.failures.length} 项未移动` : '';
       finishTask(taskId, 'done', { result: `已移动 ${formatCount(moved)} 项${failText}`, undoable, openFolderId: target.id });
       replaceUndo(undoable ? { taskId, kind: 'move', manifest: result.manifest } : null);
+      // 已移动图片 / 图包的隐私标记迁移到新路径（图包整体移动按前缀迁移子树）。
+      setBlurredImages((prev) =>
+        remapBlurredPaths(
+          prev,
+          blurredPathRemap(
+            relPathPairsFromActions(result.manifest.actions),
+            result.movedFolderRels.length > 0
+              ? new Map(result.movedFolderRels.map((f) => [f.fromRelPath, f.toRelPath]))
+              : undefined,
+          ),
+        ),
+      );
       await refresh();
       clearSelection();
       const reasons = [...new Set(result.failures.map((f) => (f.reason === 'invalid-target' ? '不能移入自身内部' : f.reason === 'target-exists' ? '目标已有同名图包' : '移动失败')))];
@@ -1701,6 +1748,9 @@ export function LibraryBrowser({
                 conflicts: result.conflicts,
               });
               replaceUndo(undoable ? { taskId, kind: 'merge', manifest: result.manifest } : null);
+              // 移入新图包的图片隐私标记迁移到新路径。
+              const mergePairs = relPathPairsFromActions(result.manifest.actions);
+              if (mergePairs.size > 0) setBlurredImages((prev) => remapBlurredPaths(prev, blurredPathRemap(mergePairs)));
               clearSelection();
               notify(`已合并 ${formatCount(result.movedCount)} 张到「${name}」${notes.length ? `，${notes.join('；')}` : ''}`, 'success', [
                 ...(undoable ? [{ label: '撤销', onPress: () => void undoRef.current(taskId) }] : []),

@@ -8,7 +8,9 @@ import {
   directImagesOf,
   imagesOf,
   importFolder,
+  joinRelPath,
   loadOrScan,
+  parentRelPath,
   renameFolder,
   renameImage,
   rescanLibrary,
@@ -54,12 +56,17 @@ import {
   haptic,
   imageGridGap,
   isImageBlurred,
+  blurredPathRemap,
+  folderPrefixRemap,
   loadBlurredImages,
   loadImageGridCols,
   loadLibraryPrefs,
   loadPinnedCovers,
   loadRecentSearches,
+  pruneBlurredPaths,
   pushRecentSearch,
+  relPathPairsFromActions,
+  remapBlurredPaths,
   saveBlurredImages,
   saveImageGridCols,
   saveLibraryPrefs,
@@ -1061,6 +1068,11 @@ export function MobileApp({
       organizingRef.current = true;
       try {
         const result = await undoOrganize(store, last.manifest);
+        if (result.errors.length === 0) {
+          // 全部还原成功：隐私标记按清单反向迁移（部分失败时路径仍停在 to 侧，不能盲迁）。
+          const reverse = new Map([...relPathPairsFromActions(last.manifest.actions)].map(([from, to]) => [to, from]));
+          if (reverse.size > 0) setBlurredImages((prev) => remapBlurredPaths(prev, blurredPathRemap(reverse)));
+        }
         setLastManifest(null);
         setTasks((prev) =>
           prev.map((t) => (t.id === last.taskId ? { ...t, undoable: false, result: `${t.result ?? ''} · 已撤销` } : t)),
@@ -1099,6 +1111,9 @@ export function MobileApp({
           onProgress: (done, total) => patchTask(taskId, { done, total }),
           shouldCancel: () => flag.cancelled,
         });
+        // 已移动图片的隐私标记迁移到新路径。
+        const organizePairs = relPathPairsFromActions(result.manifest.actions);
+        if (organizePairs.size > 0) setBlurredImages((prev) => remapBlurredPaths(prev, blurredPathRemap(organizePairs)));
         const dirs = new Set(bindings.map((b) => b.virtualPath.split('/').slice(0, -1).join('/'))).size;
         const summary = `按「${ruleName}」移动 ${result.appliedCount} 张 · ${dirs} 个目录${result.conflicts.length ? ` · ${result.conflicts.length} 个冲突` : ''}`;
         const undoable = result.appliedCount > 0;
@@ -1364,16 +1379,21 @@ export function MobileApp({
     if (targets.length === 0) return;
     let ok = 0;
     let failed = 0;
+    const deletedRels = new Set<string>();
     const taskId = startTask({ kind: 'delete', title: `删除 ${targets.length} 张图片`, total: targets.length });
     exitSelectMode();
     for (let i = 0; i < targets.length; i++) {
       try {
         await deleteImage(store, targets[i]!);
         ok++;
+        deletedRels.add(targets[i]!.relPath);
       } catch {
         failed++;
       }
       patchTask(taskId, { done: i + 1 });
+    }
+    if (deletedRels.size > 0) {
+      setBlurredImages((prev) => pruneBlurredPaths(prev, (p) => !deletedRels.has(p)));
     }
     finishTask(taskId, 'done', { result: failed > 0 ? `已删除 ${ok} 张，失败 ${failed} 张` : `已删除 ${ok} 张` });
     try {
@@ -1392,10 +1412,15 @@ export function MobileApp({
     try {
       if (target.kind === 'image') {
         await deleteImage(store, target.image);
+        // 删除成功的路径不再保留隐私标记，避免残留死标记被后续同名新文件误命中。
+        setBlurredImages((prev) => pruneBlurredPaths(prev, (p) => p !== target.image.relPath));
         await refresh();
         notify(`已删除「${target.image.name}」`, 'success');
       } else if (target.kind === 'folder') {
         await deleteLibraryFolder(store, target.folder.relPath);
+        // 删除成功的目录子树内的隐私标记一并清理。
+        const deadPrefix = target.folder.relPath;
+        setBlurredImages((prev) => pruneBlurredPaths(prev, (p) => !(p === deadPrefix || p.startsWith(`${deadPrefix}/`))));
         // 删的是当前所在图包：先按旧快照退回上级，再重扫（重扫后该目录已不存在）。
         if (currentFolderId === target.folder.id) goUp();
         await refresh();
@@ -1418,19 +1443,35 @@ export function MobileApp({
         if (prompt.kind === 'rename-image') {
           if (value === prompt.image.name) return;
           const renamed = await renameImage(store, prompt.image, value);
+          // 隐私标记跟着文件走：否则新路径不糊、旧路径残留死标记。
+          const newRel = joinRelPath(parentRelPath(prompt.image.relPath), renamed.name);
+          if (newRel !== prompt.image.relPath) {
+            setBlurredImages((prev) => remapBlurredPaths(prev, (p) => (p === prompt.image.relPath ? newRel : null)));
+          }
           await refresh();
           notify(`已重命名为「${renamed.name}」`, 'success');
         } else if (prompt.kind === 'rename-folder') {
           if (value === prompt.folder.name) return;
           await renameFolder(store, prompt.folder, value);
+          if (prompt.folder.relPath) {
+            // 图包重命名：子树内全部隐私标记按前缀迁移。
+            setBlurredImages((prev) =>
+              remapBlurredPaths(
+                prev,
+                folderPrefixRemap(new Map([[prompt.folder.relPath, joinRelPath(parentRelPath(prompt.folder.relPath), value)]])),
+              ),
+            );
+          }
           await refresh();
           notify(`已重命名为「${value}」`, 'success');
         } else if (prompt.kind === 'batch-move') {
           // 批量移动：在当前目录新建子文件夹，把选中的图片移进去。
           const created = await createSubfolder(store, selectedFolder?.relPath ?? '', value);
+          const targetRel = joinRelPath(selectedFolder?.relPath ?? '', value);
           const targets = selectedImages;
           let moved = 0;
           let failed = 0;
+          const movedRels: Array<[string, string]> = [];
           const taskId = startTask({ kind: 'move', title: `移动 ${targets.length} 张到「${value}」`, total: targets.length });
           exitSelectMode();
           for (let i = 0; i < targets.length; i++) {
@@ -1438,10 +1479,14 @@ export function MobileApp({
             try {
               await store.move({ id: img.fileRefId ?? img.id, name: img.name, kind: 'file' }, created, img.name);
               moved++;
+              movedRels.push([img.relPath, joinRelPath(targetRel, img.name)]);
             } catch {
               failed++;
             }
             patchTask(taskId, { done: i + 1 });
+          }
+          if (movedRels.length > 0) {
+            setBlurredImages((prev) => remapBlurredPaths(prev, blurredPathRemap(new Map(movedRels))));
           }
           finishTask(taskId, 'done', { result: failed > 0 ? `已移动 ${moved} 张，失败 ${failed} 张` : `已移动 ${moved} 张` });
           await refresh();
@@ -1470,10 +1515,14 @@ export function MobileApp({
         if (blurred) next.add(img.relPath);
         else next.delete(img.relPath);
       }
-      saveBlurredImages(next);
       return next;
     });
   }, []);
+
+  // 持久化收口到渲染后 effect：任何来源的标记变化（含整理 / 重命名后的路径迁移）都会落盘。
+  useEffect(() => {
+    saveBlurredImages(blurredImages);
+  }, [blurredImages]);
 
   const toggleImageBlur = useCallback(
     (image: ImageEntry) => {

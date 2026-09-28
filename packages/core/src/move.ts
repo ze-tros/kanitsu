@@ -1,6 +1,6 @@
 import type { FileRef, LibraryStore } from '../../fs-adapter/src/types';
 import type { FolderNode, ImageEntry, LibrarySnapshot } from './types';
-import { canonicalizeRelPath, nameKey, normalizeRelPath, parentRelPath } from './path';
+import { canonicalizeRelPath, joinRelPath, nameKey, normalizeRelPath, parentRelPath } from './path';
 import { stableHash } from './hash';
 import { resolveFolderRef } from './entry-ops';
 import { nextUniqueName, type OrganizeAction, type OrganizeManifest } from './organize';
@@ -22,11 +22,18 @@ export interface MoveFailure {
   reason: 'invalid-target' | 'target-exists' | 'move-failed';
 }
 
+/** 成功移动的图包旧/新库内相对路径（图包移动不进 manifest，供调用方迁移路径相关的本机状态）。 */
+export interface MovedFolderRel {
+  fromRelPath: string;
+  toRelPath: string;
+}
+
 export interface MoveEntriesResult {
   /** 已移动图片的清单，可用 undoOrganize 还原（图包移动不进清单）。 */
   manifest: OrganizeManifest;
   movedImages: number;
   movedFolders: number;
+  movedFolderRels: MovedFolderRel[];
   failures: MoveFailure[];
 }
 
@@ -112,6 +119,7 @@ export async function moveEntries(
   }
 
   let movedFolders = 0;
+  const movedFolderRels: MovedFolderRel[] = [];
   for (const folder of topFolders) {
     const fail = (reason: MoveFailure['reason']) => failures.push({ kind: 'folder', id: folder.id, name: folder.name, reason });
     if (isRelPrefix(folder.relPath, targetRel)) fail('invalid-target');
@@ -125,6 +133,7 @@ export async function moveEntries(
         await store.move(source, target, folder.name);
         takenFolders.add(folder.name);
         takenNames.add(nameKey(folder.name));
+        movedFolderRels.push({ fromRelPath: folder.relPath, toRelPath: joinRelPath(targetRel, folder.name) });
         movedFolders++;
       } catch {
         fail('move-failed');
@@ -139,6 +148,6 @@ export async function moveEntries(
     containerRelPath: targetRel,
     actions,
   };
-  return { manifest, movedImages, movedFolders, failures };
+  return { manifest, movedImages, movedFolders, movedFolderRels, failures };
 }
 
