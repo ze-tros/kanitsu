@@ -25,9 +25,10 @@ if (desktopPackageFile.exists()) {
     }
 }
 def versionSegments = desktopVersion.tokenize('.')
+// tokenize 返回 ArrayList，取长度用 size()（Groovy 列表没有 length 属性）。
 def derivedVersionCode = (versionSegments[0].toInteger() * 10000)
-        + (versionSegments.length > 1 ? versionSegments[1].toInteger() * 100 : 0)
-        + (versionSegments.length > 2 ? versionSegments[2].toInteger() : 0)
+        + (versionSegments.size() > 1 ? versionSegments[1].toInteger() * 100 : 0)
+        + (versionSegments.size() > 2 ? versionSegments[2].toInteger() : 0)
 
 android {
     namespace "com.kanitsu.viewer"
